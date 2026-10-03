@@ -1,0 +1,10 @@
+# Reverse-engineering workspace: converted binaries, Ghidra project, generated reports (game code)
+re/
+# Link to the client's game root (see sdk.toml)
+game
+# Local MCP configuration (Ghidra bridge)
+.mcp.json
+# Editors and Python
+.vscode/
+__pycache__/
+*.pyc

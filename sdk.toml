@@ -1,0 +1,5 @@
+# Local SDK settings. Paths are relative to this file.
+
+# The client checkout that holds the game files (assets/, saves/) and runs mods. The repo also
+# expects a `game` link to it: ln -s ../boz-redux game
+client = "../boz-redux"

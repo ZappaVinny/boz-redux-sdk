@@ -1,0 +1,6 @@
+[submodule "tools/destin"]
+	path = tools/destin
+	url = https://github.com/Tatsh/destin
+[submodule "gamedef"]
+	path = gamedef
+	url = https://github.com/ZappaVinny/boz-redux-gamedef.git
