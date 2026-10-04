@@ -48,6 +48,7 @@ off (other handlers keep running) and is logged the same way. `print` and `log` 
 | --- | --- | --- |
 | `frame` | `dt` (seconds since the last frame) | Once per displayed frame. The only place `ui` functions work. |
 | `key` | `name`, `down`, `repeat` | Every key press and release. `name` is the key name used in `client.ini` (SDL names: `A`, `F1`, `` ` ``, `Left Shift`, `Escape`). Return `true` to say the mod used the key. |
+| `action` | `name`, `down` | A game action pressed or released during a Zombies match (see `input`), before the game gets it. Return `true` to keep it from the game. |
 
 ## input
 
@@ -55,8 +56,14 @@ off (other handlers keep running) and is logged the same way. `print` and `log` 
 | --- | --- |
 | `input.bind(key, fn)` | Calls `fn()` when `key` is pressed (not on key repeat). One binding per key across all mods; the last one wins. A key a mod binds does not also type its character into the overlay. |
 | `input.unbind(key)` | Removes the binding. |
+| `input.send(action, down)` | Sends a game action as if its button was pressed (`down` true, the default) or released. Does not raise the `action` event. |
+| `input.down(action)` | True while the player holds the action's binding. |
+| `input.aiming()` | True while the player is aiming down sights. Approximate: it can miss aiming in some states. |
+| `input.native()` | True when the client sends controls straight to the game (actions work). False with the old touchpad controls (`BOZ_TOUCHPAD_CONTROLS`, or a game definition without the input functions). |
 
 The game still sees bound keys unless the overlay is capturing input (see `overlay`).
+
+Actions are the game's own, whatever keys the player bound: `shoot`, `aim` (a toggle in the game), `reload`, `use`, `melee`, `grenade`, `tactical`, `crouch` (tap crouches, hold goes prone), `fire_mode`, `switch_weapon`. During a Zombies match the client turns the player's bindings into these (mouse look and movement go to the game directly). Dead Ops Arcade still uses the touchpad controls and raises no actions. The standard lib's `boz.input` wraps them.
 
 ## gamedef
 

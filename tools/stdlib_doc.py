@@ -17,6 +17,7 @@ SDK = Path(__file__).resolve().parents[1]
 # Reference order and grouping. Modules not listed go to "Other".
 GROUPS = [
     ("Gameplay", ["player", "fly", "rounds"]),
+    ("Controls", ["input"]),
     ("Console", ["console"]),
     ("Menus and text", ["pause_settings", "text"]),
     ("Game UI building blocks", ["iwui", "frontend", "flash"]),

@@ -17,6 +17,7 @@ Functions that need a Zombies match return `nil` (or `false`) outside one instea
 ## Contents
 
 - **Gameplay**: [boz.player](#bozplayer), [boz.fly](#bozfly), [boz.rounds](#bozrounds)
+- **Controls**: [boz.input](#bozinput)
 - **Console**: [boz.console](#bozconsole)
 - **Menus and text**: [boz.pause_settings](#bozpausesettings), [boz.text](#boztext)
 - **Game UI building blocks**: [boz.iwui](#boziwui), [boz.frontend](#bozfrontend), [boz.flash](#bozflash)
@@ -91,6 +92,37 @@ these run the game's developer commands (StartWave, SpawnZombie, ...) through bo
 | `rounds.power_on()` | Turns the map's power on. |
 | `rounds.toggle_pause()` | Pauses or resumes game time. |
 | `rounds.set_time_scale(factor)` | Game speed multiplier (1 = normal). |
+
+## Controls
+
+### boz.input
+
+The player's controls during a Zombies match: watch, change or send the game's actions.
+
+```lua
+local input = require("boz.input")
+input.on_action("melee", function(down)
+    log("knife " .. (down and "pressed" or "released"))
+end)
+input.send("reload")
+```
+
+Actions: shoot, aim, reload, use, melee, grenade, tactical, crouch, fire_mode, switch_weapon. They are the game's own actions, whatever keys the player bound to them.
+
+<details><summary>How it works</summary>
+
+the client sends the player's key presses straight to the game's input (native controls) and raises the "action" event first; a handler that returns true keeps the action from the game. Dead Ops Arcade still uses the touchpad path and raises no actions.
+
+</details>
+
+| Function | Description |
+| --- | --- |
+| `M.ACTIONS` | The action names. |
+| `M.on_action(name, fn)` | Calls fn(down) when the player presses (true) or releases (false) the action. If fn returns true the game does not get it. Several handlers may watch one action; any one returning true keeps it from the game. |
+| `M.send(name, down)` | Sends an action to the game as if its button was pressed (down = true, the default) or released. Handlers from on_action do not see it. |
+| `M.held(name)` | True while the player holds the action's key or button. |
+| `M.aiming()` | True while the player is aiming down sights (approximate: it can miss aiming in some states). |
+| `M.native()` | True when the client sends controls straight to the game (actions work); false with the old touchpad controls. |
 
 ## Console
 

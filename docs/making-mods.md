@@ -133,6 +133,7 @@ What is in it (full list in [standard-library.md](standard-library.md)):
 | Module | For |
 | --- | --- |
 | `boz.player` | Perks, field of view |
+| `boz.input` | Watch, block or send the game's actions (shoot, aim, reload, ...) |
 | `boz.fly` | Noclip |
 | `boz.rounds` | Next round, spawn or kill zombies, power, time |
 | `boz.console` | Console variables and commands |
