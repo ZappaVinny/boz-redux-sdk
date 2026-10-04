@@ -1,0 +1,6 @@
+id = "developer"
+name = "Developer"
+version = "0.1.0"
+author = "BOZ Redux"
+game = "1.0.11"
+description = "The game's hidden developer console, back on screen: run commands, browse and edit every console variable, and switch the built-in cheats. Press ` (or F1) to open it."

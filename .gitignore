@@ -8,3 +8,7 @@ game
 .vscode/
 __pycache__/
 *.pyc
+
+# Private notes (design history, RE notebooks, assistant workflow)
+docs/internal/
+CLAUDE.local.md

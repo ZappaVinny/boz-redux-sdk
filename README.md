@@ -2,7 +2,8 @@
 
 Tools and documentation for modding _Call of Duty: Black Ops Zombies_ (Android 1.0.11) on PC with
 the [BOZ Redux client](https://github.com/ZappaVinny/boz-redux). This repository is where the
-game is reverse-engineered and where mods are made: data edits, assets and, later, Lua code mods.
+game is reverse-engineered and where mods are made: Lua code mods, the standard lib they are built
+from, data edits and assets.
 
 No game files are included, and none ever will be. You need your own copy of the game, set up by
 the client.
@@ -20,7 +21,9 @@ This was created with a human steered Generative AI (LLM) setup, minimal human v
 | `tools/ghidra/`  | Ghidra scripts and converters that build and export the reverse-engineering project                                                                   |
 | `tools/symbols/` | Turns Ghidra exports into the game definition files                                                                                                   |
 | `tools/destin/`  | [destin](https://github.com/Tatsh/destin) (submodule): `.dz` pack extraction, textures, models                                                        |
-| `docs/`          | [Modding design](docs/modding-design.md), [reverse engineering](docs/reverse-engineering.md), [asset formats](docs/asset-formats.md)                  |
+| `lib/boz/`       | The standard lib (`boz.*`): the Lua library mods are built from ([reference](docs/standard-library.md))                                               |
+| `mods/`          | Reference mods: `developer` (the game's developer console in an overlay), `redux` (PC settings in the pause menu)                                    |
+| `docs/`          | [Making mods](docs/making-mods.md), [standard library](docs/standard-library.md), [Lua API](docs/lua-api.md), [console reference](docs/console-reference.md), [how the game works](docs/game-overview.md), [contributing to the game definition](docs/reverse-engineering.md), [asset formats](docs/asset-formats.md) |
 
 ## Setup
 
@@ -32,7 +35,24 @@ ln -s ../boz-redux game          # your client checkout with the game set up (se
 
 Python 3.11+ for bozkit and the symbol tools; Ghidra 12.1+ only for reverse engineering.
 
-## Quick start: change a weapon
+## Quick start: make a mod
+
+Read [making mods](docs/making-mods.md): a mod is a folder with a `mod.toml` and a
+`scripts/main.lua` in the client's `mods/` folder. Copy `lib/boz` into it as `scripts/boz` to use
+the standard lib:
+
+```lua
+local pause_settings = require("boz.pause_settings")
+local player = require("boz.player")
+
+pause_settings.add_slider{id = "fov", label = "Field of view", min = 50, max = 120, step = 1,
+    get = function() return settings.get("fov", 50) end,
+    set = function(v) settings.set("fov", v); player.set_fov(v) end}
+```
+
+`mods/redux` and `mods/developer` are complete examples.
+
+## Quick start: change a weapon's data
 
 ```bash
 cd tools/bozkit
@@ -41,8 +61,9 @@ python3 -m bozkit dump weapons_kino.group.bin -o weapons.json
 python3 -m bozkit set weapons_kino.group.bin colt45 m_clipSize 12 --component CPlayerWeapon -o weapons_kino.mod.group.bin
 ```
 
-Extract groups from the game's packs with `dade marmalade extract-dz --no-delete`. Loading edited
-files in game comes with the client's mod support.
+Extract groups from the game's packs with `dade marmalade extract-dz --no-delete`, and test an
+edited group by putting it in a mod's `assets/` folder. Edited game files are still the game's
+files: to share a change, make it in code (`assets.patch`, see the guide).
 
 ## License
 

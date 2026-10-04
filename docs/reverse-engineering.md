@@ -1,10 +1,12 @@
-# Reverse-engineering workflow
+# Contributing to the game definition
 
-How to build the annotated Ghidra project from your own copy of the game, and how names get from
-Ghidra into the committed symbol database. The reasoning behind this is in
-[modding-design.md](modding-design.md).
+The game definition ([boz-redux-gamedef](https://github.com/ZappaVinny/boz-redux-gamedef), the
+`gamedef/` submodule) is what mods and the standard lib use to find game functions and data by
+name. This page is for people who want to extend it: how to build an annotated Ghidra project
+from your own copy of the game, and how names get from Ghidra into the game definition.
 
-Everything under `re/` is gitignored: it contains game code.
+Only knowledge is committed (names, layouts, notes), never the game's code: the Ghidra project,
+the converted binary and anything under `re/` stay on your machine (`re/` is gitignored).
 
 ## Requirements
 
@@ -98,16 +100,23 @@ Everything under `re/` is gitignored: it contains game code.
    ```
 
 9. **Export Console Commands** (`ExportBozCommands.java`, argument `re/commands.json`) lists every
-   developer console command (name, id, owning class). With the console variables (below), refresh
-   the SDK catalog:
+   developer console command (name, id, owning class). **Export Console Variables**
+   (`ExportBozCvars.java`, `re/cvars.json`) lists the cvars registered through the
+   `Cvar_Register*` wrappers; **Export Direct Console Variables** (`ExportBozDirectCvars.java`,
+   `re/cvars-direct.json`) adds the ones registered straight through the console's vtable and the
+   names the code only reads. Refresh the catalog and its readable reference:
 
    ```bash
-   python3 tools/symbols/symbols.py console re/cvars.json re/commands.json gamedef/console/boz-1.0.11.toml
+   python3 tools/symbols/symbols.py console re/cvars.json re/commands.json \
+       gamedef/console/boz-1.0.11.toml --direct re/cvars-direct.json
+   python3 tools/symbols/symbols.py console-doc gamedef/console/boz-1.0.11.toml \
+       tools/symbols/console_notes.toml docs/console-reference.md
    ```
 
-10. Optional: **Export Console Variables** (`ExportBozCvars.java`) lists every console variable
-   (cvar) the game registers, with its type, default value and the global holding it, to
-   `re/cvars.json`. **Export Engine Boundary** (`ExportBozEngineBoundary.java`) reports which
+   What each variable or command does, and in-game test results, go in
+   `tools/symbols/console_notes.toml`.
+
+10. Optional: **Export Engine Boundary** (`ExportBozEngineBoundary.java`) reports which
    functions call each family of engine imports. **Find String References**
    (`BozFindStringRefs.java`, arguments: hex addresses) lists the functions using a string or
    global; Ghidra's own references miss the game's `ldr` + `add pc` addressing.
@@ -162,10 +171,3 @@ Pull before you start and apply the database first, so you export on top of ever
 - **Structs**: create them in `/BOZ`; field names and comments are exported.
 - Coverage per subsystem is the `[coverage]` table in the database; update it by hand when a
   subsystem's mapping moves forward.
-
-## The assistant's Ghidra access
-
-The [Ghidra MCP](https://github.com/bethington/ghidra-mcp) plugin lets the assistant work in your
-open project: it decompiles, follows references, renames, comments and defines types, and you see
-the changes live. Running scripts through it needs Ghidra started with
-`GHIDRA_MCP_ALLOW_SCRIPTS=1` (it only listens on the local machine).

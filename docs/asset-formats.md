@@ -1,8 +1,7 @@
 # Asset formats
 
 How Call of Duty: Black Ops Zombies 1.0.11 stores its data, and how `tools/bozkit` reads and
-writes it. Everything here was worked out from the game's own code (see
-[reverse-engineering.md](reverse-engineering.md)). No game data is included in this repository.
+writes it. Everything here was worked out from the game's own code. No game data is included in this repository.
 
 ## Where the files are
 
@@ -171,5 +170,6 @@ python3 -m unittest discover tests
 ```
 
 `dump` writes every reflected resource and entity spec with named fields and typed values. `set`
-changes one field and writes a new group. With the client's file-override layer (next
-milestone), the edited group goes in a mod's `assets/` folder under the same path.
+changes one field and writes a new group, which you can test by putting it in a mod's `assets/`
+folder. Edited game files are still the game's files: to share a change, make it in code as the
+file loads (`assets.patch`, see [making-mods.md](making-mods.md)).

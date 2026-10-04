@@ -1,0 +1,6 @@
+id = "redux"
+name = "Redux"
+version = "0.1.0"
+author = "BOZ Redux"
+game = "1.0.11"
+description = "Quality-of-life settings for PC, in the game's own Options > Settings menu: field of view (more to come)."
