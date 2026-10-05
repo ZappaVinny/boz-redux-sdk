@@ -18,8 +18,8 @@ the Redux base mod. Siblings: `../boz-redux` (the client: runtime, launcher, mod
 - `lib/boz/`: the **standard lib** (`boz.*`), the Lua abstraction layer mods use (player, fly,
   rounds, console, pause_settings, text, iwui, frontend, and helpers). Feature generics go here;
   mods only use them. Every public function has a `---` comment: `python3 tools/stdlib_doc.py`
-  regenerates `docs/standard-library.md` from them. Mods carry a copy as `scripts/boz` (linked to
-  `lib/boz` during development).
+  regenerates `docs/standard-library.md` from them. Mods carry a copy as `scripts/boz` (plain files, so
+  GitHub zips and Windows checkouts work); after changing `lib/boz`, copy it into each mod again.
 - `mods/`: reference mods. `developer` (console overlay, cheats, noclip), `redux` (PC settings in
   the pause menu). Linked into the client's `mods/` for testing.
 - Docs for modders: `docs/making-mods.md` (guide), `docs/standard-library.md` (generated),
