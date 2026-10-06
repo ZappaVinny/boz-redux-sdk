@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Project compiler and asset tools for BOZ Redux mods"
 requires-python = ">=3.11"
 license = {text = "MIT"}
+dependencies = ["Pillow>=10"]
 
 [project.optional-dependencies]
 desktop = ["PySide6>=6.7"]

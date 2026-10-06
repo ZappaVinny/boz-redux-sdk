@@ -30,10 +30,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
 from pathlib import Path
 
-from . import group, reflect, resources, save
+from . import collision, corpus, gltf, group, map_resources, native, navigation, reflect, resources, save
 from . import project as sdk_project
 from .schema import Names
 
@@ -314,6 +315,297 @@ def cmd_extract(args) -> int:
     return 0
 
 
+def _find_resource(g: group.Group, class_hash: int, resource_hash: int) -> group.Resource | None:
+    for kind in g.types():
+        if kind.class_hash != class_hash:
+            continue
+        for item in kind.resources:
+            if resource_hash in (item.name_hash, item.in_group_hash):
+                return item
+    return None
+
+
+def cmd_texture(args) -> int:
+    if not args.experimental_raw:
+        print('error: PNG texture import is experimental; cooked/swizzled layouts are not yet '
+              'supported (pass --experimental-raw only for format research)', file=sys.stderr)
+        return 2
+    if not args.output:
+        print('give -o NEW.group.bin (the input is never overwritten)', file=sys.stderr)
+        return 2
+    names = Names()
+    source = Path(args.group)
+    g = group.parse(source.read_bytes())
+    item = _find_resource(g, names.hash('CIwTexture'), names.hash(args.resource))
+    if item is None:
+        print(f'no CIwTexture resource {args.resource}', file=sys.stderr)
+        return 1
+    try:
+        item.body = native.encode_texture_png(args.png, item.body, args.bytes_per_pixel)
+    except (OSError, ValueError) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    Path(args.output).write_bytes(group.encode(g))
+    print(f'texture {args.resource} replaced -> {args.output}')
+    return 0
+
+
+def cmd_texture_export(args) -> int:
+    try:
+        _, item = _load_group_resource(args.group, 'CIwTexture', args.resource)
+        native.decode_texture(item.body).save(args.output, format='PNG')
+    except (OSError, ValueError) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    print(f'texture {args.resource} -> {args.output}')
+    return 0
+
+
+def cmd_corpus(args) -> int:
+    report = corpus.audit(args.paths, tuple(args.exclude))
+    text = json.dumps(report, indent=2, sort_keys=True) + '\n'
+    if args.output:
+        Path(args.output).write_text(text)
+    else:
+        sys.stdout.write(text)
+    return 0 if report['summary']['all_byte_identical'] else 1
+
+
+def _load_group_resource(path: str, class_name: str, resource_name: str):
+    names = Names()
+    g = group.parse(Path(path).read_bytes())
+    item = _find_resource(g, names.hash(class_name), names.hash(resource_name))
+    if item is None:
+        raise ValueError(f'no {class_name} resource {resource_name}')
+    return g, item
+
+
+def cmd_material_dump(args) -> int:
+    try:
+        _, item = _load_group_resource(args.group, 'CIwMaterial', args.resource)
+        value = native.decode_material(item.body)
+    except ValueError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    out = {'same_as_default': value.same_as_default, 'flags': value.flags,
+           'unknown': value.unknown.hex(), 'colours': value.colours,
+           'textures': [f'0x{item:08x}' for item in value.textures],
+           'trailer': value.trailer.hex()}
+    text = json.dumps(out, indent=2) + '\n'
+    if args.output:
+        Path(args.output).write_text(text)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def cmd_material_set(args) -> int:
+    if not args.output:
+        print('give -o NEW.group.bin (the input is never overwritten)', file=sys.stderr)
+        return 2
+    try:
+        g, item = _load_group_resource(args.group, 'CIwMaterial', args.resource)
+        value = native.decode_material(item.body)
+        if args.flags is not None:
+            value.flags = int(args.flags, 0)
+        for edit in args.texture:
+            index_text, separator, hash_text = edit.partition('=')
+            if not separator:
+                raise ValueError('texture edits use INDEX=NAME_OR_0xHASH')
+            index = int(index_text)
+            if not 0 <= index < len(value.textures):
+                raise ValueError(f'texture index {index} is out of range')
+            value.textures[index] = Names().hash(hash_text)
+        item.body = native.encode_material(value)
+        Path(args.output).write_bytes(group.encode(g))
+    except (OSError, ValueError) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    print(f'material {args.resource} changed -> {args.output}')
+    return 0
+
+
+def cmd_nav(args) -> int:
+    try:
+        g, item = _load_group_resource(args.group, 'CIsNavMesh', args.resource)
+        mesh = navigation.decode(item.body)
+        for edit in args.set:
+            name, separator, raw = edit.partition('=')
+            if not separator or not hasattr(mesh.config, name) or name == 'raw':
+                raise ValueError('nav settings are cell_size, cell_height, agent_height, '
+                                 'agent_radius, agent_max_climb, and agent_max_slope')
+            setattr(mesh.config, name, float(raw))
+        if args.set:
+            if not args.output:
+                raise ValueError('give -o NEW.group.bin (the input is never overwritten)')
+            item.body = navigation.encode(mesh)
+            Path(args.output).write_bytes(group.encode(g))
+            print(f'navigation {args.resource} changed -> {args.output}')
+            return 0
+        print(json.dumps({'cell_size': mesh.config.cell_size,
+                          'cell_height': mesh.config.cell_height,
+                          'agent_height': mesh.config.agent_height,
+                          'agent_radius': mesh.config.agent_radius,
+                          'agent_max_climb': mesh.config.agent_max_climb,
+                          'agent_max_slope': mesh.config.agent_max_slope,
+                          'origin': mesh.origin, 'tile_width': mesh.tile_width,
+                          'tile_height': mesh.tile_height, 'max_tiles': mesh.max_tiles,
+                          'max_polygons': mesh.max_polygons, 'tiles': len(mesh.tiles)}, indent=2))
+        return 0
+    except (OSError, ValueError) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+
+
+def cmd_model_export(args) -> int:
+    try:
+        _, item = _load_group_resource(args.group, 'CIwModel', args.resource)
+        gltf.export_model(native.decode_model(item.body), args.output, args.resource)
+    except (OSError, ValueError, KeyError, struct.error) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    print(f'model {args.resource} -> {args.output}')
+    return 0
+
+
+def cmd_model_import(args) -> int:
+    if not args.experimental_raw:
+        print('error: model glTF import is experimental; cooked block transforms and primitive '
+              'groups are not complete (pass --experimental-raw for format research)',
+              file=sys.stderr)
+        return 2
+    if not args.output:
+        print('give -o NEW.group.bin (the input is never overwritten)', file=sys.stderr)
+        return 2
+    try:
+        g, item = _load_group_resource(args.group, 'CIwModel', args.resource)
+        model = gltf.import_model(args.gltf)
+        item.body = native.encode_model(model, None if args.rebuild else item.body)
+        Path(args.output).write_bytes(group.encode(g))
+    except (OSError, ValueError, KeyError, IndexError, struct.error) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    print(f'model {args.resource} imported -> {args.output}')
+    return 0
+
+
+def cmd_portal(args) -> int:
+    try:
+        g, item = _load_group_resource(args.group, 'CIsPortal', args.resource)
+        portal = map_resources.decode_portal(item.body)
+        if args.front is not None:
+            portal.front_sector = args.front
+        if args.back is not None:
+            portal.back_sector = args.back
+        if args.translate:
+            dx, dy, dz = args.translate
+            portal.vertices = [(x + dx, y + dy, z + dz) for x, y, z in portal.vertices]
+            portal.distance += portal.normal[0] * dx + portal.normal[1] * dy + portal.normal[2] * dz
+        if args.front is not None or args.back is not None or args.translate:
+            if not args.output:
+                raise ValueError('give -o NEW.group.bin (the input is never overwritten)')
+            item.body = map_resources.encode_portal(portal)
+            Path(args.output).write_bytes(group.encode(g))
+            print(f'portal {args.resource} changed -> {args.output}')
+            return 0
+        print(json.dumps({'vertices': portal.vertices, 'normal': portal.normal,
+                          'distance': portal.distance, 'front_sector': portal.front_sector,
+                          'back_sector': portal.back_sector}, indent=2))
+        return 0
+    except (OSError, ValueError, struct.error) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+
+
+def _collision_component(item: group.Resource) -> tuple[resources.EntitySpec, resources.Component]:
+    spec = resources.decode_entity_spec(item.body)
+    matches = [component for component in spec.components
+               if component.class_hash == resources.COLLISION_MESH_SPEC]
+    if len(matches) != 1:
+        raise ValueError(f'expected one collision component, found {len(matches)}')
+    return spec, matches[0]
+
+
+def cmd_collision_export(args) -> int:
+    try:
+        _, item = _load_group_resource(args.group, 'CIsEntitySpec', args.resource)
+        _, component = _collision_component(item)
+        mesh = collision.decode(component.extra)
+        triangles = [tuple(mesh.indices[index:index + 3])
+                     for index in range(0, len(mesh.indices), 3)]
+        gltf.export_model(native.Model(mesh.vertices, triangles), args.output, args.resource)
+    except (OSError, ValueError, KeyError, struct.error) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    print(f'collision {args.resource} -> {args.output}')
+    return 0
+
+
+def cmd_collision_import(args) -> int:
+    if not args.output:
+        print('give -o NEW.group.bin (the input is never overwritten)', file=sys.stderr)
+        return 2
+    try:
+        g, item = _load_group_resource(args.group, 'CIsEntitySpec', args.resource)
+        spec, component = _collision_component(item)
+        mesh = collision.decode(component.extra)
+        imported = gltf.import_model(args.gltf, round_positions=False)
+        new_indices = [value for triangle in imported.triangles for value in triangle]
+        if not args.rebuild_mesh and (len(imported.vertices) != len(mesh.vertices) or
+                                      len(new_indices) != len(mesh.indices)):
+            raise ValueError('lossless collision import requires unchanged vertex and index counts')
+        mesh.vertices = imported.vertices
+        mesh.indices = new_indices
+        if len(mesh.materials) != len(new_indices) // 3:
+            mesh.materials = bytes(len(new_indices) // 3)
+        component.extra = collision.encode(mesh)
+        item.body = resources.encode_entity_spec(spec)
+        Path(args.output).write_bytes(group.encode(g))
+    except (OSError, ValueError, KeyError, IndexError, struct.error) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    print(f'collision {args.resource} imported -> {args.output}')
+    return 0
+
+
+def cmd_nav_connection(args) -> int:
+    try:
+        g, item = _load_group_resource(args.group, 'CIsNavMeshConnection', args.resource)
+        connection = navigation.decode_connection(item.body)
+        if args.translate:
+            dx, dy, dz = args.translate
+            connection.start = tuple(value + delta for value, delta in zip(connection.start,
+                                                                            (dx, dy, dz)))
+            connection.end = tuple(value + delta for value, delta in zip(connection.end,
+                                                                          (dx, dy, dz)))
+        for edit in args.set:
+            name, separator, raw = edit.partition('=')
+            if not separator or name not in {'value_50', 'value_54', 'value_48', 'value_4c',
+                                               'flag_5c', 'flag_5d'}:
+                raise ValueError('editable fields: value_50, value_54, value_48, value_4c, '
+                                 'flag_5c, flag_5d')
+            current = getattr(connection, name)
+            if isinstance(current, bool):
+                value = raw.lower() in {'1', 'true', 'yes', 'on'}
+            elif isinstance(current, int):
+                value = int(raw, 0)
+            else:
+                value = float(raw)
+            setattr(connection, name, value)
+        if args.translate or args.set:
+            if not args.output:
+                raise ValueError('give -o NEW.group.bin (the input is never overwritten)')
+            item.body = navigation.encode_connection(connection)
+            Path(args.output).write_bytes(group.encode(g))
+            print(f'navigation connection {args.resource} changed -> {args.output}')
+            return 0
+        print(json.dumps(connection.__dict__, indent=2))
+        return 0
+    except (OSError, ValueError, struct.error) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog='bozkit', description='BOZ asset tools')
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -374,6 +666,85 @@ def main(argv=None) -> int:
     extract.add_argument('output')
     extract.add_argument('--kind', choices=('auto', 'dz', 'group'), default='auto')
     extract.set_defaults(func=cmd_extract)
+    texture = sub.add_parser('texture', help='replace a CIwTexture with a PNG')
+    texture.add_argument('group')
+    texture.add_argument('resource', help='resource name or 0x-prefixed hash')
+    texture.add_argument('png')
+    texture.add_argument('-o', '--output')
+    texture.add_argument('--bytes-per-pixel', type=int, choices=(1, 2, 3, 4))
+    texture.add_argument('--experimental-raw', action='store_true', help=argparse.SUPPRESS)
+    texture.set_defaults(func=cmd_texture)
+    texture_export = sub.add_parser('texture-export', help='export a supported CIwTexture to PNG')
+    texture_export.add_argument('group')
+    texture_export.add_argument('resource', help='resource name or 0x-prefixed hash')
+    texture_export.add_argument('output')
+    texture_export.add_argument('--experimental-raw', action='store_true', help=argparse.SUPPRESS)
+    texture_export.set_defaults(func=cmd_texture_export)
+    corpus_parser = sub.add_parser('corpus', help='audit private group files without exporting assets')
+    corpus_parser.add_argument('paths', nargs='+')
+    corpus_parser.add_argument('-o', '--output')
+    corpus_parser.add_argument('--exclude', action='append', default=[], metavar='GLOB')
+    corpus_parser.set_defaults(func=cmd_corpus)
+    material_dump = sub.add_parser('material-dump', help='show a CIwMaterial as JSON')
+    material_dump.add_argument('group')
+    material_dump.add_argument('resource')
+    material_dump.add_argument('-o', '--output')
+    material_dump.set_defaults(func=cmd_material_dump)
+    material_set = sub.add_parser('material-set', help='edit a CIwMaterial losslessly')
+    material_set.add_argument('group')
+    material_set.add_argument('resource')
+    material_set.add_argument('--flags')
+    material_set.add_argument('--texture', action='append', default=[], metavar='INDEX=HASH')
+    material_set.add_argument('-o', '--output')
+    material_set.set_defaults(func=cmd_material_set)
+    nav = sub.add_parser('nav', help='show or edit CIsNavMesh build settings')
+    nav.add_argument('group')
+    nav.add_argument('resource')
+    nav.add_argument('--set', action='append', default=[], metavar='NAME=VALUE')
+    nav.add_argument('-o', '--output')
+    nav.set_defaults(func=cmd_nav)
+    model_export = sub.add_parser('model-export', help='export a CIwModel to glTF 2.0')
+    model_export.add_argument('group')
+    model_export.add_argument('resource')
+    model_export.add_argument('output')
+    model_export.add_argument('--experimental-raw', action='store_true', help=argparse.SUPPRESS)
+    model_export.set_defaults(func=cmd_model_export)
+    model_import = sub.add_parser('model-import', help='import glTF into a CIwModel')
+    model_import.add_argument('group')
+    model_import.add_argument('resource')
+    model_import.add_argument('gltf')
+    model_import.add_argument('-o', '--output')
+    model_import.add_argument('--rebuild', action='store_true',
+                              help='replace with a minimal body instead of preserving source metadata')
+    model_import.add_argument('--experimental-raw', action='store_true', help=argparse.SUPPRESS)
+    model_import.set_defaults(func=cmd_model_import)
+    portal = sub.add_parser('portal', help='show or edit a CIsPortal')
+    portal.add_argument('group')
+    portal.add_argument('resource')
+    portal.add_argument('--front')
+    portal.add_argument('--back')
+    portal.add_argument('--translate', type=float, nargs=3, metavar=('X', 'Y', 'Z'))
+    portal.add_argument('-o', '--output')
+    portal.set_defaults(func=cmd_portal)
+    collision_export = sub.add_parser('collision-export', help='export collision triangles to glTF')
+    collision_export.add_argument('group')
+    collision_export.add_argument('resource')
+    collision_export.add_argument('output')
+    collision_export.set_defaults(func=cmd_collision_export)
+    collision_import = sub.add_parser('collision-import', help='import collision triangles from glTF')
+    collision_import.add_argument('group')
+    collision_import.add_argument('resource')
+    collision_import.add_argument('gltf')
+    collision_import.add_argument('-o', '--output')
+    collision_import.add_argument('--rebuild-mesh', action='store_true')
+    collision_import.set_defaults(func=cmd_collision_import)
+    connection = sub.add_parser('nav-connection', help='show or edit a CIsNavMeshConnection')
+    connection.add_argument('group')
+    connection.add_argument('resource')
+    connection.add_argument('--translate', type=float, nargs=3, metavar=('X', 'Y', 'Z'))
+    connection.add_argument('--set', action='append', default=[], metavar='NAME=VALUE')
+    connection.add_argument('-o', '--output')
+    connection.set_defaults(func=cmd_nav_connection)
     args = ap.parse_args(argv)
     return args.func(args)
 

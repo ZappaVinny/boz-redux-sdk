@@ -23,7 +23,7 @@ This was created with a human steered Generative AI (LLM) setup, minimal human v
 | `tools/destin/`  | [destin](https://github.com/Tatsh/destin) (submodule): `.dz` pack extraction, textures, models                                                        |
 | `lib/boz/`       | The standard lib (`boz.*`): the Lua library mods are built from ([reference](docs/standard-library.md))                                               |
 | `mods/`          | Reference mods: `developer` (the game's developer console in an overlay), `redux` (PC settings in the pause menu)                                    |
-| `docs/`          | [Roadmap](docs/roadmap.md), [SDK projects](docs/sdk-projects.md), [making mods](docs/making-mods.md), [standard library](docs/standard-library.md), [Lua API](docs/lua-api.md), [compatibility](docs/compatibility.md), [asset formats](docs/asset-formats.md), and RE references |
+| `docs/`          | [Roadmap](docs/roadmap.md), [SDK projects](docs/sdk-projects.md), [native editing](docs/native-editing.md), [making mods](docs/making-mods.md), [standard library](docs/standard-library.md), [Lua API](docs/lua-api.md), [compatibility](docs/compatibility.md), [asset formats](docs/asset-formats.md), and RE references |
 
 ## Setup
 
@@ -69,16 +69,18 @@ pause_settings.add_slider{id = "fov", label = "Field of view", min = 50, max = 1
 ## Quick start: change a weapon's data
 
 ```bash
-cd tools/bozkit
-python3 -m bozkit names ../../game/assets/boz.s3e.unpacked     # optional: show names, not hashes
-python3 -m bozkit dump weapons_kino.group.bin -o weapons.json
-python3 -m bozkit set weapons_kino.group.bin colt45 m_clipSize 12 --component CPlayerWeapon -o weapons_kino.mod.group.bin
+cd /home/zappa/Work/boz/boz-redux-sdk
+.venv/bin/bozkit extract ../boz-redux/original/obb/blackops_etc.dz /tmp/boz-etc --kind dz
+.venv/bin/bozkit dump /tmp/boz-etc/ingame/weapons/weapons_kino.group.bin \
+  --class CIsEntitySpec -o /tmp/weapons-kino.json
 ```
 
 Extract groups with `bozkit extract`, edit them, and put complete or modified files in a project's
 `assets/` folder. The SDK supports these files for local development and packaging. Authors are
 responsible for deciding what game-derived content they may distribute; game assets must never be
-committed to this repository.
+committed to this repository. See [native asset editing](docs/native-editing.md) for tested
+material, collision, portal, navigation, texture, and static-model workflows using files in this
+workspace, plus the explicit limits for unsupported native layouts.
 
 ## License
 

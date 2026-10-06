@@ -47,8 +47,34 @@ type_count x:
     count x: u32 size, [u32 name_hash], u32 in_group_hash, body
 ```
 
-The 1.0.11 packs use 63 resource classes. By size, most are `CIwTexture` (about 300 MB) and
-`CIwModel`. `tools/destin` (dade) converts textures, materials, models and fonts.
+The 1.0.11 ETC pack uses 63 resource classes. By size, most are `CIwTexture` (about 300 MB) and
+`CIwModel`. `tools/destin` (dade) provides extraction and read-side conversions; `bozkit` owns
+BOZ-specific lossless writing and editing.
+
+## Writable-format status
+
+| Resource | Parse/write status | Editing status |
+| --- | --- | --- |
+| Resource groups | Complete | Resources may be replaced without changing unknown sections or other bodies |
+| Reflected resources | Complete | Named typed properties, including nested objects and lists |
+| Entity specifications | Complete | Components, children, reflected fields; collision payload retained raw |
+| `CIwMaterial` | Complete | Flags and texture references; unknown bytes retained |
+| `CIwModel` | Static GL triangle geometry and lossless preservation | glTF export; source-backed edits retain unknown blocks; additional primitive types remain |
+| `CIsNavMesh` | Complete for shipped resources | Recast agent/build settings; Detour tiles retained raw |
+| `CIwTexture` | Row-major RGB565 and BGRA8888 | PNG export/import; unsupported packed, compressed, or swizzled formats fail closed |
+| `CIsPortal` | Complete | Vertices, plane, and connected sector names |
+| Collision triangle meshes | Complete for Zombies maps | Vertices, indices, per-triangle materials, glTF; Bullet metadata retained raw |
+| `CIsNavMeshConnection` | Complete | Endpoints, rotation, and raw offset-named settings |
+
+Run `bozkit corpus` on private extracted groups for exact machine-readable counts. A corpus report
+contains filenames, counts, capabilities, and SHA-256 hashes, never resource bodies. Excluding
+out-of-scope Dead Ops paths, all 128 Zombies groups and 25,415 resources currently round-trip
+byte-identically across 57 resource classes. Structured codec coverage is full for all 7,097
+materials, 3,268 entity specs, 198 portals, 8 navigation connections, 5 collision meshes, and 4
+navmeshes. All 3,562 model bodies are preserved byte-identically. Static model export was visually
+validated with the named `colt45` resource, including its planar center-offset positions,
+render-vertex remap, UVs, and triangle list. BGRA8888 texture export was visually validated with
+the named `main_menu_logo` resource.
 
 ## Hashes
 
@@ -95,18 +121,19 @@ u32 child_count
 child_count x: u32 class (CIsEntitySpec), u32 reserved, entity spec (this layout)
 ```
 
-bozkit decodes and re-encodes all of it byte for byte: every group, all 4,344 entity specs and
-all 1,128 reflected resources in both packs.
+For Zombies content, bozkit decodes and re-encodes all 3,268 entity specs and 1,040 reflected
+resources byte-for-byte.
 
 ## Navigation meshes (`CIsNavMesh`)
 
-Zombie and Dead Ops pathing uses Recast/Detour.
+Zombie pathing uses Recast/Detour.
 
-- **Layout:** each `CIsNavMesh` body is 128 bytes of Recast build settings, followed by standard
-  Detour (version 7) tile data (`DNAV`). The settings start with cell size, cell height, agent
-  height, agent radius, max climb and max slope; for example 0.3 / 0.2 / 1.5 / 0.5 / 0.9 / 45°
-  in Dead Ops, and 0.1 / 0.15 / 1.5 / 0.4 / 0.4 / 50° in the Zombies maps.
-- **Where:** Dead Ops arenas hold one tile; the Zombies maps (`*_statics`) hold several.
+- **Layout:** each `CIsNavMesh` body begins with an 80-byte Recast build configuration and a
+  40-byte Detour mesh-set header. Each tile then has an 8-byte reference/size header followed by
+  standard Detour version 7 tile data (`DNAV`). The settings begin with cell size, cell height,
+  agent height, agent radius, max climb and max slope; Zombies maps commonly use
+  0.1 / 0.15 / 1.5 / 0.4 / 0.4 / 50°.
+- **Where:** Zombies map `*_statics` groups hold one or more tiles.
 - **Off-mesh links:** window and barricade climbs are not Detour links. They are separate
   objects (`CIsNavMeshConnection` resources, `CJumpConnection` components).
 - **Agents:** a zombie moves as a crowd agent (`CIsCrowdAgent`: `m_maxSpeed`,
@@ -114,14 +141,44 @@ Zombie and Dead Ops pathing uses Recast/Detour.
 
 Existing Recast/Detour tools can read the tile data, which matters for map editing later.
 
-## Dead Ops data
+`CIsNavMeshConnection::Serialise` at `0x4a0a4e95` confirms its packed 55-byte field order:
 
-- **Rounds:** Dead Ops runs on 42 `CDORound` resources (`deadops-ingame.group.bin`). Each picks the
-  arena (`environment`, for example `lv1_island`), lightmap variant, music track, sun direction
-  and colour tint.
-- **Hordes:** the enemies come from `CDOZombieSpawner` hordes, a list of `CDOZombieConfig`. Each
-  enemy type has `name`, `roundUnlocked`, `baseSpawnRate`, `spawnRateIncrease`, `maxSpawnRate`
-  and `miniboss`.
+```text
+vec3 start, vec3 end, quat rotation
+u8 field_0x50, unaligned u32 field_0x54
+float field_0x48, float field_0x4c
+bool field_0x5c, bool field_0x5d
+```
+
+The offset-based names are intentional until behavior proves their semantics.
+
+## Visibility portals (`CIsPortal`)
+
+```text
+u32 vertex_count
+vertex_count * vec3 vertices
+vec3 plane_normal, float plane_distance
+u32 front_sector_hash, u32 back_sector_hash
+cstring front_sector_name, cstring back_sector_name
+```
+
+The hashes are regenerated from the sector names when written.
+
+## Collision meshes
+
+`CIsCollisionMeshSpec` appends this data after its reflection blobs:
+
+```text
+u32 bullet_shape_size, u8 bullet_shape[bullet_shape_size]
+u32 vertex_count, u32 index_count, u32 material_name_count
+material_name_count * cstring material_name
+vertex_count * vec3 vertices
+index_count * u32 indices
+(index_count / 3) * u8 triangle_material
+```
+
+The five Zombies map collision resources use this layout. `bozkit` edits triangle geometry and
+material assignment while retaining the serialized Bullet shape byte-for-byte.
 
 ## Saves (`.i3d`)
 
@@ -160,16 +217,18 @@ Strings in these files end with a zero.
 ## bozkit
 
 ```bash
-cd tools/bozkit
-python3 -m bozkit names ../../game/assets/boz.s3e.unpacked GROUP.group.bin ...   # optional, local names
-python3 -m bozkit dump GROUP.group.bin -o group.json [--class CWave]
-python3 -m bozkit set GROUP.group.bin colt45 m_clipSize 12 --component CPlayerWeapon -o NEW.group.bin
-python3 -m bozkit save ../../game/saves/data-etc/1_save_game.i3d -o save.json
-python3 -m bozkit settings ../../game/saves/data-etc/save_settings.i3d --set sensitivity_x=1.5 -o NEW.i3d
-python3 -m unittest discover tests
+cd /home/zappa/Work/boz/boz-redux-sdk
+.venv/bin/bozkit extract ../boz-redux/original/obb/blackops_etc.dz /tmp/boz-etc --kind dz
+.venv/bin/bozkit corpus /tmp/boz-etc --exclude '*deadops*' -o /tmp/boz-etc-corpus.json
+.venv/bin/bozkit dump /tmp/boz-etc/ingame/levels/kino/kino.group.bin -o /tmp/kino.json
+.venv/bin/bozkit texture-export /tmp/boz-etc/frontend/frontend.group.bin \
+  main_menu_logo /tmp/main_menu_logo.png
+.venv/bin/bozkit model-export /tmp/boz-etc/ingame/weapons/weapons_kino.group.bin \
+  colt45 /tmp/colt45.gltf
+.venv/bin/python -m unittest discover tools/bozkit/tests
 ```
 
 `dump` writes every reflected resource and entity spec with named fields and typed values. `set`
-changes one field and writes a new group, which you can test by putting it in a mod's `assets/`
-folder. Edited game files are still the game's files: to share a change, make it in code as the
-file loads (`assets.patch`, see [making-mods.md](making-mods.md)).
+changes one field and writes a new group. Complete edited game files are valid project inputs and
+may be built into local test mods. Official BOZ repositories must not track those files;
+distribution validation warns when their game-derived provenance is recorded.
