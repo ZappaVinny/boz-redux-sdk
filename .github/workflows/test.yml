@@ -1,0 +1,28 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sdk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install SDK
+        run: python3 -m pip install -e .
+      - name: Test bozkit and project compiler
+        run: python3 -m unittest discover tools/bozkit/tests -v
+      - name: Check installed CLI
+        run: bozkit --help
+      - name: Verify generated standard-library reference
+        run: |
+          python3 tools/stdlib_doc.py
+          git diff --exit-code -- docs/standard-library.md

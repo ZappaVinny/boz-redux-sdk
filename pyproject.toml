@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "boz-redux-sdk"
+version = "0.1.0"
+description = "Project compiler and asset tools for BOZ Redux mods"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+desktop = ["PySide6>=6.7"]
+
+[project.scripts]
+bozkit = "bozkit.__main__:main"
+boz-sdk = "bozkit.desktop:main"
+
+[tool.setuptools]
+package-dir = {"" = "tools/bozkit"}
+
+[tool.setuptools.packages.find]
+where = ["tools/bozkit"]
+
+[tool.setuptools.data-files]
+"share/boz-redux-sdk/lib/boz" = ["lib/boz/*.lua"]

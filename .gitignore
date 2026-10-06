@@ -8,6 +8,9 @@ game
 .vscode/
 __pycache__/
 *.pyc
+*.egg-info/
+dist/
+build/
 
 # Private notes (design history, RE notebooks, assistant workflow)
 docs/internal/

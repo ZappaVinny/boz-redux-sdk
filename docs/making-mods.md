@@ -20,17 +20,18 @@ client set up with the game. No C, Ghidra or reverse engineering is needed for m
 | **Standard lib** (`boz.*`) | Lua modules that turn the game's internals into plain functions: `player.set_fov(90)`, `pause_settings.add_slider{...}`, `console.set(...)`. | use it |
 | **Your mod** | A folder with a manifest, scripts and optional replacement files. | write it |
 
-Two rules keep mods working and legal:
+Two rules keep mods working and keep official project history clean:
 
-- **Never ship game files.** No textures, models, menus or data copied from the game, edited or
-  not. Change what you need as it loads (`assets.patch`), or describe changes in code. Files you
-  make yourself are fine.
+- **Never commit game files to the BOZ Redux repositories.** SDK projects and local packages may
+  contain complete, extracted or edited files for development and testing. Mod authors are
+  responsible for deciding what they are permitted to distribute. `assets.patch` is useful when a
+  code-only change is preferable, but it is not a requirement.
 - **Use names, not addresses.** The standard lib and `gamedef` names (`"CScoreManager::AddScore"`)
   keep working when the game definition is updated; raw numbers do not.
 
 ## Your first mod
 
-Create a folder in the client's `mods/` folder (next to `client.ini`):
+For a quick experiment, create a folder in the client's `mods/` folder (next to `client.ini`):
 
 ```
 mods/hello/
@@ -73,9 +74,9 @@ events.on("frame", function()
 end)
 ```
 
-It uses the standard lib (`boz.console`), so the mod needs a copy of it: copy the SDK's
-`lib/boz` folder to `mods/hello/scripts/boz`. (While developing you can link it instead; the
-SDK will add it automatically once it can build mods.)
+It uses the standard lib (`boz.console`), so a hand-made mod needs a copy of the SDK's `lib/boz`
+folder at `mods/hello/scripts/boz`. For normal development, create an
+[SDK project](sdk-projects.md); its builder adds the library automatically.
 
 Start the launcher. **Mods** lists "Hello"; make sure it is ticked, press **Play**, start a
 match and press F5. Open `boz-log.txt` (next to `client.ini`) to see `[lua] hello: Hello from
@@ -247,8 +248,9 @@ Game data files (`.group.bin`) can be read and edited with the SDK's bozkit
 ([asset-formats.md](asset-formats.md)): for example
 `python3 -m bozkit set weapons_kino.group.bin colt45 m_clipSize 12 --component CPlayerWeapon -o out.group.bin`.
 
-An edited game file is still the game's file, so do not share it. For changes you want to share,
-use `assets.patch` instead:
+The SDK deliberately supports complete and edited game files in local projects and packages. Mark
+their provenance in `boz-project.toml` to receive a distribution warning, then make your own
+decision about sharing them. When a code-only change is useful, use `assets.patch`:
 
 ### Change a file as it loads
 
@@ -328,7 +330,7 @@ the standard lib.
 
 ## Sharing your mod
 
-Zip the mod folder (with its `scripts/boz` copy of the standard lib) and share it. Players unzip
-it into their `mods/` folder and tick it in the launcher. Do not include game files or edited
-copies of them. Bump `version` when you change it, and keep `game` set to the version you tested
-with.
+Use `bozkit package` to create a deterministic ZIP containing the mod and its standard-library
+copy. Players unzip it into their `mods/` folder and tick it in the launcher. Bump `version` when
+you change it, keep `game` set to the tested version, and review the distribution-profile warnings
+for any game-derived content you chose to include.

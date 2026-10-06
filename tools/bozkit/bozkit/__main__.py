@@ -34,6 +34,7 @@ import sys
 from pathlib import Path
 
 from . import group, reflect, resources, save
+from . import project as sdk_project
 from .schema import Names
 
 
@@ -206,6 +207,113 @@ def cmd_settings(args) -> int:
     return 0
 
 
+def _print_validation(result: sdk_project.ValidationResult) -> None:
+    for message in result.errors:
+        print(f'error: {message}', file=sys.stderr)
+    for message in result.warnings:
+        print(f'warning: {message}', file=sys.stderr)
+
+
+def cmd_new(args) -> int:
+    try:
+        project = sdk_project.create_project(args.directory, args.id, args.name or args.id,
+                                             args.author, args.version, args.description)
+    except sdk_project.ProjectError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    print(f'project created -> {project.root}')
+    return 0
+
+
+def _load_project(args):
+    try:
+        return sdk_project.load_project(args.project)
+    except sdk_project.ProjectError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return None
+
+
+def cmd_inspect(args) -> int:
+    project = _load_project(args)
+    if project is None:
+        return 1
+    result = sdk_project.validate_project(project, args.profile)
+    out = {
+        'root': str(project.root), 'schema': project.schema,
+        'mod': project.mod.__dict__,
+        'paths': {'scripts': str(project.scripts), 'assets': str(project.assets)},
+        'include_standard_library': project.include_standard_library,
+        'dependencies': [item.__dict__ for item in project.dependencies],
+        'provenance': [item.__dict__ for item in project.provenance],
+        'validation': result.as_dict(),
+    }
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0 if result.ok else 1
+
+
+def cmd_validate(args) -> int:
+    project = _load_project(args)
+    if project is None:
+        return 1
+    result = sdk_project.validate_project(project, args.profile)
+    _print_validation(result)
+    print('valid' if result.ok else 'invalid')
+    return 0 if result.ok else 1
+
+
+def cmd_build(args) -> int:
+    project = _load_project(args)
+    if project is None:
+        return 1
+    try:
+        output, report = sdk_project.build_project(project, args.output, args.profile)
+    except sdk_project.ProjectError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    for warning in report['warnings']:
+        print(f'warning: {warning}', file=sys.stderr)
+    print(f'{len(report["files"])} files -> {output}')
+    return 0
+
+
+def cmd_package(args) -> int:
+    project = _load_project(args)
+    if project is None:
+        return 1
+    try:
+        output, report = sdk_project.package_project(project, args.output, args.profile)
+    except sdk_project.ProjectError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    for warning in report['warnings']:
+        print(f'warning: {warning}', file=sys.stderr)
+    print(f'{len(report["files"])} files -> {output}')
+    return 0
+
+
+def cmd_install(args) -> int:
+    project = _load_project(args)
+    if project is None:
+        return 1
+    try:
+        output = sdk_project.install_project(project, args.client, args.force, args.profile)
+    except sdk_project.ProjectError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    print(f'installed -> {output}')
+    return 0
+
+
+def cmd_extract(args) -> int:
+    try:
+        sdk_project.extract_asset(args.source, args.output, args.kind)
+    except sdk_project.ProjectError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    print(f'extracted -> {Path(args.output).resolve()}')
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog='bozkit', description='BOZ asset tools')
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -234,6 +342,38 @@ def main(argv=None) -> int:
     n = sub.add_parser('names', help='build the local name dictionary from game files')
     n.add_argument('files', nargs='+')
     n.set_defaults(func=cmd_names)
+    new = sub.add_parser('new', help='create an SDK mod project')
+    new.add_argument('directory')
+    new.add_argument('--id', required=True)
+    new.add_argument('--name')
+    new.add_argument('--author', required=True)
+    new.add_argument('--version', default='0.1.0')
+    new.add_argument('--description', default='')
+    new.set_defaults(func=cmd_new)
+    for command, help_text, function in (
+        ('inspect', 'show an SDK project and its validation result', cmd_inspect),
+        ('validate', 'validate an SDK project', cmd_validate),
+        ('build', 'compile an SDK project to a mod folder', cmd_build),
+        ('package', 'compile an SDK project to a reproducible ZIP', cmd_package),
+    ):
+        parser = sub.add_parser(command, help=help_text)
+        parser.add_argument('project', nargs='?', default='.')
+        parser.add_argument('--profile', choices=('development', 'distribution'),
+                            default='distribution' if command == 'package' else 'development')
+        if command in ('build', 'package'):
+            parser.add_argument('-o', '--output')
+        parser.set_defaults(func=function)
+    install = sub.add_parser('install', help='build and install a project into a client root')
+    install.add_argument('project', nargs='?', default='.')
+    install.add_argument('--client', required=True)
+    install.add_argument('--profile', choices=('development', 'distribution'), default='development')
+    install.add_argument('--force', action='store_true')
+    install.set_defaults(func=cmd_install)
+    extract = sub.add_parser('extract', help='extract a DZ archive or resource group with dade')
+    extract.add_argument('source')
+    extract.add_argument('output')
+    extract.add_argument('--kind', choices=('auto', 'dz', 'group'), default='auto')
+    extract.set_defaults(func=cmd_extract)
     args = ap.parse_args(argv)
     return args.func(args)
 

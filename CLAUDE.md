@@ -13,8 +13,11 @@ the Redux base mod. Siblings: `../boz-redux` (the client: runtime, launcher, mod
   Ghidra MCP with absolute paths). Pipeline and conventions: `docs/reverse-engineering.md`.
 - `tools/symbols/symbols.py`: Ghidra exports to gamedef TOML (`from-json`, `reflection`,
   `events`, `console`) and back (`to-json`).
-- `tools/bozkit/`: Python asset toolkit (`python3 -m bozkit dump|set|save|settings|names`, tests in
-  `tools/bozkit/tests`, synthetic data only). Formats: `docs/asset-formats.md`.
+- `tools/bozkit/`: shared Python SDK compiler and asset toolkit (`new`, `inspect`, `validate`,
+  `build`, `install`, `package`, `extract`, plus `dump`, `set`, `save`, `settings`, `names`). Tests
+  in `tools/bozkit/tests` use synthetic data only. Project guide: `docs/sdk-projects.md`; formats:
+  `docs/asset-formats.md`. `bozkit.desktop` is the optional PySide6 frontend and must call the same
+  compiler rather than maintaining its own serializers.
 - `lib/boz/`: the **standard lib** (`boz.*`), the Lua abstraction layer mods use (player, fly,
   rounds, console, pause_settings, text, iwui, frontend, and helpers). Feature generics go here;
   mods only use them. Every public function has a `---` comment: `python3 tools/stdlib_doc.py`
