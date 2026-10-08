@@ -16,6 +16,9 @@ cd /home/zappa/Work/boz/boz-redux-sdk
 The corpus command must finish successfully with `all_byte_identical: true`. Its `classes` array
 shows full, partial, or preserve-only codec coverage for every resource class encountered.
 
+For visual editing of complete groups, continue with the
+[Blender existing-map guide](blender-existing-maps.md).
+
 ## Models and glTF
 
 Export the named Colt M1911 model and open the resulting glTF in Blender:

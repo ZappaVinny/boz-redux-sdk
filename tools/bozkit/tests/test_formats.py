@@ -11,7 +11,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bozkit import collision, corpus, gltf, group, map_resources, native, navigation, reflect, resources, save  # noqa: E402
+from bozkit import blender_scene, collision, corpus, gltf, group, map_resources, native, navigation, reflect, resources, save  # noqa: E402
 from bozkit.hashing import iw_hash  # noqa: E402
 from bozkit.__main__ import main as cli_main  # noqa: E402
 
@@ -140,6 +140,36 @@ class FormatTests(unittest.TestCase):
         image = native.decode_texture(bytes(header) + bytes((0, 0, 255, 255)))
         self.assertEqual(image.getpixel((0, 0)), (255, 0, 0, 255))
 
+    def test_cooked_dxt1_texture_without_pillow(self):
+        body = bytearray(103)
+        body[23] = 0x34
+        struct.pack_into('<IIII', body, 35, 1, 4, 4, 8)
+        # One opaque-red DXT1 block: both endpoints red and every selector zero.
+        body[95:103] = struct.pack('<HHI', 0xf800, 0xf800, 0)
+        texture = native.decode_texture_rgba(bytes(body))
+        self.assertEqual((texture.width, texture.height, texture.format), (4, 4, 'DXT1'))
+        self.assertEqual(texture.rgba[:4], bytes((255, 0, 0, 255)))
+
+    def test_cooked_texture_variable_mip_tables(self):
+        for mip_count in (7, 8, 9, 11):
+            width = 1 << (mip_count - 1)
+            sizes = [max(1, ((width >> i) + 3) // 4) ** 2 * 8
+                     for i in range(mip_count)]
+            for platform in (0x27, 0x34):
+                with self.subTest(mips=mip_count, platform=platform):
+                    header = bytearray(95)
+                    header[23] = platform
+                    struct.pack_into('<III', header, 35, mip_count, width, width)
+                    struct.pack_into(f'<{mip_count}I', header, 47, *sizes)
+                    block = (bytes(8) if platform == 0x27 else
+                             struct.pack('<HHI', 0xf800, 0xf800, 0))
+                    body = bytes(header) + block * (sum(sizes) // 8)
+                    decoded = native.decode_texture_rgba(body)
+                    pixel = bytes((2, 2, 2, 255) if platform == 0x27 else (255, 0, 0, 255))
+                    self.assertEqual(decoded.rgba, pixel * (width * width))
+                    with self.assertRaises(ValueError):
+                        native.decode_texture_rgba(body[:-1])
+
     def test_material_roundtrip_and_edit(self):
         source = (b'\0' + struct.pack('<I', 0x12345678) + b'abcd' +
                   bytes(range(16)) + struct.pack('<III', 2, 0x11111111, 0x22222222) + b'tail')
@@ -169,6 +199,15 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(decoded.triangles, [(0, 1, 2), (2, 0, 3)])
         self.assertEqual(native.encode_model(decoded, source), source)
 
+    def test_model_reads_explicit_primitive_material_index(self):
+        model = native.Model([(0, 0, 0), (10, 0, 0), (0, 10, 0)], [(0, 1, 2)])
+        source = bytearray(native.encode_model(model))
+        primitive = native._block(source, native._TRIS)
+        struct.pack_into('<I', source, primitive + 10, 7)
+        decoded = native.decode_model(bytes(source))
+        self.assertEqual(decoded.face_materials, [7])
+        self.assertEqual(native.encode_model(decoded, bytes(source)), bytes(source))
+
     def test_model_gltf_roundtrip(self):
         model = native.Model([(-2, 0, 1), (10, 0, 0), (0, 10, 0)], [(0, 1, 2)],
                              [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)])
@@ -177,6 +216,65 @@ class FormatTests(unittest.TestCase):
             gltf.export_model(model, path, 'synthetic')
             imported = gltf.import_model(path)
         self.assertEqual(imported, model)
+
+    def test_blender_group_boundary_preserves_and_edits_resources(self):
+        self.assertEqual(blender_scene.to_blender((1.0, 2.0, 3.0)), (1.0, -3.0, 2.0))
+        self.assertEqual(blender_scene.from_blender((1.0, -3.0, 2.0)), (1.0, 2.0, 3.0))
+        model = native.Model([(0, 0, 0), (10, 0, 0), (0, 10, 0)], [(0, 1, 2)])
+        portal = map_resources.Portal([(0.0, 0.0, 0.0), (0.0, 10.0, 0.0),
+                                       (0.0, 0.0, 10.0)], (1.0, 0.0, 0.0), 0.0,
+                                      'front', 'back')
+        collision_mesh = collision.CollisionMesh(
+            b'bullet', [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [0, 1, 2], b'\0', ['default'])
+        component = resources.Component(resources.COLLISION_MESH_SPEC, 0,
+                                        iw_hash('CIsCollisionMeshSpec'), [],
+                                        collision.encode(collision_mesh))
+        spec = resources.EntitySpec([component])
+        types = [
+            group.ResourceType(iw_hash('CIwModel'), 0, 1,
+                               [group.Resource(iw_hash('model'), iw_hash('model'),
+                                               native.encode_model(model))]),
+            group.ResourceType(iw_hash('CIsPortal'), 0, 1,
+                               [group.Resource(iw_hash('portal'), iw_hash('portal'),
+                                               map_resources.encode_portal(portal))]),
+            group.ResourceType(iw_hash('CIsEntitySpec'), 0, 1,
+                               [group.Resource(iw_hash('collision'), iw_hash('collision'),
+                                               resources.encode_entity_spec(spec))]),
+            group.ResourceType(iw_hash('CIsNavMeshConnection'), 0, 1,
+                               [group.Resource(iw_hash('jump'), iw_hash('jump'),
+                                               navigation.encode_connection(
+                                                   navigation.NavMeshConnection(
+                                                       (0.0, 0.0, 0.0), (1.0, 2.0, 3.0),
+                                                       (0.0, 0.0, 0.0, 1.0), 1, 2, 3.0, 4.0,
+                                                       True, False)))]),
+        ]
+        source_group = group.Group(bytes((0x3D, 0, 0, 0, 0, 0)),
+                                   [group.Section(group.RESOURCES, b'', types)])
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'source.group.bin'
+            unchanged = Path(directory) / 'unchanged.group.bin'
+            edited = Path(directory) / 'edited.group.bin'
+            source.write_bytes(group.encode(source_group))
+            imported = blender_scene.import_group(source)
+            self.assertEqual({item.kind for item in imported.meshes},
+                             {'model', 'portal', 'collision', 'navigation_connection'})
+            edits = [blender_scene.SceneEdit(
+                kind=item.kind, class_hash=item.class_hash,
+                resource_hash=item.resource_hash, resource_index=item.resource_index,
+                vertices=item.vertices, faces=item.faces,
+                edges=item.edges,
+                front_sector=item.front_sector, back_sector=item.back_sector)
+                for item in imported.meshes]
+            report = blender_scene.export_group(source, unchanged, edits)
+            self.assertEqual(report.edited, 0)
+            self.assertEqual(source.read_bytes(), unchanged.read_bytes())
+            edits[0].vertices = [(x + 2, y, z) for x, y, z in edits[0].vertices]
+            report = blender_scene.export_group(source, edited, [edits[0]])
+            self.assertEqual(report.edited, 1)
+            rebuilt = blender_scene.import_group(edited)
+            rebuilt_model = next(item for item in rebuilt.meshes if item.kind == 'model')
+            self.assertEqual(rebuilt_model.vertices[0], (2.0, 0.0, 0.0))
 
     def test_navigation_roundtrip_and_settings_edit(self):
         config = bytearray(80)

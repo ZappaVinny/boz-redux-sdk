@@ -53,15 +53,46 @@ BOZ-specific lossless writing and editing.
 
 ## Writable-format status
 
+### Material rendering evidence
+
+The GLES material-state function at `0x4a2b74fc` extracts `(flags >> 16) & 7`.
+Modes 0 and 5 disable blending; modes 1 and 4 use `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`;
+mode 2 uses `SRC_ALPHA, ONE`; mode 3 uses `ZERO, ONE_MINUS_SRC_COLOR`.
+Mode 5 additionally enables a greater-than-0.75 alpha test when the primary runtime
+texture's flags at `+0x34` contain bit 3. Explicit alpha-test settings are separately
+encoded in material bits 25–28, with the reference at runtime byte `+0x17`.
+The Blender primary-texture preview implements the blend equations and the
+mode-5 greater-than-0.75 cutout for textures with flag bit 3. Other alpha-test
+branches and the separate texture-combine-mode-5 override (`ZERO, SRC_COLOR`)
+remain unsupported.
+It must not treat every texture's alpha channel as an instruction to blend.
+
+Generated Blender images must set their colour space **before** uploading pixels;
+changing it afterward can reset the image buffer. Shader texture coordinates explicitly
+reference the face-corner `UVMap`, not the preserved point-domain UV attribute.
+
+In the supported cooked ETC1/DXT1 layout, the u32 at body offset 35 is the mip
+count, followed by width and height at 39 and 43. The size table starts at 47
+and reserves twelve u32 slots, with one populated size per mip. Native constructor
+`0x4a24c7b4` allocates a fixed `0x48`-byte platform header and copies the first mip
+immediately after it. That header starts at body offset 23, so base-level blocks
+start at **95**, not 79 or immediately after the populated size entries. The decoder checks the
+base block size and complete mip payload bounds. Synthetic tests exercise 7,
+8, 9 and 11 levels in both formats; these differing table lengths also occur
+in the private tutorial group. The old incorrect offset decoded table words as
+image blocks and rejected its seven-level texture altogether.
+
+### Resource coverage
+
 | Resource | Parse/write status | Editing status |
 | --- | --- | --- |
 | Resource groups | Complete | Resources may be replaced without changing unknown sections or other bodies |
 | Reflected resources | Complete | Named typed properties, including nested objects and lists |
 | Entity specifications | Complete | Components, children, reflected fields; collision payload retained raw |
-| `CIwMaterial` | Complete | Flags and texture references; unknown bytes retained |
-| `CIwModel` | Static GL triangle geometry and lossless preservation | glTF export; source-backed edits retain unknown blocks; additional primitive types remain |
+| `CIwMaterial` | Complete | Compact records contain flags and one primary texture reference; full records contain four texture slots, packed colours and a shader-technique reference; unknown auxiliary data retained |
+| `CIwModel` | Static GL triangle geometry, render-vertex remaps, vertex colours, explicit primitive material indices, terminal material references, and lossless preservation | glTF/Blender export; source-backed edits retain unknown blocks; additional primitive types remain |
 | `CIsNavMesh` | Complete for shipped resources | Recast agent/build settings; Detour tiles retained raw |
-| `CIwTexture` | Row-major RGB565 and BGRA8888 | PNG export/import; unsupported packed, compressed, or swizzled formats fail closed |
+| `CIwTexture` | Row-major RGB565/BGRA8888 plus cooked ETC1 and DXT1 mip payloads | PNG import for writable raw formats; raw and cooked formats decode for Blender/material previews |
 | `CIsPortal` | Complete | Vertices, plane, and connected sector names |
 | Collision triangle meshes | Complete for Zombies maps | Vertices, indices, per-triangle materials, glTF; Bullet metadata retained raw |
 | `CIsNavMeshConnection` | Complete | Endpoints, rotation, and raw offset-named settings |
@@ -73,8 +104,11 @@ byte-identically across 57 resource classes. Structured codec coverage is full f
 materials, 3,268 entity specs, 198 portals, 8 navigation connections, 5 collision meshes, and 4
 navmeshes. All 3,562 model bodies are preserved byte-identically. Static model export was visually
 validated with the named `colt45` resource, including its planar center-offset positions,
-render-vertex remap, UVs, and triangle list. BGRA8888 texture export was visually validated with
-the named `main_menu_logo` resource.
+render-vertex remap, UVs, and all material-indexed triangle lists. `CIwModelBlockCols` stores either
+four component planes or one compact grayscale byte per render vertex; the latter expands to opaque
+RGBA at load. BGRA8888 texture export was visually
+validated with the named `main_menu_logo` resource. ETC1 and DXT1 decoding was visually validated
+against the same tutorial floor material from the corresponding platform archives.
 
 ## Hashes
 

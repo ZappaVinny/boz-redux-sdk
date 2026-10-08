@@ -21,9 +21,10 @@ This was created with a human steered Generative AI (LLM) setup, minimal human v
 | `tools/ghidra/`  | Ghidra scripts and converters that build and export the reverse-engineering project                                                                   |
 | `tools/symbols/` | Turns Ghidra exports into the game definition files                                                                                                   |
 | `tools/destin/`  | [destin](https://github.com/Tatsh/destin) (submodule): `.dz` pack extraction, textures, models                                                        |
+| `blender/`       | Blender 5.2 LTS add-on for importing, validating, editing, and exporting existing native map resources                                            |
 | `lib/boz/`       | The standard lib (`boz.*`): the Lua library mods are built from ([reference](docs/standard-library.md))                                               |
 | `mods/`          | Reference mods: `developer` (the game's developer console in an overlay), `redux` (PC settings in the pause menu)                                    |
-| `docs/`          | [Roadmap](docs/roadmap.md), [SDK projects](docs/sdk-projects.md), [native editing](docs/native-editing.md), [making mods](docs/making-mods.md), [standard library](docs/standard-library.md), [Lua API](docs/lua-api.md), [compatibility](docs/compatibility.md), [asset formats](docs/asset-formats.md), and RE references |
+| `docs/`          | [Roadmap](docs/roadmap.md), [SDK projects](docs/sdk-projects.md), [Blender editing](docs/blender-existing-maps.md), [native editing](docs/native-editing.md), [making mods](docs/making-mods.md), [standard library](docs/standard-library.md), [Lua API](docs/lua-api.md), [compatibility](docs/compatibility.md), [asset formats](docs/asset-formats.md), and RE references |
 
 ## Setup
 
