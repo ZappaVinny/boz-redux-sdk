@@ -405,6 +405,55 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
     return navigation.encode(mesh), report
 
 
+def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None) -> bytes:
+    """A new navmesh for new geometry, on *body*'s settings and tile grid (a shipped navmesh as
+    template). Every tile the geometry touches is built; all floor is plain walkable (flags 1, no
+    name) and there are no off-mesh links. Input as for :func:`rebuild`."""
+    triangles = [(a, c, b) for a, b, c in triangles]
+    mesh = navigation.decode(body)
+    settings = Settings.from_raw(mesh.config.raw)
+    if not vertices_m:
+        raise ValueError('a navmesh needs walkable geometry')
+    columns = math.ceil((settings.bmax[0] - mesh.origin[0]) / mesh.tile_width)
+    rows = math.ceil((settings.bmax[2] - mesh.origin[2]) / mesh.tile_width)
+    xs = [v[0] for v in vertices_m]
+    zs = [v[2] for v in vertices_m]
+    if min(xs) < settings.bmin[0] or max(xs) > settings.bmax[0] or \
+            min(zs) < settings.bmin[2] or max(zs) > settings.bmax[2]:
+        raise ValueError('geometry lies outside the navmesh bounds of the template')
+    first_x = max(0, math.floor((min(xs) - mesh.origin[0]) / mesh.tile_width) - 1)
+    last_x = min(columns - 1, math.floor((max(xs) - mesh.origin[0]) / mesh.tile_width) + 1)
+    first_y = max(0, math.floor((min(zs) - mesh.origin[2]) / mesh.tile_width) - 1)
+    last_y = min(rows - 1, math.floor((max(zs) - mesh.origin[2]) / mesh.tile_width) + 1)
+    grid = [(x, y) for y in range(first_y, last_y + 1) for x in range(first_x, last_x + 1)]
+    request = _request(settings, mesh, vertices_m, triangles, grid, [])
+    with tempfile.TemporaryDirectory(prefix='boz-navmesh-') as directory:
+        request_path = Path(directory) / 'request.bin'
+        reply_path = Path(directory) / 'tiles.bin'
+        request_path.write_bytes(request)
+        subprocess.run([str(helper or helper_path()), str(request_path), str(reply_path)],
+                       check=True, capture_output=True)
+        built = _read_reply(reply_path.read_bytes())
+    tile_bits = max(1, math.ceil(math.log2(mesh.max_tiles)))
+    poly_bits = max(1, math.ceil(math.log2(mesh.max_polygons)))
+    tiles = []
+    for x, y, stock in sorted(built, key=lambda item: (item[1], item[0])):
+        data = to_boz_tile(stock, lambda index, centre: (1, 0), {})
+        decoded = navigation.decode_tile(data)
+        if not decoded.polys:
+            continue
+        if len(decoded.polys) > mesh.max_polygons:
+            raise ValueError(f'tile {(x, y)} has more polygons than the level allows')
+        if len(tiles) >= mesh.max_tiles:
+            raise ValueError(f'the navmesh needs more than {mesh.max_tiles} tiles')
+        tiles.append(navigation.NavTile((1 << (tile_bits + poly_bits)) | (len(tiles) << poly_bits),
+                                        data))
+    if not tiles:
+        raise ValueError('Recast found no walkable floor in the geometry')
+    mesh.tiles = tiles
+    return navigation.encode(mesh)
+
+
 def coverage(a_tiles, b_tiles, tolerance: float = 0.3) -> float:
     """Fraction of walkable area of *a* (by triangle centres) that *b* also covers."""
     index = _SurfaceIndex(b_tiles)

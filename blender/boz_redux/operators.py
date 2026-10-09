@@ -24,9 +24,9 @@ except ModuleNotFoundError:  # Blender bundles numpy; the fallback keeps tests p
     numpy = None
 
 try:
-    from bozkit import blender_scene
+    from bozkit import blender_scene, levels
 except ModuleNotFoundError:
-    from ._vendor.bozkit import blender_scene
+    from ._vendor.bozkit import blender_scene, levels
 
 from . import view
 
@@ -1178,6 +1178,40 @@ def _game_running() -> bool:
     return subprocess.run(["pgrep", "-f", "codboz_s3e_loader"], capture_output=True).returncode == 0
 
 
+def _launch_check(context, root: Path) -> str | None:
+    """Why the game cannot be started into a level with the test mod, or None."""
+    if _game_running():
+        return "The game is already running; close it first"
+    if _client_launch(root) is None:
+        return f"No BOZ Redux client found in {root}"
+    runner = _settings(context).run_mod or "developer"
+    runner_dir = root / "mods" / runner
+    if not (runner_dir / "mod.toml").is_file():
+        return f"The test mod '{runner}' is not in {root / 'mods'}"
+    if not (runner_dir / "scripts" / "boz" / "levels.lua").is_file():
+        return (f"The test mod '{runner}' has no boz.levels; copy the current standard library "
+                "into its scripts/boz (the Developer mod has it)")
+    if runner in _disabled_mods(root):
+        return f"The test mod '{runner}' is switched off; enable it in the launcher's Mods tab"
+    return None
+
+
+def _launch_level(context, root: Path, level: str) -> str:
+    """Start the game straight into *level* with the test mod; returns the status message."""
+    runner = _settings(context).run_mod or "developer"
+    saves = Path(os.environ.get("BOZ_SAVES") or root / "saves")
+    _set_mod_setting(saves, runner, "autostart_level", level)
+    ordering = _make_mod_win(root, _settings(context).mod_id)
+    old = root / "mods" / "boz_autostart"  # managed mod of an earlier add-on build
+    if (old / "mod.toml").is_file() and "Blender add-on" in (old / "mod.toml").read_text():
+        shutil.rmtree(old)
+    log = open(root / "boz-log.txt", "w")
+    subprocess.Popen(_client_launch(root), cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                     stdin=subprocess.DEVNULL, start_new_session=True)
+    message = f"{runner} starts {level}"
+    return f"{message}; {ordering}" if ordering else message
+
+
 class BOZ_OT_build_and_run(Operator):
     bl_idname = "boz.build_and_run"
     bl_label = "Build & Run"
@@ -1196,41 +1230,59 @@ class BOZ_OT_build_and_run(Operator):
         if not folder:
             self.report({"ERROR"}, "Build & Run needs a level imported with Import level folder")
             return {"CANCELLED"}
-        if _game_running():
-            self.report({"ERROR"}, "The game is already running; close it first")
-            return {"CANCELLED"}
-        command = _client_launch(root)
-        if command is None:
-            self.report({"ERROR"}, f"No BOZ Redux client found in {root}")
-            return {"CANCELLED"}
-        runner = _settings(context).run_mod or "developer"
-        runner_dir = root / "mods" / runner
-        if not (runner_dir / "mod.toml").is_file():
-            self.report({"ERROR"}, f"The test mod '{runner}' is not in {root / 'mods'}")
-            return {"CANCELLED"}
-        if not (runner_dir / "scripts" / "boz" / "levels.lua").is_file():
-            self.report({"ERROR"}, f"The test mod '{runner}' has no boz.levels; copy the current "
-                        "standard library into its scripts/boz (the Developer mod has it)")
-            return {"CANCELLED"}
-        if runner in _disabled_mods(root):
-            self.report({"ERROR"}, f"The test mod '{runner}' is switched off; enable it in the "
-                        "launcher's Mods tab")
+        problem = _launch_check(context, root)
+        if problem:
+            self.report({"ERROR"}, problem)
             return {"CANCELLED"}
         if bpy.ops.boz.save_to_mod() != {"FINISHED"}:
             return {"CANCELLED"}
-        level = Path(folder).name
-        saves = Path(os.environ.get("BOZ_SAVES") or root / "saves")
-        _set_mod_setting(saves, runner, "autostart_level", level)
-        ordering = _make_mod_win(root, _settings(context).mod_id)
-        old = root / "mods" / "boz_autostart"  # managed mod of an earlier add-on build
-        if (old / "mod.toml").is_file() and "Blender add-on" in (old / "mod.toml").read_text():
-            shutil.rmtree(old)
-        log = open(root / "boz-log.txt", "w")
-        subprocess.Popen(command, cwd=root, stdout=log, stderr=subprocess.STDOUT,
-                         stdin=subprocess.DEVNULL, start_new_session=True)
-        message = f"{context.scene.get('boz_last_report', '')}; {runner} starts {level}"
-        if ordering:
-            message += f"; {ordering}"
+        message = f"{context.scene.get('boz_last_report', '')}; " \
+            + _launch_level(context, root, Path(folder).name)
+        context.scene["boz_last_report"] = message
+        self.report({"INFO"}, message)
+        return {"FINISHED"}
+
+
+class BOZ_OT_run_new_level_test(Operator):
+    bl_idname = "boz.run_new_level_test"
+    bl_label = "Run new level test"
+    bl_description = ("Experimental: write a level the game does not ship into your mod and start "
+                      "the game in it")
+    bl_options = {"REGISTER"}
+
+    kind: EnumProperty(name="Level", items=[
+        ("arena", "Generated arena", "redux_arena: a walled arena with its own model, texture, "
+         "collision and navmesh, plus spawns, Juggernog and power from Kino"),
+        ("clone", "Kino copy", "Kino under the name redux_test: proves the game loads a new level"),
+    ], default="arena")
+
+    def execute(self, context):
+        try:
+            client_root, mod_id = _mod_target(context)
+        except ValueError as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        root = Path(client_root).expanduser().resolve()
+        problem = _launch_check(context, root)
+        if problem:
+            self.report({"ERROR"}, problem)
+            return {"CANCELLED"}
+        try:
+            pack = levels.game_pack(root)
+            assets = blender_scene.mod_assets_folder(root, mod_id, create=True)
+            # Add to the mod's own fixed group so earlier test levels keep their loading screen.
+            fixed = levels.read_group(assets / "fixed.group.bin")
+            if self.kind == "arena":
+                files = levels.generate_arena(pack, "redux_arena", fixed=fixed)
+            else:
+                files = levels.clone_level(pack, "redux_test", fixed=fixed)
+            written = files.write(assets)
+        except (OSError, ValueError, KeyError, StopIteration,
+                subprocess.CalledProcessError) as exc:
+            self.report({"ERROR"}, f"Could not write the test level: {exc!r}")
+            return {"CANCELLED"}
+        message = f"wrote {len(written)} files to {mod_id}; " \
+            + _launch_level(context, root, files.name)
         context.scene["boz_last_report"] = message
         self.report({"INFO"}, message)
         return {"FINISHED"}
@@ -1324,6 +1376,13 @@ class BOZ_PT_map_tools(Panel):
         column.operator(BOZ_OT_rebuild_navmesh.bl_idname, icon="MOD_SMOOTH")
         column.enabled = bool(settings is not None and settings.client_root)
         view.draw_switches(layout, context.scene)
+        new = layout.column(align=True)
+        new.label(text="New levels (experimental)")
+        new.operator(BOZ_OT_run_new_level_test.bl_idname, text="Run generated arena",
+                     icon="PLAY").kind = "arena"
+        new.operator(BOZ_OT_run_new_level_test.bl_idname, text="Run Kino copy",
+                     icon="PLAY").kind = "clone"
+        new.enabled = column.enabled
         more = layout.column(align=True)
         more.label(text="Files")
         more.operator(BOZ_OT_import_group.bl_idname, icon="IMPORT")
@@ -1344,5 +1403,5 @@ class BOZ_PT_map_tools(Panel):
 
 CLASSES = (BOZ_AP_preferences, BOZ_OT_import_group, BOZ_OT_import_level, BOZ_OT_export_group,
            BOZ_OT_export_level, BOZ_OT_save_to_mod, BOZ_OT_build_and_run, BOZ_OT_rebuild_navmesh,
-           BOZ_OT_choose_mod,
+           BOZ_OT_run_new_level_test, BOZ_OT_choose_mod,
            BOZ_OT_duplicate_entity, BOZ_OT_delete_entity, BOZ_OT_validate_scene, BOZ_PT_map_tools)

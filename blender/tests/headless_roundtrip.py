@@ -363,5 +363,25 @@ with tempfile.TemporaryDirectory() as directory:
     assert (client / 'saves' / 'mods' / 'developer.cfg').read_text() == \
         'open=b:true\nautostart_level=s:test\n'
     assert 'Saved' in bpy.context.scene['boz_last_report']
+
+    # New level test: writes a renamed Kino copy, read straight from the game's pack, into the mod.
+    sys.path.insert(0, str(ROOT / 'tools' / 'bozkit' / 'tests'))
+    from test_levels import level_pack, make_dz
+    from bozkit import derbh
+    (client / 'assets').mkdir(exist_ok=True)
+    (client / 'assets' / 'blackops_etc.dz').write_bytes(make_dz(
+        {path: (data, derbh.STORED) for path, data in level_pack().files.items()}))
+    started.unlink()
+    assert bpy.ops.boz.run_new_level_test(kind='clone') == {'FINISHED'}
+    assets = client / 'mods' / 'developer' / 'assets'
+    assert (assets / 'redux_test_statics.group.bin').is_file(), sorted(assets.iterdir())
+    assert (assets / 'fixed.group.bin').is_file()
+    for _ in range(50):
+        if started.exists():
+            break
+        time.sleep(0.1)
+    assert started.exists()
+    assert 'autostart_level=s:redux_test' in \
+        (client / 'saves' / 'mods' / 'developer.cfg').read_text()
     addon_utils.disable('boz_redux')
     print('BOZ_BLENDER_HEADLESS_OK')

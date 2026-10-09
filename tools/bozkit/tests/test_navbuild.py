@@ -55,6 +55,21 @@ class NavRebuildTests(unittest.TestCase):
                                                 dirty=everywhere)
         self.assertEqual(report.tiles, 2)
 
+    def test_fresh_build_for_new_geometry(self):
+        vertices, triangles = floor()
+        built = navbuild.build(empty_navmesh(), vertices, triangles)
+        mesh = navigation.decode(built)
+        self.assertEqual(len(mesh.tiles), 2)
+        self.assertEqual(len({tile.reference for tile in mesh.tiles}), 2)
+        for tile in mesh.tiles:
+            decoded = navigation.decode_tile(tile.data)
+            self.assertTrue(all((poly.flags, poly.extra) == (1, 0) for poly in decoded.polys))
+            self.assertEqual(decoded.off_mesh_count, 0)
+        self.assertTrue(walkable(built, (3.2, 0.0, 3.2)))
+        with self.assertRaises(ValueError):
+            navbuild.build(empty_navmesh(), [(v[0] + 50, v[1], v[2]) for v in vertices],
+                           triangles)
+
     def test_layout_and_walkable_floor(self):
         mesh = navigation.decode(self.shipped)
         self.assertEqual(len(mesh.tiles), 2)

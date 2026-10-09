@@ -7,6 +7,7 @@ small synthetic resources for tests and newly-authored content.
 from __future__ import annotations
 
 import io
+import math
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -550,3 +551,76 @@ def encode_model(model: Model, source: bytes | None = None) -> bytes:
             triangle_index += 1
     return bytes(out)
 
+
+def build_model(vertices, uvs, triangles, materials: Sequence[int],
+                face_materials: Sequence[int] | None = None, flags: int = 0x20000) -> bytes:
+    """A complete ``CIwModel`` body from scratch (``CIwModel_Serialise`` layout)::
+
+        u32 flags, u16 render vertex count, u16 position count,
+        bounding sphere (i32 x, y, z, u32 radius),
+        u32 block count, then per block: u32 class hash + the block's own serialisation
+            (u32 class hash, u16 in-memory size, u16 element count, u16 flags, data),
+        u32 second block list count (0), u32 material count, u32 material hashes
+
+    One ``CIwModelBlockVerts``, one ``CIwModelBlockGLUVs`` and one ``CIwModelBlockGLTriList``
+    per material. Every vertex is its own position (no shared-position remap). Positions are
+    signed 16-bit model units (centimetres); UVs follow GL (v = 0 is the texture's first row).
+    """
+    count = len(vertices)
+    if not 0 < count <= 65535 or len(uvs) != count:
+        raise ValueError('a model needs 1-65535 vertices and one UV per vertex')
+    if any(len(v) != 3 or any(not -32768 <= c <= 32767 for c in v) for v in vertices):
+        raise ValueError('model vertices must be signed 16-bit XYZ triples')
+    if any(not 0 <= i < count for t in triangles for i in t):
+        raise ValueError('model triangle index is outside the vertex array')
+    face_materials = list(face_materials) if face_materials is not None else [0] * len(triangles)
+    if len(face_materials) != len(triangles) or \
+            any(not 0 <= m < len(materials) for m in face_materials):
+        raise ValueError('every triangle needs a material index into the material list')
+
+    lows = [min(v[axis] for v in vertices) for axis in range(3)]
+    highs = [max(v[axis] for v in vertices) for axis in range(3)]
+    centre = [(lo + hi) // 2 for lo, hi in zip(lows, highs)]
+    # The game rounds either way; rounding up never culls a visible model.
+    radius = math.ceil(max(sum((v[axis] - centre[axis]) ** 2 for axis in range(3))
+                           for v in vertices) ** 0.5)
+
+    def block(class_hash, element_count, block_flags, data, memory):
+        inner = struct.pack('<IHHH', class_hash, 28 + memory, element_count, block_flags)
+        return struct.pack('<I', class_hash) + inner + data
+
+    planar = b''.join(struct.pack(f'<{count}h', *(v[axis] for v in vertices))
+                      for axis in range(3))
+    blocks = [block(_VERTS, count, 0, struct.pack('<Hh', count, 0) + planar, count * 6)]
+    raw_uvs = [(round(u * 4096), round(v * 4096)) for u, v in uvs]
+    if any(not -32768 <= c <= 32767 for uv in raw_uvs for c in uv):
+        raise ValueError('model UVs must stay within -8..8 (1/4096 fixed point)')
+    blocks.append(block(_UVS, count, 0, b''.join(struct.pack('<hh', *uv) for uv in raw_uvs),
+                        count * 4))
+    for material in range(len(materials)):
+        indices = [i for t, m in zip(triangles, face_materials) if m == material for i in t]
+        if not indices:
+            continue
+        if len(indices) > 65535:
+            raise ValueError('too many triangles for one material (split the model)')
+        data = struct.pack('<I', material) + struct.pack(f'<{len(indices)}H', *indices)
+        data += struct.pack('<HH', 0, count)
+        blocks.append(block(_TRIS, len(indices), 2, data, len(indices) * 2))
+    out = struct.pack('<IHH3iI', flags, count, count, *centre, radius)
+    out += struct.pack('<I', len(blocks)) + b''.join(blocks)
+    out += struct.pack('<II', 0, len(materials)) + b''.join(struct.pack('<I', m) for m in materials)
+    return out
+
+
+def build_texture(width: int, height: int, bgra: bytes, template: bytes) -> bytes:
+    """A raw BGRA8888 ``CIwTexture`` from *bgra* texels, keeping a shipped raw texture's other
+    header bytes (*template* must be a raw 0x05 or 0x0e texture). No image library needed."""
+    layout = texture_layout(template)
+    if len(bgra) != width * height * 4:
+        raise ValueError('texture data must be width x height BGRA texels')
+    if not 0 < width <= 8192 or not 0 < height <= 8192:
+        raise ValueError('texture dimensions must be between 1 and 8192')
+    header = bytearray(template[:layout.texel_offset])
+    header[layout.header_offset] = 0x0E
+    struct.pack_into('<HHH', header, layout.header_offset + 3, width, height, width * 4)
+    return bytes(header) + bgra + template[layout.trailer_offset:]

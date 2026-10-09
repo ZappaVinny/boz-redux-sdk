@@ -11,8 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ADDON = ROOT / 'blender' / 'boz_redux'
 BOZKIT = ROOT / 'tools' / 'bozkit' / 'bozkit'
 VENDORED = {
-    '__init__.py', 'blender_scene.py', 'bullet.py', 'collision.py', 'group.py', 'hashing.py',
-    'map_resources.py', 'native.py', 'navbuild.py', 'navigation.py', 'reflect.py', 'resources.py',
+    '__init__.py', 'blender_scene.py', 'bullet.py', 'collision.py', 'derbh.py', 'group.py',
+    'hashing.py', 'levels.py', 'map_resources.py', 'native.py', 'navbuild.py', 'navigation.py',
+    'reflect.py', 'resources.py',
 }
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 NAVMESH_HELPERS = [ROOT / 'tools' / 'navmesh' / 'build' / name
