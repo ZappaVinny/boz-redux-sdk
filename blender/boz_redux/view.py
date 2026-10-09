@@ -38,6 +38,7 @@ SWITCHES = {
     "boz_show_collision": {"collision", "collision_piece"},
     "boz_show_portals": {"portal"},
     "boz_show_navigation": {"navigation_connection"},
+    "boz_show_navmesh": {"navmesh"},
 }
 
 
@@ -304,7 +305,8 @@ def draw_switches(layout, scene):
     for switch, text in (("boz_show_markers", "Markers"), ("boz_show_badges", "Badges"),
                          ("boz_show_areas", "Areas"), ("boz_show_links", "Links"),
                          ("boz_show_shapes", "Shapes"), ("boz_show_collision", "Collision"),
-                         ("boz_show_portals", "Portals"), ("boz_show_navigation", "Nav")):
+                         ("boz_show_portals", "Portals"), ("boz_show_navigation", "Nav links"),
+                         ("boz_show_navmesh", "Navmesh")):
         grid.prop(scene, switch, text=text, toggle=True)
     if scene.boz_show_links:
         box.prop(scene, "boz_links_selected_only")

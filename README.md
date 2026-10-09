@@ -21,6 +21,7 @@ This was created with a human steered Generative AI (LLM) setup, minimal human v
 | `tools/ghidra/`  | Ghidra scripts and converters that build and export the reverse-engineering project                                                                   |
 | `tools/symbols/` | Turns Ghidra exports into the game definition files                                                                                                   |
 | `tools/destin/`  | [destin](https://github.com/Tatsh/destin) (submodule): `.dz` pack extraction, textures, models                                                        |
+| `tools/navmesh/` | Native Recast helper that rebuilds navmesh tiles (with the `tools/recast` submodule) |
 | `blender/`       | Blender 5.2 LTS add-on for importing, validating, editing, and exporting existing native map resources                                            |
 | `lib/boz/`       | The standard lib (`boz.*`): the Lua library mods are built from ([reference](docs/standard-library.md))                                               |
 | `mods/`          | Reference mods: `developer` (the game's developer console in an overlay), `redux` (PC settings in the pause menu)                                    |

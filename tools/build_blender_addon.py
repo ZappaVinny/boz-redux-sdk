@@ -12,15 +12,17 @@ ADDON = ROOT / 'blender' / 'boz_redux'
 BOZKIT = ROOT / 'tools' / 'bozkit' / 'bozkit'
 VENDORED = {
     '__init__.py', 'blender_scene.py', 'bullet.py', 'collision.py', 'group.py', 'hashing.py',
-    'map_resources.py', 'native.py', 'navigation.py', 'reflect.py', 'resources.py',
+    'map_resources.py', 'native.py', 'navbuild.py', 'navigation.py', 'reflect.py', 'resources.py',
 }
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
+NAVMESH_HELPERS = [ROOT / 'tools' / 'navmesh' / 'build' / name
+                   for name in ('boz-navmesh', 'boz-navmesh.exe')]
 
 
-def _write(archive: zipfile.ZipFile, name: str, data: bytes) -> None:
+def _write(archive: zipfile.ZipFile, name: str, data: bytes, mode: int = 0o644) -> None:
     info = zipfile.ZipInfo(name, ZIP_TIME)
     info.compress_type = zipfile.ZIP_DEFLATED
-    info.external_attr = 0o100644 << 16
+    info.external_attr = (0o100000 | mode) << 16
     archive.writestr(info, data)
 
 
@@ -30,6 +32,10 @@ def build(output: Path) -> str:
     files['boz_redux/_vendor/__init__.py'] = b''
     for name in sorted(VENDORED):
         files[f'boz_redux/_vendor/bozkit/{name}'] = (BOZKIT / name).read_bytes()
+    # The navmesh helper is native code built from tools/navmesh; bundle the one for this platform.
+    for helper in NAVMESH_HELPERS:
+        if helper.is_file():
+            files[f'boz_redux/_vendor/bozkit/{helper.name}'] = helper.read_bytes()
     # A content hash identifies the build in Blender's sidebar while keeping the ZIP reproducible.
     digest = hashlib.sha256()
     for name in sorted(files):
@@ -39,7 +45,7 @@ def build(output: Path) -> str:
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, 'w') as archive:
         for name in sorted(files):
-            _write(archive, name, files[name])
+            _write(archive, name, files[name], 0o755 if 'boz-navmesh' in name else 0o644)
     return build_id
 
 
@@ -49,7 +55,10 @@ def main() -> int:
                         default=ROOT / 'build' / 'blender' / 'boz-redux-blender.zip')
     args = parser.parse_args()
     build_id = build(args.output)
+    helper = next((path for path in NAVMESH_HELPERS if path.is_file()), None)
     print(f'{args.output.resolve()} (build {build_id})')
+    if helper is None:
+        print('warning: tools/navmesh is not built; the add-on cannot rebuild navmeshes')
     return 0
 
 

@@ -137,6 +137,12 @@ position.
 `boz_back_sector` custom properties. **Navigation connections** (window and barricade climbs) are
 two-point edges.
 
+**Navmesh.** **Show > Navmesh** draws where players and zombies can walk: blue floor, orange
+floor a door blocks until it opens, white jump areas, violet other tagged floor, and lines for
+the zombie window crossings and climbs. It is display only. Saving rebuilds the tiles around
+changed collision and refreshes this overlay; **Rebuild navmesh** forces it (see
+[navigation meshes](navmesh.md)).
+
 ## Edit
 
 Supported:
@@ -150,8 +156,8 @@ Supported:
   slots of any collision object, with unchanged topology. Deleting a collision piece is rejected
   on save. Collision
   decides what bullets and other ray casts hit; export updates both copies the game loads (the
-  ray-cast arrays and the Bullet physics shape). It does not decide where players and zombies can
-  walk: that is the navmesh, which cannot be edited yet.
+  ray-cast arrays and the Bullet physics shape). Where players and zombies can walk is the navmesh,
+  which saving rebuilds around changed collision.
 - **Portals:** vertices and sector names.
 - **Navigation connections:** either endpoint.
 
@@ -194,8 +200,8 @@ All in Blender's sidebar and the game:
    kino_statics by about a player's height. **Validate**, then **Save to mod**; the status line
    names the groups it saved.
 3. **File > New**, then **Import level folder** on `levels/kino` again: every edit is still there.
-4. Play Kino with the mod: the objects sit where you put them, and shots stop on the raised
-   collision. You can still walk through it, because walking follows the navmesh.
+4. Play Kino with the mod: the objects sit where you put them, shots stop on the raised
+   collision, and you can no longer walk through it: saving rebuilt the navmesh around it.
 5. Disable the mod in the launcher and play again: everything is back to normal.
 
 ## Automated checks

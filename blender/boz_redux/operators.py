@@ -32,7 +32,8 @@ except ImportError:  # running from the SDK checkout rather than an installed ZI
     BUILD = "source"
 
 SUFFIX = ".group.bin"
-HELPER_KINDS = {"collision", "collision_piece", "portal", "navigation_connection", "shape"}
+HELPER_KINDS = {"collision", "collision_piece", "portal", "navigation_connection", "shape",
+                "navmesh"}
 # Marker colour by what the entity does (sRGB-ish display colours).
 MARKER_COLOURS = {
     "perk": (0.65, 0.2, 1.0), "pack_a_punch": (1.0, 0.1, 0.8), "mystery_box": (0.1, 0.9, 1.0),
@@ -46,6 +47,8 @@ MARKER_COLOURS = {
 }
 # Shape colour by role: solid collision, ghost (pass-through trigger) volume, interaction reach.
 SHAPE_COLOURS = {"solid": (1.0, 0.15, 0.1), "ghost": (0.1, 1.0, 0.3), "reach": (1.0, 0.85, 0.1)}
+NAV_COLOURS = {"walkable": (0.15, 0.45, 1.0), "door": (1.0, 0.5, 0.1), "jump": (1.0, 1.0, 1.0),
+               "tagged": (0.7, 0.45, 1.0)}
 GLYPH_SIZE = 12.0
 PACKAGE = __name__.rpartition(".")[0]
 
@@ -119,11 +122,15 @@ def _build_mesh(item: blender_scene.SceneMesh):
                                                for c in source[vertex]])
         else:
             colours.data.foreach_set("color", [1.0] * (4 * len(mesh.loops)))
-    for name in item.material_names:
-        material = bpy.data.materials.get(f"BOZ Collision: {name}")
-        if material is None:
-            material = bpy.data.materials.new(f"BOZ Collision: {name}")
-        mesh.materials.append(material)
+    if item.kind == "navmesh":
+        for name in item.material_names:
+            mesh.materials.append(_colour_material(f"BOZ Nav: {name}", NAV_COLOURS[name], 0.35))
+    else:
+        for name in item.material_names:
+            material = bpy.data.materials.get(f"BOZ Collision: {name}")
+            if material is None:
+                material = bpy.data.materials.new(f"BOZ Collision: {name}")
+            mesh.materials.append(material)
     for material_hash in item.material_hashes:
         name = f"BOZ Material {material_hash:08x}"
         material = bpy.data.materials.get(name)
@@ -268,6 +275,12 @@ def _mesh_object(context, item: blender_scene.SceneMesh, meshes=None, objects=No
         obj.hide_render = True
         obj["boz_shape"] = item.shape
         obj["boz_shape_component"] = item.shape_component
+    elif item.kind == "navmesh":
+        # Display only: saving rebuilds the navmesh from collision.
+        obj.show_wire = True
+        obj.show_transparent = True
+        obj.hide_render = True
+        obj.hide_select = True
     elif item.kind == "badge":
         # A badge only shows what its model does; it follows the model and is not edited.
         obj.lock_location = obj.lock_rotation = obj.lock_scale = (True, True, True)
@@ -574,6 +587,7 @@ class BOZ_OT_import_level(Operator):
                     mod_assets = blender_scene.mod_assets_folder(settings.client_root,
                                                                  settings.mod_id)
             editable, references = blender_scene.level_groups(self.directory, mod_assets)
+            context.scene["boz_level_folder"] = str(Path(self.directory).resolve())
             result = blender_scene.import_groups(
                 editable, references if self.include_shared else [],
                 include_models=self.include_models,
@@ -648,7 +662,7 @@ def _scene_edits(context):
         if obj.get("boz_schema") != blender_scene.SCHEMA:
             raise ValueError(f"{obj.name} was imported by an older add-on; re-import the group")
         kind = obj["boz_kind"]
-        if kind == "badge":
+        if kind in {"badge", "navmesh"}:
             continue
         if obj.mode == "EDIT":
             obj.update_from_editmode()
@@ -778,6 +792,28 @@ class BOZ_OT_export_level(Operator):
         return {"FINISHED"}
 
 
+def _refresh_navmesh(context, written):
+    """Show the navmesh just saved: replace the overlay's mesh from the written group."""
+    for path in written:
+        try:
+            parsed = blender_scene.group.parse(Path(path).read_bytes())
+        except (OSError, ValueError):
+            continue
+        for resource_type in parsed.types():
+            if resource_type.class_hash != blender_scene.NAVMESH:
+                continue
+            for index, item in enumerate(resource_type.resources):
+                for obj in context.scene.objects:
+                    if obj.get("boz_kind") != "navmesh" or \
+                            Path(obj.get("boz_source_group", "")).name != Path(path).name:
+                        continue
+                    fresh = blender_scene.navmesh_meshes(obj["boz_source_group"], item, index,
+                                                         obj.name.split(":", 1)[0])
+                    old = obj.data
+                    obj.data = _build_mesh(fresh)
+                    bpy.data.meshes.remove(old)
+
+
 class BOZ_OT_save_to_mod(Operator):
     bl_idname = "boz.save_to_mod"
     bl_label = "Save to mod"
@@ -785,10 +821,17 @@ class BOZ_OT_save_to_mod(Operator):
                       "game loads it the next time it starts")
     bl_options = {"REGISTER"}
 
+    force_navmesh: BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})
+
     def execute(self, context):
         try:
             client_root, mod_id = _mod_target(context)
-            report = blender_scene.export_to_mod(_scene_edits(context), client_root, mod_id)
+            scene = context.scene
+            sources = [line for line in scene.get("boz_source_groups", "").split("\n") if line]
+            report = blender_scene.export_to_mod(
+                _scene_edits(context), client_root, mod_id,
+                level_folder=scene.get("boz_level_folder") or None, sources=sources,
+                force_navmesh=self.force_navmesh)
         except (OSError, ValueError, IndexError, struct.error) as exc:
             context.scene["boz_last_report"] = f"Save failed: {exc}"
             self.report({"ERROR"}, str(exc))
@@ -796,11 +839,27 @@ class BOZ_OT_save_to_mod(Operator):
         if report.written:
             message = (f"Saved {report.edited} edits to mod {mod_id}: "
                        + ", ".join(Path(path).name for path in report.written))
+            if report.navmesh:
+                message += f"; {report.navmesh}"
+                _refresh_navmesh(context, report.written)
         else:
             message = "Nothing changed; mod left as it was"
+            if report.navmesh:
+                message += f" ({report.navmesh})"
         context.scene["boz_last_report"] = message
         self.report({"INFO"}, message)
         return {"FINISHED"}
+
+
+class BOZ_OT_rebuild_navmesh(Operator):
+    bl_idname = "boz.rebuild_navmesh"
+    bl_label = "Rebuild navmesh"
+    bl_description = ("Save to mod and rebuild the navmesh from the game's original wherever the "
+                      "level differs from it (repairs mods saved by older add-on versions)")
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        return bpy.ops.boz.save_to_mod(force_navmesh=True)
 
 
 class BOZ_OT_validate_scene(Operator):
@@ -830,7 +889,7 @@ class BOZ_OT_validate_scene(Operator):
                 _basis(obj)
             except ValueError as exc:
                 problems.append(str(exc))
-            if kind in {"entity", "shape", "badge", "area"}:
+            if kind in {"entity", "shape", "badge", "area", "navmesh"}:
                 continue
             if obj.type != "MESH" or (not obj.data.polygons
                                       and kind not in {"navigation_connection", "collision"}):
@@ -863,9 +922,10 @@ class BOZ_PT_map_tools(Panel):
             box.prop(settings, "mod_id", text="Mod")
         layout.operator(BOZ_OT_import_level.bl_idname, icon="FILE_FOLDER")
         layout.operator(BOZ_OT_validate_scene.bl_idname, icon="CHECKMARK")
-        row = layout.row()
-        row.operator(BOZ_OT_save_to_mod.bl_idname, icon="FILE_TICK")
-        row.enabled = bool(settings is not None and settings.client_root)
+        column = layout.column(align=True)
+        column.operator(BOZ_OT_save_to_mod.bl_idname, icon="FILE_TICK")
+        column.operator(BOZ_OT_rebuild_navmesh.bl_idname, icon="MOD_SMOOTH")
+        column.enabled = bool(settings is not None and settings.client_root)
         view.draw_switches(layout, context.scene)
         more = layout.column(align=True)
         more.label(text="Files")
@@ -886,4 +946,5 @@ class BOZ_PT_map_tools(Panel):
 
 
 CLASSES = (BOZ_AP_preferences, BOZ_OT_import_group, BOZ_OT_import_level, BOZ_OT_export_group,
-           BOZ_OT_export_level, BOZ_OT_save_to_mod, BOZ_OT_validate_scene, BOZ_PT_map_tools)
+           BOZ_OT_export_level, BOZ_OT_save_to_mod, BOZ_OT_rebuild_navmesh, BOZ_OT_validate_scene,
+           BOZ_PT_map_tools)

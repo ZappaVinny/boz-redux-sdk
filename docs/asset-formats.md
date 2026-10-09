@@ -194,7 +194,8 @@ Zombie pathing uses Recast/Detour.
 
 - **Layout:** each `CIsNavMesh` body begins with an 80-byte Recast build configuration and a
   40-byte Detour mesh-set header. Each tile then has an 8-byte reference/size header followed by
-  standard Detour version 7 tile data (`DNAV`). The settings begin with cell size, cell height,
+  Detour version 7 tile data (`DNAV`) with BOZ's widened 40-byte polygons and off-mesh
+  connections (see [navigation meshes](navmesh.md)). The settings begin with cell size, cell height,
   agent height, agent radius, max climb and max slope; Zombies maps commonly use
   0.1 / 0.15 / 1.5 / 0.4 / 0.4 / 50°.
 - **Where:** Zombies map `*_statics` groups hold one or more tiles.

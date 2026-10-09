@@ -16,7 +16,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import collision, group, map_resources, native, navigation, reflect, resources
+from . import collision, group, map_resources, native, navbuild, navigation, reflect, resources
 from .hashing import iw_hash
 
 SCHEMA = 2
@@ -281,6 +281,7 @@ class ExportReport:
     edited: int
     preserved: int
     written: tuple[str, ...] = ()
+    navmesh: str = ''  # what happened to the navmesh, for the status line
 
 
 def _identity(item: group.Resource) -> int:
@@ -625,6 +626,11 @@ def import_groups(paths, reference_paths=(), *, include_models: bool = False,
                     scale=scale_to_blender(scale), instance_resource_hash=resource_hash,
                     instance_resource_index=resource_index, instance_source_group=path,
                     key=f'{path}|collision|{resource_index}', group_name=name))
+            elif include_navigation and class_hash == NAVMESH:
+                try:
+                    result.meshes.append(navmesh_meshes(path, item, resource_index, name))
+                except (ValueError, struct.error):
+                    result.preserved += 1
             elif include_navigation and class_hash == NAV_CONNECTION:
                 connection = navigation.decode_connection(item.body)
                 result.meshes.append(SceneMesh(
@@ -1230,7 +1236,7 @@ def _normal(vertices: list[tuple[float, float, float]], original):
 
 
 def _validate_edit(edit: SceneEdit) -> None:
-    if edit.kind in ('entity', 'shape', 'badge', 'area'):
+    if edit.kind in ('entity', 'shape', 'badge', 'area', 'navmesh'):
         return
     if edit.kind == 'collision' and edit.collision_triangles == [] and not edit.faces:
         return  # every triangle of this collision lives in attached pieces
@@ -1274,9 +1280,181 @@ def _model_edit_key(edit: SceneEdit):
             tuple(edit.face_materials))
 
 
+NAVMESH = iw_hash('CIsNavMesh')
+DOOR = iw_hash('CDoor')
+
+
+def _native_apply(chain, point):
+    """Apply native (position, xyzw rotation, scale) transforms, innermost first."""
+    for position, rotation, scale in chain:
+        point = _rotate(rotation, tuple(point[i] * scale[i] for i in range(3)))
+        point = tuple(point[i] + position[i] for i in range(3))
+    return point
+
+
+_BOX_FACES = [(0, 2, 1), (1, 2, 3), (4, 5, 6), (5, 7, 6), (0, 1, 4), (1, 5, 4),
+              (2, 6, 3), (3, 6, 7), (0, 4, 2), (2, 4, 6), (1, 3, 5), (3, 7, 5)]
+
+
+def navmesh_input(parsed: dict[str, group.Group]):
+    """The navmesh build input of a level: collision meshes plus solid entity collision boxes,
+    leaving out doors (the navmesh runs under doors; their tags gate it). Metres, the game's
+    Y-up axes and triangle winding."""
+    vertices, triangles = [], []
+    # Order by file name so a mod's copy of a group lines up with the game's original.
+    for path in sorted(parsed, key=lambda value: (Path(value).name.lower(), value)):
+        for resource_type in parsed[path].types():
+            if resource_type.class_hash != ENTITY_SPEC:
+                continue
+            for item in resource_type.resources:
+                try:
+                    spec = resources.decode_entity_spec(item.body)
+                except (ValueError, struct.error):
+                    continue
+                meshes = [c for c in spec.components if c.class_hash == resources.COLLISION_MESH_SPEC]
+                if len(meshes) == 1:
+                    chain = [_local_transform(spec)]
+                    mesh = collision.decode(meshes[0].extra)
+                    base = len(vertices)
+                    vertices += [tuple(v / 100 for v in _native_apply(chain, vertex))
+                                 for vertex in mesh.vertices]
+                    triangles += [(base + mesh.indices[i], base + mesh.indices[i + 1],
+                                   base + mesh.indices[i + 2]) for i in range(0, len(mesh.indices), 3)]
+                    continue
+                stack = [(spec, [], False)]
+                while stack:
+                    node, parents, in_door = stack.pop()
+                    chain = [_local_transform(node)] + parents
+                    door = in_door or any(c.type_hash == DOOR for c in node.components)
+                    for component in node.components:
+                        blob = component.blob
+                        if component.type_hash != COLLISION_BOX or door or \
+                                _blob_value(blob, 'm_Ghost', False):
+                            continue
+                        half = _blob_value(blob, 'm_halfAxis', [0.0, 0.0, 0.0])
+                        centre = _blob_value(blob, 'm_Offset', None) or _blob_value(
+                            blob, 'm_boxCentre', [0.0, 0.0, 0.0])
+                        base = len(vertices)
+                        for corner in range(8):
+                            local = tuple(centre[i] + (half[i] if corner >> i & 1 else -half[i])
+                                          for i in range(3))
+                            vertices.append(tuple(v / 100 for v in _native_apply(chain, local)))
+                        # outward-facing counter-clockwise, then swapped into the game's winding
+                        triangles += [(base + a, base + c, base + b) for a, b, c in _BOX_FACES]
+                    stack.extend((child, chain, door) for _, _, child in node.children)
+    return vertices, triangles
+
+
+NAV_SLOTS = ('walkable', 'door', 'jump', 'tagged')
+
+
+def navmesh_meshes(path: str, item: group.Resource, index: int, group_name: str) -> SceneMesh:
+    """A display mesh of a navmesh: enabled polygons by tag (slots NAV_SLOTS) and its off-mesh
+    links as loose edges. Disabled polygons (flags 0) are left out."""
+    mesh = navigation.decode(item.body)
+    vertices, faces, materials, edges = [], [], [], []
+    keys: dict[tuple, int] = {}
+
+    def vertex(point):
+        key = tuple(round(value, 4) for value in point)
+        if key not in keys:
+            keys[key] = len(vertices)
+            vertices.append(to_blender(tuple(value * 100 for value in point)))
+        return keys[key]
+
+    for tile in mesh.tiles:
+        decoded = navigation.decode_tile(tile.data)
+        for poly, triangle in decoded.triangles():
+            if not poly.flags:
+                continue
+            corners = tuple(vertex(point) for point in triangle)
+            if len(set(corners)) < 3:
+                continue
+            faces.append(corners)
+            materials.append(1 if poly.flags & 0x2 else 2 if poly.flags & 0x4000 else
+                             3 if poly.extra or poly.flags & ~0x1 else 0)
+        for start, end, *_ in decoded.off_mesh:
+            edges.append((vertex(start), vertex(end)))
+    return SceneMesh('navmesh', NAVMESH, _identity(item), index, path, f'{group_name}:Navmesh',
+                     f'{group_name} Navigation', vertices, faces, edges, face_materials=materials,
+                     material_names=list(NAV_SLOTS), key=f'{path}|navmesh|{index}',
+                     group_name=group_name,
+                     description='Walkable areas (blue), door-gated floor (orange), jump areas '
+                                 '(white), other tagged floor (violet), window crossings and '
+                                 'climbs (lines)')
+
+
+def _dirty_boxes(before, after):
+    """XZ boxes (metres) around navmesh input triangles that moved or changed."""
+    (old_v, old_t), (new_v, new_t) = before, after
+    if len(old_t) != len(new_t):
+        points = old_v + new_v
+        if not points:
+            return []
+        return [(min(p[0] for p in points), min(p[2] for p in points),
+                 max(p[0] for p in points), max(p[2] for p in points))]
+    boxes = []
+    for old, new in zip(old_t, new_t):
+        a = [old_v[i] for i in old]
+        b = [new_v[i] for i in new]
+        if all(_close(p, q, 1e-4) for p, q in zip(a, b)):
+            continue
+        corners = a + b
+        boxes.append((min(p[0] for p in corners), min(p[2] for p in corners),
+                      max(p[0] for p in corners), max(p[2] for p in corners)))
+    merged = []
+    for box in sorted(boxes):
+        if merged and box[0] <= merged[-1][2] + 0.5 and abs(box[1] - merged[-1][1]) < 6 and \
+                abs(box[3] - merged[-1][3]) < 6:
+            last = merged[-1]
+            merged[-1] = (min(last[0], box[0]), min(last[1], box[1]),
+                          max(last[2], box[2]), max(last[3], box[3]))
+        else:
+            merged.append(box)
+    return merged
+
+
+def _update_navmesh(parsed: dict[str, group.Group], base_folder: Path, changed: set) -> str:
+    """Rebuild the level's navmesh from the game's original: every tile whose input differs from
+    the game's files is rebuilt, so repeated saves and stale mod copies converge."""
+    names = {path.name.lower(): path for path in base_folder.glob('*.group.bin')}
+    level = {path: value for path, value in parsed.items() if Path(path).name.lower() in names}
+    navmesh = None
+    for path, value in level.items():
+        for resource_type in value.types():
+            if resource_type.class_hash == NAVMESH:
+                for index, item in enumerate(resource_type.resources):
+                    navmesh = (path, index, item)
+    if navmesh is None:
+        return ''
+    originals = {str(path): group.parse(path.read_bytes()) for path in names.values()}
+    base_body = None
+    for value in originals.values():
+        for resource_type in value.types():
+            if resource_type.class_hash == NAVMESH:
+                base_body = resource_type.resources[navmesh[1]].body
+    if base_body is None:
+        return ''
+    vertices, triangles = navmesh_input(level)
+    dirty = _dirty_boxes(navmesh_input(originals), (vertices, triangles))
+    try:
+        body, report = navbuild.rebuild(base_body, vertices, triangles, dirty=dirty)
+    except FileNotFoundError:
+        return 'navmesh NOT rebuilt: the boz-navmesh helper is missing'
+    if body != navmesh[2].body:
+        navmesh[2].body = body
+        changed.add((navmesh[0], NAVMESH, navmesh[1]))
+    if not dirty:
+        return 'navmesh matches the game' if body == base_body else ''
+    kept = f', {report.reachable} kept for window links' if report.reachable else ''
+    return f'navmesh: {report.tiles} tiles rebuilt{kept}'
+
+
 def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path], *,
                   write_unchanged: bool = False,
-                  replaceable: str | Path | None = None) -> ExportReport:
+                  replaceable: str | Path | None = None,
+                  level_folder: str | Path | None = None,
+                  force_navmesh: bool = False) -> ExportReport:
     """Patch edits into copies of their source groups.
 
     *outputs* maps each source group to the file it is written to. Sources are never overwritten,
@@ -1369,8 +1547,8 @@ def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path],
         if edit.kind == 'shape':
             shape_edits.append(edit)
             continue
-        if edit.kind == 'badge':
-            continue  # display only; it follows its model
+        if edit.kind in ('badge', 'navmesh'):
+            continue  # display only (a navmesh is rebuilt from collision when saving)
         if edit.kind == 'area':
             area_edits.append(edit)
             continue
@@ -1492,6 +1670,15 @@ def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path],
             item.body = resources.encode_entity_spec(root)
             changed.add(entity_key)
 
+    navmesh_note = ''
+    if level_folder is None and targets:
+        # Without a level folder, the folder of the group that holds the navmesh is the level.
+        level_folder = next((Path(path).parent for path in targets
+                             if path.endswith('_statics.group.bin')), None)
+    if level_folder is not None and (changed or force_navmesh):
+        for source in targets:
+            load(source)
+        navmesh_note = _update_navmesh(parsed, Path(level_folder).resolve(), changed)
     written = []
     for source, output in targets.items():
         group_changed = any(key[0] == source for key in changed)
@@ -1506,7 +1693,7 @@ def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path],
         temporary.replace(output)
         written.append(str(output))
     total = sum(totals.values())
-    return ExportReport(len(changed), total - len(changed), tuple(written))
+    return ExportReport(len(changed), total - len(changed), tuple(written), navmesh_note)
 
 
 def export_group(source: str | Path, output: str | Path,
@@ -1583,10 +1770,17 @@ def mod_assets_folder(client_root: str | Path, mod_id: str, create: bool = False
     return mod / 'assets'
 
 
-def export_to_mod(edits: list[SceneEdit], client_root: str | Path, mod_id: str) -> ExportReport:
-    """Write every changed group into a client mod, under its game file name."""
+def export_to_mod(edits: list[SceneEdit], client_root: str | Path, mod_id: str, *,
+                  level_folder: str | Path | None = None, sources=(),
+                  force_navmesh: bool = False) -> ExportReport:
+    """Write every changed group into a client mod, under its game file name.
+
+    *level_folder* is the game's level folder (for the navmesh, which is always rebuilt from the
+    game's original); *sources* adds groups to consider beyond those the edits mention."""
     assets = mod_assets_folder(client_root, mod_id, create=True)
-    sources = sorted({path for edit in edits
-                      for path in (edit.source_group, edit.instance_source_group) if path})
-    return export_groups(edits, {path: assets / Path(path).name for path in sources},
-                         replaceable=assets)
+    paths = sorted({path for edit in edits
+                    for path in (edit.source_group, edit.instance_source_group) if path}
+                   | {str(path) for path in sources})
+    return export_groups(edits, {path: assets / Path(path).name for path in paths},
+                         replaceable=assets, level_folder=level_folder,
+                         force_navmesh=force_navmesh)
