@@ -314,7 +314,7 @@ with tempfile.TemporaryDirectory() as directory:
     preferences = bpy.context.preferences.addons['boz_redux'].preferences
     preferences.client_root = str(client)
     assert bpy.ops.boz.save_to_mod() == {'FINISHED'}
-    assert (client / 'mods' / 'blender_edits' / 'mod.toml').is_file()
+    assert (client / 'mods' / 'developer' / 'mod.toml').is_file()
     clear_scene()
     assert bpy.ops.boz.import_level(directory=str(level)) == {'FINISHED'}
     crate = next(obj for obj in boz_objects() if obj['boz_kind'] == 'placed_model')
@@ -325,5 +325,43 @@ with tempfile.TemporaryDirectory() as directory:
     assert bpy.ops.boz.import_level(directory=str(level)) == {'FINISHED'}
     crate = next(obj for obj in boz_objects() if obj['boz_kind'] == 'placed_model')
     assert abs(crate.location.z - 8.0) < 1e-5, tuple(crate.location)
+
+    # Build & Run: saves, writes the one-shot autostart request and starts the client.
+    fake = client / 'runtime' / 'scripts'
+    fake.mkdir(parents=True)
+    started = directory / 'started.txt'
+    (fake / 'run-desktop.sh').write_text(f'echo "$@" > {started}\n')
+    crate = next(obj for obj in boz_objects() if obj['boz_kind'] == 'placed_model')
+    crate.location.z += 1.0
+    try:
+        bpy.ops.boz.build_and_run()
+        raise AssertionError('Build & Run must need the test mod')
+    except RuntimeError as exc:
+        assert 'test mod' in str(exc), exc
+    developer = client / 'mods' / 'developer'
+    (developer / 'scripts' / 'boz').mkdir(parents=True)
+    (developer / 'mod.toml').write_text('id = "developer"\nname = "Developer"\n')
+    (developer / 'scripts' / 'boz' / 'levels.lua').write_text('return {}\n')
+    (client / 'saves' / 'mods').mkdir(parents=True)
+    (client / 'saves' / 'mods' / 'developer.cfg').write_text('open=b:true\nautostart_level=s:old\n')
+    # An older edit mod that loads later and replaces the same group would hide the new save.
+    stale = client / 'mods' / 'zz_old_edits'
+    (stale / 'assets').mkdir(parents=True)
+    (stale / 'mod.toml').write_text('id = "zz_old_edits"\n')
+    (stale / 'assets' / 'test_statics.group.bin').write_bytes(b'old')
+    (client / 'client.ini').write_text('[display]\nfullscreen = false\n[mods]\norder = developer\n')
+    assert bpy.ops.boz.build_and_run() == {'FINISHED'}
+    ini = (client / 'client.ini').read_text()
+    assert 'order = zz_old_edits, developer' in ini, ini
+    assert 'fullscreen = false' in ini
+    import time
+    for _ in range(50):
+        if started.exists():
+            break
+        time.sleep(0.1)
+    assert started.read_text().strip() == str(client), started.read_text()
+    assert (client / 'saves' / 'mods' / 'developer.cfg').read_text() == \
+        'open=b:true\nautostart_level=s:test\n'
+    assert 'Saved' in bpy.context.scene['boz_last_report']
     addon_utils.disable('boz_redux')
     print('BOZ_BLENDER_HEADLESS_OK')

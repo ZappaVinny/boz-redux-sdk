@@ -186,7 +186,7 @@ Not supported yet:
 ## Save, reload and play
 
 The sidebar's **Client** field is your BOZ Redux client folder (set it once; Blender remembers it)
-and **Mod** names the mod your edits go into (`blender_edits` by default).
+and **Mod** names the mod your edits go into (the Developer mod by default).
 
 1. **Validate BOZ scene** reports non-triangle faces, empty geometry, duplicated identities,
    changed parents and objects from an older add-on version.
@@ -202,6 +202,20 @@ and **Mod** names the mod your edits go into (`blender_edits` by default).
 Every unknown section and unsupported resource body stays byte-identical. Editing the geometry of
 a model that lives in the shared `ingame` group saves a new `ingame.group.bin` in the mod; moving
 it changes only the group that places it.
+
+**Build & Run** saves to your mod and starts the game straight into the level. The sidebar's
+**Test with** mod (the Developer mod by default) does the starting: Build & Run stores the level
+in that mod's settings, and the mod's `boz.levels.autostart()` runs the front end's `StartLevel`
+console command once the menu is up, then clears the request, so a normal launch still shows the
+menu. Any mod can be the test mod if it calls `levels.autostart()` (see the
+[standard library](standard-library.md)). The game's output goes to `boz-log.txt` in the client
+folder. Build & Run refuses to start while the game is already running, or when the test mod is
+missing or switched off. When two enabled mods replace the same file, the one loaded later wins;
+if another mod would hide your edits, Build & Run moves your mod to the end of `client.ini`'s
+`[mods] order` (the launcher's Mods tab shows the same list) and says so.
+
+The arrow buttons next to **Mod** and **Test with** list the mods already in the client; editing
+an existing mod is just choosing it there.
 
 Under **Files**, **Import native group** opens a single `.group.bin`, **Export edited level** writes
 changed groups into any folder (for example an SDK project's `assets/`), and **Export edited

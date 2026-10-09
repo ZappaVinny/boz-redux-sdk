@@ -10,6 +10,11 @@ local console = require("boz.console")
 local player = require("boz.player")
 local fly = require("boz.fly")
 local rounds = require("boz.rounds")
+local levels = require("boz.levels")
+
+-- The Developer mod is the default test runner: the Blender add-on's Build & Run asks it to start
+-- the level just saved, once.
+levels.autostart()
 
 local MAX_LINES = 2000
 local MAX_ROWS = 300          -- variable rows shown at once; type in the filter to narrow

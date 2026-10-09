@@ -22,6 +22,7 @@ Functions that need a Zombies match return `nil` (or `false`) outside one instea
 - **Menus and text**: [boz.pause_settings](#bozpausesettings), [boz.text](#boztext)
 - **Game UI building blocks**: [boz.iwui](#boziwui), [boz.frontend](#bozfrontend), [boz.flash](#bozflash)
 - **Low-level helpers**: [boz.components](#bozcomponents), [boz.hash](#bozhash), [boz.swf](#bozswf), [boz.avm1](#bozavm1)
+- **Other**: [boz.levels](#bozlevels)
 
 ## Gameplay
 
@@ -362,3 +363,24 @@ A builder collects actions. Values are pushed with :push(...) (strings, numbers,
 | `Builder:get(path)` | Pushes the value of a dotted path, e.g. b:get("_root.Options.settings"). |
 | `Builder:call_method(push_obj, method, ...)` | Calls obj.method(args...) where obj is pushed by push_obj(b); leaves the result on the stack. |
 | `Builder:trace(text, path)` | trace(text .. value-of-path): writes a line to the Flash log (see boz.flash.capture_log). |
+
+## Other
+
+### boz.levels
+
+Start levels (Zombies maps) without going through the menus.
+
+```lua
+levels.start("kino")      levels.autostart()
+```
+
+<details><summary>How it works</summary>
+
+the front end's StartLevel console command starts a single-player match on a level by name (it sends the game's own start-game event). The command only works once the front end is running, so levels.start waits for the Flash menu's first ActionScript call and a short settling time. levels.autostart reads a one-shot request from the mod's settings: the Blender add-on's Build & Run writes it to start the level just saved.
+
+</details>
+
+| Function | Description |
+| --- | --- |
+| `levels.start(name)` | Starts a single-player match on the level (e.g. "kino") once the front end is up. Call it while the mod's script starts; the match starts after the main menu appears. |
+| `levels.autostart()` | Starts the level a tool asked for, once: reads and clears the mod's "autostart_level" setting (the Blender add-on's Build & Run writes it). Returns the level name or nil. |

@@ -6,6 +6,9 @@ import struct
 from pathlib import Path
 
 import json
+import os
+import shutil
+import subprocess
 import uuid
 
 import bmesh
@@ -61,12 +64,17 @@ class BOZ_AP_preferences(AddonPreferences):
         name="Client folder", subtype="DIR_PATH",
         description="Your BOZ Redux client folder (the one with mods/ and assets/)")
     mod_id: StringProperty(
-        name="Mod", default="blender_edits",
+        name="Mod", default="developer",
         description="Mod that Save to mod writes and Import level folder can include")
+    run_mod: StringProperty(
+        name="Test with", default="developer",
+        description="Mod that Build & Run asks to start the level (the Developer mod by default; "
+                    "it needs the standard library's boz.levels)")
 
     def draw(self, context):
         self.layout.prop(self, "client_root")
         self.layout.prop(self, "mod_id")
+        self.layout.prop(self, "run_mod")
 
 
 def _settings(context):
@@ -1017,6 +1025,217 @@ class BOZ_OT_save_to_mod(Operator):
         return {"FINISHED"}
 
 
+def _client_mods(client_root):
+    """(id, name) of every mod folder in the client."""
+    mods = []
+    folder = Path(client_root).expanduser() / "mods"
+    if folder.is_dir():
+        for path in sorted(folder.iterdir()):
+            manifest = path / "mod.toml"
+            if not manifest.is_file():
+                continue
+            values = {}
+            for line in manifest.read_text(errors="ignore").splitlines():
+                key, _, value = line.partition("=")
+                values[key.strip()] = value.strip().strip('"')
+            mods.append((values.get("id") or path.name, values.get("name") or path.name))
+    return mods
+
+
+def _disabled_mods(client_root):
+    """Mod ids the client's client.ini switches off ([mods] disabled)."""
+    ini = Path(client_root).expanduser() / "client.ini"
+    section = ""
+    if ini.is_file():
+        for line in ini.read_text(errors="ignore").splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                section = line.strip("[]").lower()
+            elif section == "mods" and line.startswith("disabled"):
+                return {value.strip() for value in line.partition("=")[2].split(",") if value.strip()}
+    return set()
+
+
+def _load_order(client_root):
+    """Enabled mod ids in the order the client loads them (later mods win): the [mods] order
+    list first, then unlisted mods alphabetically, as runtime/src/mods.c sorts them."""
+    root = Path(client_root).expanduser()
+    order = []
+    ini = root / "client.ini"
+    section = ""
+    if ini.is_file():
+        for line in ini.read_text(errors="ignore").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("["):
+                section = stripped.strip("[]").lower()
+            elif section == "mods" and stripped.startswith("order"):
+                order = [value.strip() for value in stripped.partition("=")[2].split(",")
+                         if value.strip()]
+    disabled = _disabled_mods(root)
+    present = [mod_id for mod_id, _ in _client_mods(root) if mod_id not in disabled]
+    listed = [mod_id for mod_id in order if mod_id in present]
+    return listed + sorted((m for m in present if m not in listed), key=str.lower), order
+
+
+def _mod_assets(client_root, mod_id):
+    folder = Path(client_root).expanduser() / "mods" / mod_id / "assets"
+    return {path.name.lower() for path in folder.rglob("*") if path.is_file()} if folder.is_dir() \
+        else set()
+
+
+def _make_mod_win(client_root, mod_id) -> str:
+    """Move mod_id to the end of the load order when a later mod replaces the same files.
+    Returns what was done, for the status line."""
+    root = Path(client_root).expanduser()
+    loaded, order = _load_order(root)
+    if mod_id not in loaded:
+        return ""
+    ours = _mod_assets(root, mod_id)
+    later = [other for other in loaded[loaded.index(mod_id) + 1:]
+             if ours & _mod_assets(root, other)]
+    if not later:
+        return ""
+    new_order = [m for m in order if m != mod_id]
+    new_order += [m for m in loaded if m not in new_order and m != mod_id] + [mod_id]
+    ini = root / "client.ini"
+    lines = ini.read_text(errors="ignore").splitlines() if ini.is_file() else []
+    section, replaced, out = "", False, []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            if section == "mods" and not replaced:
+                out.append(f"order = {', '.join(new_order)}")
+                replaced = True
+            section = stripped.strip("[]").lower()
+        elif section == "mods" and stripped.startswith("order"):
+            line, replaced = f"order = {', '.join(new_order)}", True
+        out.append(line)
+    if not replaced:
+        if section != "mods":
+            out.append("[mods]")
+        out.append(f"order = {', '.join(new_order)}")
+    ini.write_text("\n".join(out) + "\n")
+    return f"moved {mod_id} after {', '.join(later)} in the load order so its files win"
+
+
+def _set_mod_setting(saves, mod_id, key, value):
+    """Set one string value in a mod's settings file, keeping its other settings."""
+    path = Path(saves) / "mods" / f"{mod_id}.cfg"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    if path.is_file():
+        lines = [line for line in path.read_text(errors="ignore").splitlines()
+                 if line and not line.startswith(f"{key}=")]
+    lines.append(f"{key}=s:{value}")
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _mod_items(self, context):
+    settings = _settings(context)
+    if settings is None or not settings.client_root:
+        return [("", "Set the client folder first", "")]
+    return [(mod_id, f"{name} ({mod_id})", "") for mod_id, name in _client_mods(settings.client_root)] \
+        or [("", "No mods in this client", "")]
+
+
+class BOZ_OT_choose_mod(Operator):
+    bl_idname = "boz.choose_mod"
+    bl_label = "Choose mod"
+    bl_description = "Pick one of the mods in the client's mods folder"
+    bl_property = "mod"
+
+    mod: EnumProperty(items=_mod_items)
+    target: StringProperty(default="mod_id", options={"HIDDEN"})
+
+    def invoke(self, context, event):
+        context.window_manager.invoke_search_popup(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        settings = _settings(context)
+        if settings is None or not self.mod:
+            return {"CANCELLED"}
+        setattr(settings, self.target, self.mod)
+        return {"FINISHED"}
+
+
+def _client_launch(client_root: Path):
+    """The command that starts the client from its root, or None."""
+    script = client_root / "runtime" / "scripts" / "run-desktop.sh"
+    if script.is_file():
+        return ["bash", str(script), str(client_root)]
+    for name in ("codboz_s3e_loader", "codboz_s3e_loader.exe"):
+        loader = client_root / name
+        if loader.is_file():
+            image = client_root / "assets" / "boz.s3e.unpacked"
+            return [str(loader), "--root", str(client_root), "--run", str(image)]
+    return None
+
+
+def _game_running() -> bool:
+    if not shutil.which("pgrep"):
+        return False
+    return subprocess.run(["pgrep", "-f", "codboz_s3e_loader"], capture_output=True).returncode == 0
+
+
+class BOZ_OT_build_and_run(Operator):
+    bl_idname = "boz.build_and_run"
+    bl_label = "Build & Run"
+    bl_description = ("Save to your mod, then start the game straight into this level with the "
+                      "test mod (Developer by default); the game's output goes to boz-log.txt")
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        try:
+            client_root, _ = _mod_target(context)
+        except ValueError as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        root = Path(client_root).expanduser().resolve()
+        folder = context.scene.get("boz_level_folder")
+        if not folder:
+            self.report({"ERROR"}, "Build & Run needs a level imported with Import level folder")
+            return {"CANCELLED"}
+        if _game_running():
+            self.report({"ERROR"}, "The game is already running; close it first")
+            return {"CANCELLED"}
+        command = _client_launch(root)
+        if command is None:
+            self.report({"ERROR"}, f"No BOZ Redux client found in {root}")
+            return {"CANCELLED"}
+        runner = _settings(context).run_mod or "developer"
+        runner_dir = root / "mods" / runner
+        if not (runner_dir / "mod.toml").is_file():
+            self.report({"ERROR"}, f"The test mod '{runner}' is not in {root / 'mods'}")
+            return {"CANCELLED"}
+        if not (runner_dir / "scripts" / "boz" / "levels.lua").is_file():
+            self.report({"ERROR"}, f"The test mod '{runner}' has no boz.levels; copy the current "
+                        "standard library into its scripts/boz (the Developer mod has it)")
+            return {"CANCELLED"}
+        if runner in _disabled_mods(root):
+            self.report({"ERROR"}, f"The test mod '{runner}' is switched off; enable it in the "
+                        "launcher's Mods tab")
+            return {"CANCELLED"}
+        if bpy.ops.boz.save_to_mod() != {"FINISHED"}:
+            return {"CANCELLED"}
+        level = Path(folder).name
+        saves = Path(os.environ.get("BOZ_SAVES") or root / "saves")
+        _set_mod_setting(saves, runner, "autostart_level", level)
+        ordering = _make_mod_win(root, _settings(context).mod_id)
+        old = root / "mods" / "boz_autostart"  # managed mod of an earlier add-on build
+        if (old / "mod.toml").is_file() and "Blender add-on" in (old / "mod.toml").read_text():
+            shutil.rmtree(old)
+        log = open(root / "boz-log.txt", "w")
+        subprocess.Popen(command, cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+        message = f"{context.scene.get('boz_last_report', '')}; {runner} starts {level}"
+        if ordering:
+            message += f"; {ordering}"
+        context.scene["boz_last_report"] = message
+        self.report({"INFO"}, message)
+        return {"FINISHED"}
+
+
 class BOZ_OT_rebuild_navmesh(Operator):
     bl_idname = "boz.rebuild_navmesh"
     bl_label = "Rebuild navmesh"
@@ -1086,7 +1305,11 @@ class BOZ_PT_map_tools(Panel):
         if settings is not None:
             box = layout.box()
             box.prop(settings, "client_root", text="Client")
-            box.prop(settings, "mod_id", text="Mod")
+            for field, label in (("mod_id", "Mod"), ("run_mod", "Test with")):
+                row = box.row(align=True)
+                row.prop(settings, field, text=label)
+                pick = row.operator(BOZ_OT_choose_mod.bl_idname, text="", icon="DOWNARROW_HLT")
+                pick.target = field
         layout.operator(BOZ_OT_import_level.bl_idname, icon="FILE_FOLDER")
         layout.operator(BOZ_OT_validate_scene.bl_idname, icon="CHECKMARK")
         row = layout.row(align=True)
@@ -1096,6 +1319,7 @@ class BOZ_PT_map_tools(Panel):
         if pending:
             layout.label(text=f"{pending} deletions waiting for save", icon="INFO")
         column = layout.column(align=True)
+        column.operator(BOZ_OT_build_and_run.bl_idname, icon="PLAY")
         column.operator(BOZ_OT_save_to_mod.bl_idname, icon="FILE_TICK")
         column.operator(BOZ_OT_rebuild_navmesh.bl_idname, icon="MOD_SMOOTH")
         column.enabled = bool(settings is not None and settings.client_root)
@@ -1119,5 +1343,6 @@ class BOZ_PT_map_tools(Panel):
 
 
 CLASSES = (BOZ_AP_preferences, BOZ_OT_import_group, BOZ_OT_import_level, BOZ_OT_export_group,
-           BOZ_OT_export_level, BOZ_OT_save_to_mod, BOZ_OT_rebuild_navmesh,
+           BOZ_OT_export_level, BOZ_OT_save_to_mod, BOZ_OT_build_and_run, BOZ_OT_rebuild_navmesh,
+           BOZ_OT_choose_mod,
            BOZ_OT_duplicate_entity, BOZ_OT_delete_entity, BOZ_OT_validate_scene, BOZ_PT_map_tools)

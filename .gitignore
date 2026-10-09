@@ -15,3 +15,6 @@ build/
 # Private notes (design history, RE notebooks, assistant workflow)
 docs/internal/
 CLAUDE.local.md
+
+# Map edits saved into the reference mods from Blender are game data: never commit them.
+mods/*/assets/
