@@ -257,6 +257,134 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(area.links[0]['targets'], [iw_hash('Spawn_B')])
 
 
+class CopyDeleteTests(unittest.TestCase):
+    """Duplicating and deleting entities (resources are created and removed)."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.path = Path(self.directory.name) / 'level.group.bin'
+        crate = placed('crate', (100.0, 0.0, 0.0))
+        crate.components.append(resources.Component(
+            iw_hash('CIsComponentSpec'), 0, iw_hash('CIsNamed'),
+            [reflect.Blob(iw_hash('CIsNamed'), [typed('string', 'name', 'Crate', 'CIsNamed')])]))
+        crate.children.append((iw_hash('CIsEntitySpec'), 0,
+                               named('Crate_Light', [], (0.0, 50.0, 0.0))))
+        door = named('Door', [('CDoor', [('unsigned int', 'powerSwitch', iw_hash('Power'))])])
+        area = reflect.Blob(iw_hash('CArea'), [u32_list('CArea', 'm_SpawnPoints', [iw_hash('Spawn_A')])])
+        vertices = [(100.0, 0.0, 0.0), (110.0, 0.0, 0.0), (100.0, 10.0, 0.0), (0.0, 0.0, 500.0),
+                    (10.0, 0.0, 500.0), (0.0, 10.0, 500.0)]
+        write_group(self.path, [model_type('crate'), spec_type(
+            ('crate', crate), ('power', named('Power', [('CPowerSwitch', [])])), ('door', door),
+            ('spawn', named('Spawn_A', [('CSpawnPoint', [('bool', 'm_StartActive', True)])])),
+            collision_type(vertices, [0, 1, 2, 3, 4, 5])),
+            group.ResourceType(iw_hash('CArea'), 0, 1, [group.Resource(
+                iw_hash('atrium'), iw_hash('atrium'), resources.encode_reflected(area))])])
+        self.out = Path(self.directory.name) / 'out.group.bin'
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def edits(self, imported):
+        edits = edits_for(imported)
+        chain = blender_scene._chains(imported.meshes)
+        for edit, item in zip(edits, imported.meshes):
+            edit.collision_triangles = item.collision_triangles
+            edit.shape, edit.shape_component, edit.links = item.shape, item.shape_component, item.links
+            if item.kind == 'collision_piece':
+                edit.vertices = [blender_scene._to_world(chain(item), v) for v in item.vertices]
+        return edits
+
+    def copy_of(self, imported, edits, item, copy_id, offset):
+        """Mimic the add-on: copy an object and its descendants, moving the copy by *offset*."""
+        root_path = list(item.instance_path)
+        result = []
+        keys = {item.key}
+        for other, edit in zip(imported.meshes, edits):
+            if other.key in keys or other.parent_key in keys:
+                keys.add(other.key)
+                clone = blender_scene.SceneEdit(**{**edit.__dict__})
+                relative = list(other.instance_path[len(root_path):]) if other.kind != 'collision_piece' else []
+                clone.copy = {'id': copy_id, 'group': item.instance_source_group,
+                              'index': item.instance_resource_index,
+                              'hash': item.instance_resource_hash, 'root_path': root_path,
+                              'path': relative}
+                if other is item:
+                    clone.location = tuple(clone.location[i] + offset[i] for i in range(3))
+                if other.kind == 'collision_piece':
+                    clone.vertices = [tuple(v[i] + offset[i] for i in range(3)) for v in clone.vertices]
+                result.append(clone)
+        return result
+
+    def reload(self):
+        return blender_scene.import_group(self.out)
+
+    def test_copy_entity_with_collision_and_unique_name(self):
+        imported = blender_scene.import_group(self.path)
+        edits = self.edits(imported)
+        crate = next(item for item in imported.meshes if item.kind == 'placed_model')
+        edits += self.copy_of(imported, edits, crate, 'c1', (0.0, 300.0, 0.0))
+        report = blender_scene.export_group(self.path, self.out, edits)
+        self.assertEqual(report.added, 1)
+        rebuilt = self.reload()
+        crates = [item for item in rebuilt.meshes if item.kind == 'placed_model']
+        self.assertEqual(sorted(item.location[1] for item in crates), [0.0, 300.0])
+        names = sorted(item.display_name.split('"')[1] for item in rebuilt.meshes
+                       if item.kind == 'entity' and '"' in item.display_name)
+        self.assertIn('Crate_Light_2', names)  # the child's unique name was renamed too
+        pieces = [item for item in rebuilt.meshes if item.kind == 'collision_piece']
+        self.assertEqual(len(pieces), 2)  # the copy brought its collision triangle along
+
+    def test_copy_spawn_joins_area_and_child_copy(self):
+        imported = blender_scene.import_group(self.path)
+        edits = self.edits(imported)
+        spawn = next(item for item in imported.meshes if item.category == 'spawn')
+        light = next(item for item in imported.meshes if item.instance_path == (0,))
+        edits += self.copy_of(imported, edits, spawn, 's1', (50.0, 0.0, 0.0))
+        edits += self.copy_of(imported, edits, light, 'l1', (0.0, 0.0, 20.0))
+        blender_scene.export_group(self.path, self.out, edits)
+        rebuilt = self.reload()
+        area = next(item for item in rebuilt.meshes if item.kind == 'area')
+        self.assertEqual(area.links[0]['targets'], [iw_hash('Spawn_A'), iw_hash('Spawn_A_2')])
+        children = [item for item in rebuilt.meshes if item.instance_path and len(item.instance_path) == 1]
+        self.assertEqual(len(children), 2)
+
+    def test_delete_entity_area_and_collision(self):
+        imported = blender_scene.import_group(self.path)
+        crate = next(item for item in imported.meshes if item.kind == 'placed_model')
+        spawn = next(item for item in imported.meshes if item.category == 'spawn')
+        piece = next(item for item in imported.meshes if item.kind == 'collision_piece')
+        keep = [(item, edit) for item, edit in zip(imported.meshes, self.edits(imported))
+                if item.key not in {crate.key, spawn.key, piece.key}
+                and item.parent_key not in {crate.key, piece.key}]
+        deletions = [
+            {'group': crate.instance_source_group, 'index': crate.instance_resource_index,
+             'hash': crate.instance_resource_hash, 'path': [],
+             'collision': [{'group': piece.source_group, 'index': piece.resource_index,
+                            'hash': piece.resource_hash, 'triangles': piece.collision_triangles}]},
+            {'group': spawn.instance_source_group, 'index': spawn.instance_resource_index,
+             'hash': spawn.instance_resource_hash, 'path': []}]
+        report = blender_scene.export_groups([edit for _, edit in keep], {self.path: self.out},
+                                             deletions=deletions)
+        self.assertEqual(report.removed, 2)
+        rebuilt = self.reload()
+        self.assertFalse(any(item.kind == 'placed_model' for item in rebuilt.meshes))
+        self.assertFalse(any(item.category == 'spawn' for item in rebuilt.meshes))
+        area = next(item for item in rebuilt.meshes if item.kind == 'area')
+        self.assertEqual(area.links[0]['targets'], [])
+        world = next(item for item in rebuilt.meshes if item.kind == 'collision')
+        self.assertEqual(len(world.faces), 1)  # only the triangle no model owned
+
+    def test_delete_linked_entity_is_refused(self):
+        imported = blender_scene.import_group(self.path)
+        power = next(item for item in imported.meshes if item.category == 'power')
+        edits = [edit for item, edit in zip(imported.meshes, self.edits(imported))
+                 if item.key != power.key]
+        with self.assertRaisesRegex(ValueError, 'powerSwitch'):
+            blender_scene.export_groups(edits, {self.path: self.out}, deletions=[
+                {'group': power.instance_source_group, 'index': power.instance_resource_index,
+                 'hash': power.instance_resource_hash, 'path': []}])
+
+
 class SceneTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

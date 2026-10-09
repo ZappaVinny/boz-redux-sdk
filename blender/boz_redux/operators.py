@@ -6,6 +6,7 @@ import struct
 from pathlib import Path
 
 import json
+import uuid
 
 import bmesh
 import bpy
@@ -713,6 +714,7 @@ def _scene_edits(context):
             shape=obj.get("boz_shape", ""),
             shape_component=obj.get("boz_shape_component", -1),
             links=view.links_of(obj),
+            copy=json.loads(obj.get("boz_copy", "{}")),
             **geometry,
         ))
     return edits
@@ -751,7 +753,8 @@ class BOZ_OT_export_group(Operator, ExportHelper):
             if len(groups) != 1:
                 raise ValueError("this scene uses several groups; use Export edited level")
             output = self.filepath if self.filepath.endswith(SUFFIX) else self.filepath + SUFFIX
-            report = blender_scene.export_group(groups[0], output, edits)
+            report = blender_scene.export_groups(edits, {groups[0]: output}, write_unchanged=True,
+                                                 deletions=_deletions(context.scene))
         except (OSError, ValueError, IndexError, struct.error) as exc:
             context.scene["boz_last_report"] = f"Export failed: {exc}"
             self.report({"ERROR"}, str(exc))
@@ -779,8 +782,13 @@ class BOZ_OT_export_level(Operator):
         try:
             edits = _scene_edits(context)
             folder = Path(self.directory)
-            outputs = {path: folder / Path(path).name for path in _scene_groups(edits)}
-            report = blender_scene.export_groups(edits, outputs)
+            scene_groups = [line for line in context.scene.get("boz_source_groups", "").split("\n")
+                            if line]
+            outputs = {path: folder / Path(path).name
+                       for path in sorted(set(_scene_groups(edits)) | set(scene_groups))}
+            report = blender_scene.export_groups(edits, outputs,
+                                                 level_folder=context.scene.get("boz_level_folder")
+                                                 or None, deletions=_deletions(context.scene))
         except (OSError, ValueError, IndexError, struct.error) as exc:
             context.scene["boz_last_report"] = f"Export failed: {exc}"
             self.report({"ERROR"}, str(exc))
@@ -789,6 +797,158 @@ class BOZ_OT_export_level(Operator):
         message = f"Exported {report.edited} edits to {names}"
         context.scene["boz_last_report"] = message
         self.report({"INFO"}, message)
+        return {"FINISHED"}
+
+
+def _deletions(scene):
+    try:
+        return json.loads(scene.get("boz_deletions", "[]"))
+    except ValueError:
+        return []
+
+
+def _reload_level(context) -> bool:
+    folder = context.scene.get("boz_level_folder")
+    if not folder:
+        return False
+    for obj in [obj for obj in context.scene.objects if "boz_kind" in obj]:
+        bpy.data.objects.remove(obj)
+    return bpy.ops.boz.import_level(directory=folder, include_mod=True) == {"FINISHED"}
+
+
+def _boz_descendants(scene, root):
+    """The object and every BOZ object below it (by native parent keys)."""
+    keys, result = {root["boz_key"]}, [root]
+    changed = True
+    while changed:
+        changed = False
+        for obj in scene.objects:
+            if obj not in result and obj.get("boz_parent_key") in keys:
+                result.append(obj)
+                keys.add(obj["boz_key"])
+                changed = True
+    return result
+
+
+def _entity_roots(context):
+    """Selected entity objects, without those whose BOZ ancestor is also selected."""
+    picked = [obj for obj in context.selected_objects
+              if obj.get("boz_kind") in {"placed_model", "entity"}]
+    keys = {obj["boz_key"] for obj in picked}
+    by_key = {obj.get("boz_key"): obj for obj in context.scene.objects if obj.get("boz_key")}
+    roots = []
+    for obj in picked:
+        parent, nested = obj.get("boz_parent_key"), False
+        while parent:
+            if parent in keys:
+                nested = True
+                break
+            parent = by_key[parent].get("boz_parent_key") if parent in by_key else ""
+        if not nested:
+            roots.append(obj)
+    return roots
+
+
+class BOZ_OT_duplicate_entity(Operator):
+    bl_idname = "boz.duplicate_entity"
+    bl_label = "Duplicate"
+    bl_description = ("Copy the selected entities with everything attached (children, collision, "
+                      "shapes, links); saving adds them to the level")
+    bl_options = {"REGISTER", "UNDO"}
+
+    def invoke(self, context, event):
+        result = self.execute(context)
+        if result == {"FINISHED"}:
+            bpy.ops.transform.translate("INVOKE_DEFAULT")
+        return result
+
+    def execute(self, context):
+        roots = _entity_roots(context)
+        if not roots:
+            self.report({"ERROR"}, "Select a model or marker to duplicate")
+            return {"CANCELLED"}
+        if any("boz_copy" in obj for obj in roots):
+            self.report({"ERROR"}, "Save before duplicating a copy that has not been saved yet")
+            return {"CANCELLED"}
+        copies = []
+        for root in roots:
+            copy_id = uuid.uuid4().hex[:8]
+            root_path = [int(v) for v in root.get("boz_instance_path", "").split("/") if v]
+            originals = _boz_descendants(context.scene, root)
+            mapping = {}
+            for obj in originals:
+                clone = obj.copy()  # shares mesh data, like the game's instances
+                for collection in obj.users_collection:
+                    collection.objects.link(clone)
+                own_path = [int(v) for v in obj.get("boz_instance_path", "").split("/") if v]
+                clone["boz_key"] = f'{obj["boz_key"]}#{copy_id}'
+                clone["boz_copy"] = json.dumps({
+                    "id": copy_id, "group": root.get("boz_instance_source_group", ""),
+                    "index": root.get("boz_instance_resource_index"),
+                    "hash": int(root["boz_instance_resource_hash"], 0),
+                    "root_path": root_path, "path": own_path[len(root_path):]})
+                if "boz_link_id" in clone:
+                    del clone["boz_link_id"]  # its new name is only known after saving
+                mapping[obj["boz_key"]] = clone
+            for obj in originals:
+                clone = mapping[obj["boz_key"]]
+                parent_key = obj.get("boz_parent_key", "")
+                if obj is not root and parent_key in mapping:
+                    clone["boz_parent_key"] = mapping[parent_key]["boz_key"]
+                    clone.parent = mapping[parent_key]
+                    clone.matrix_parent_inverse = Matrix.Identity(4)
+            copies.append(mapping[root["boz_key"]])
+        for obj in context.selected_objects:
+            obj.select_set(False)
+        for obj in copies:
+            obj.select_set(True)
+        context.view_layer.objects.active = copies[-1]
+        self.report({"INFO"}, f"Duplicated {len(copies)} entities; move them, then save")
+        return {"FINISHED"}
+
+
+class BOZ_OT_delete_entity(Operator):
+    bl_idname = "boz.delete_entity"
+    bl_label = "Delete"
+    bl_description = ("Delete the selected entities with everything attached; refused while "
+                      "power, trap or door links still point at them")
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        roots = _entity_roots(context)
+        if not roots:
+            self.report({"ERROR"}, "Select a model or marker to delete")
+            return {"CANCELLED"}
+        doomed = [obj for root in roots for obj in _boz_descendants(context.scene, root)]
+        names = {obj["boz_link_id"] for obj in doomed if obj.get("boz_link_id")}
+        for other in context.scene.objects:
+            if other in doomed or "boz_links" not in other:
+                continue
+            for link in view.links_of(other):
+                if link["kind"] != "member" and any(f"0x{t:08x}" in names for t in link["targets"]):
+                    self.report({"ERROR"}, f"{other.name.split(':', 1)[-1]} still has a "
+                                f"{link['field']} link to it; remove that link first")
+                    return {"CANCELLED"}
+        deletions = _deletions(context.scene)
+        for root in roots:
+            if "boz_copy" in root:
+                continue  # an unsaved copy simply disappears
+            pieces = []
+            for obj in _boz_descendants(context.scene, root):
+                if obj.get("boz_kind") == "collision_piece":
+                    pieces.append({"group": obj["boz_source_group"],
+                                   "index": int(obj["boz_resource_index"]),
+                                   "hash": int(obj["boz_resource_hash"], 0),
+                                   "triangles": _face_ints(obj, "boz_triangle") or []})
+            deletions.append({"group": root["boz_instance_source_group"],
+                              "index": int(root["boz_instance_resource_index"]),
+                              "hash": int(root["boz_instance_resource_hash"], 0),
+                              "path": [int(v) for v in root.get("boz_instance_path", "").split("/") if v],
+                              "collision": pieces})
+        context.scene["boz_deletions"] = json.dumps(deletions)
+        for obj in doomed:
+            bpy.data.objects.remove(obj)
+        self.report({"INFO"}, f"Deleted {len(roots)} entities; saving removes them from the level")
         return {"FINISHED"}
 
 
@@ -831,7 +991,7 @@ class BOZ_OT_save_to_mod(Operator):
             report = blender_scene.export_to_mod(
                 _scene_edits(context), client_root, mod_id,
                 level_folder=scene.get("boz_level_folder") or None, sources=sources,
-                force_navmesh=self.force_navmesh)
+                force_navmesh=self.force_navmesh, deletions=_deletions(scene))
         except (OSError, ValueError, IndexError, struct.error) as exc:
             context.scene["boz_last_report"] = f"Save failed: {exc}"
             self.report({"ERROR"}, str(exc))
@@ -842,6 +1002,12 @@ class BOZ_OT_save_to_mod(Operator):
             if report.navmesh:
                 message += f"; {report.navmesh}"
                 _refresh_navmesh(context, report.written)
+            if report.added or report.removed:
+                # New and removed entities only get their identities from the saved groups.
+                message += f"; {report.added} added, {report.removed} deleted"
+                context.scene["boz_deletions"] = "[]"
+                if _reload_level(context):
+                    message += "; level reloaded"
         else:
             message = "Nothing changed; mod left as it was"
             if report.navmesh:
@@ -881,7 +1047,8 @@ class BOZ_OT_validate_scene(Operator):
                 obj.get("boz_instance_source_group"),
                 obj.get("boz_instance_resource_index"), obj.get("boz_instance_path"))
             if identity in seen:
-                problems.append(f"{obj.name}: duplicate native resource identity")
+                problems.append(f"{obj.name}: copied with Blender's own duplicate; delete it and "
+                                "use BOZ Redux > Duplicate")
             seen.add(identity)
             if obj.get("boz_schema") != blender_scene.SCHEMA:
                 problems.append(f"{obj.name}: imported by an older add-on; re-import")
@@ -922,6 +1089,12 @@ class BOZ_PT_map_tools(Panel):
             box.prop(settings, "mod_id", text="Mod")
         layout.operator(BOZ_OT_import_level.bl_idname, icon="FILE_FOLDER")
         layout.operator(BOZ_OT_validate_scene.bl_idname, icon="CHECKMARK")
+        row = layout.row(align=True)
+        row.operator(BOZ_OT_duplicate_entity.bl_idname, icon="DUPLICATE")
+        row.operator(BOZ_OT_delete_entity.bl_idname, icon="TRASH")
+        pending = len(_deletions(context.scene))
+        if pending:
+            layout.label(text=f"{pending} deletions waiting for save", icon="INFO")
         column = layout.column(align=True)
         column.operator(BOZ_OT_save_to_mod.bl_idname, icon="FILE_TICK")
         column.operator(BOZ_OT_rebuild_navmesh.bl_idname, icon="MOD_SMOOTH")
@@ -946,5 +1119,5 @@ class BOZ_PT_map_tools(Panel):
 
 
 CLASSES = (BOZ_AP_preferences, BOZ_OT_import_group, BOZ_OT_import_level, BOZ_OT_export_group,
-           BOZ_OT_export_level, BOZ_OT_save_to_mod, BOZ_OT_rebuild_navmesh, BOZ_OT_validate_scene,
-           BOZ_PT_map_tools)
+           BOZ_OT_export_level, BOZ_OT_save_to_mod, BOZ_OT_rebuild_navmesh,
+           BOZ_OT_duplicate_entity, BOZ_OT_delete_entity, BOZ_OT_validate_scene, BOZ_PT_map_tools)

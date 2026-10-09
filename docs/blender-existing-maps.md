@@ -161,9 +161,25 @@ Supported:
 - **Portals:** vertices and sector names.
 - **Navigation connections:** either endpoint.
 
+**Duplicate and delete.** Select models or markers and use **Duplicate** (the copy follows the
+mouse; click to place it) or **Delete** in the sidebar:
+
+- A copy brings everything attached: child entities, its collision piece, shapes, badge and
+  links. Names other entities can refer to get a free suffix (`QuickRevive` becomes
+  `QuickRevive_2`); generic names shared by several entities stay. A copied spawn point, perk
+  machine or teleport point joins the same areas as the original, so it works from the start.
+  Copying a child entity adds another child to the same parent.
+- Delete removes the entity, its children and its collision triangles, and takes it out of every
+  area. It is refused while a power, trap, door-sibling or area-unlock link still points at it;
+  remove those links first. The sidebar shows how many deletions wait for the next save.
+- Saving creates and removes the entities, rebuilds the navmesh around them and reloads the
+  level so the new entities get their final names and identities. Blender's own Shift+D copy is
+  not a BOZ copy; **Validate** reports it.
+
 Not supported yet:
 
 - Adding or removing vertices or faces, applying modifiers, or reassigning model materials.
+- Duplicating a copy before it has been saved.
 - Re-parenting objects. An object must keep the parent it was imported with.
 - Editing Detour navmesh polygons. Their tiles are preserved byte-for-byte.
 

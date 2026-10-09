@@ -274,6 +274,9 @@ class SceneEdit:
     shape: str = ''
     shape_component: int = -1
     links: list[dict] = field(default_factory=list)
+    # A new entity copied in the editor: {'id', 'group', 'index', 'hash', 'root_path', 'path'}.
+    # root_path is the copied node in the source entity spec, path the node within the copy.
+    copy: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -282,6 +285,8 @@ class ExportReport:
     preserved: int
     written: tuple[str, ...] = ()
     navmesh: str = ''  # what happened to the navmesh, for the status line
+    added: int = 0     # entities created by copies
+    removed: int = 0   # entities deleted
 
 
 def _identity(item: group.Resource) -> int:
@@ -807,10 +812,10 @@ def _describe(node: resources.EntitySpec, category: str) -> tuple[str, str]:
     return label, details
 
 
-def _u32_values(raw: bytes) -> list[int] | None:
-    """A u32 or a counted u32 list (std::list<unsigned int> serialisation)."""
-    if len(raw) == 4:
-        return [struct.unpack('<I', raw)[0]]
+def _u32_values(raw: bytes, is_list: bool = True) -> list[int] | None:
+    """A counted u32 list (std::list<unsigned int>), or a single u32 when not *is_list*."""
+    if not is_list:
+        return [struct.unpack('<I', raw)[0]] if len(raw) == 4 else None
     if len(raw) >= 4:
         count = struct.unpack_from('<I', raw)[0]
         if 4 + count * 4 == len(raw):
@@ -826,7 +831,7 @@ def _node_links(node: resources.EntitySpec) -> list[dict]:
             continue
         for prop in component.blob.properties:
             spec = LINK_FIELDS.get((name, _LINK_FIELD_NAMES.get(prop.name_hash, '')))
-            values = _u32_values(prop.raw) if spec else None
+            values = _u32_values(prop.raw, spec[1]) if spec else None
             if values is None:
                 continue
             links.append({'component': number, 'field': _LINK_FIELD_NAMES[prop.name_hash],
@@ -1158,7 +1163,8 @@ def _attach_collision(result: SceneImport) -> None:
     result.meshes.extend(pieces)
 
 
-def _assemble_collision(mesh: collision.CollisionMesh, edits, entity_transform) -> bool:
+def _assemble_collision(mesh: collision.CollisionMesh, edits, entity_transform,
+                        dropped=frozenset()) -> bool:
     """Rebuild a collision mesh from the objects holding its triangles; returns whether it changed.
 
     Positions are native and local to the collision entity. Triangle order, count and indices are
@@ -1167,7 +1173,16 @@ def _assemble_collision(mesh: collision.CollisionMesh, edits, entity_transform) 
     count = len(mesh.indices) // 3
     corners: list[tuple | None] = [None] * count
     materials = bytearray(mesh.materials)
+    added = []  # (corners, material) of triangles from copied pieces
     for edit in edits:
+        if edit.copy:
+            location, rotation, scale = entity_transform
+            local = [from_blender(_to_local([(location, rotation, scale)], vertex))
+                     for vertex in edit.vertices]
+            for number, face in enumerate(edit.faces):
+                material = edit.face_materials[number] if edit.face_materials else 0
+                added.append((tuple(local[vertex] for vertex in face), material))
+            continue
         if edit.kind == 'collision_piece':
             location, rotation, scale = entity_transform
             local = [from_blender(_to_local([(location, rotation, scale)], vertex))
@@ -1188,7 +1203,8 @@ def _assemble_collision(mesh: collision.CollisionMesh, edits, entity_transform) 
                 if not 0 <= value <= 255:
                     raise ValueError('collision material indices must fit in one byte')
                 materials[triangle] = value
-    if any(corner is None for corner in corners):
+    missing = [index for index, corner in enumerate(corners) if corner is None]
+    if any(index not in dropped for index in missing):
         raise ValueError('collision triangles are missing (a collision object was deleted); '
                          're-import the level')
     vertices = list(mesh.vertices)
@@ -1196,6 +1212,8 @@ def _assemble_collision(mesh: collision.CollisionMesh, edits, entity_transform) 
     placed: dict[int, tuple] = {}
     splits: dict[tuple[int, tuple], int] = {}
     for triangle in range(count):
+        if corners[triangle] is None:
+            continue
         for corner in range(3):
             slot = triangle * 3 + corner
             original = mesh.indices[slot]
@@ -1211,6 +1229,15 @@ def _assemble_collision(mesh: collision.CollisionMesh, edits, entity_transform) 
                     splits[key] = len(vertices)
                     vertices.append(position)
                 indices[slot] = splits[key]
+    if dropped:
+        kept = [triangle for triangle in range(count) if corners[triangle] is not None]
+        indices = [indices[triangle * 3 + corner] for triangle in kept for corner in range(3)]
+        materials = bytearray(materials[triangle] for triangle in kept)
+    for triangle, material in added:
+        for position in triangle:
+            indices.append(len(vertices))
+            vertices.append(position)
+        materials.append(material)
     if vertices == mesh.vertices and indices == mesh.indices and bytes(materials) == mesh.materials:
         return False
     mesh.vertices, mesh.indices, mesh.materials = vertices, indices, bytes(materials)
@@ -1385,30 +1412,32 @@ def navmesh_meshes(path: str, item: group.Resource, index: int, group_name: str)
 
 
 def _dirty_boxes(before, after):
-    """XZ boxes (metres) around navmesh input triangles that moved or changed."""
-    (old_v, old_t), (new_v, new_t) = before, after
-    if len(old_t) != len(new_t):
-        points = old_v + new_v
-        if not points:
-            return []
-        return [(min(p[0] for p in points), min(p[2] for p in points),
-                 max(p[0] for p in points), max(p[2] for p in points))]
+    """XZ boxes (metres) around navmesh input triangles that were added, removed or moved.
+
+    Triangles are compared as geometry (a multiset of rounded corner sets), so inserting or
+    deleting triangles anywhere marks only those triangles, not everything after them."""
+    def keyed(data):
+        vertices, triangles = data
+        result = {}
+        for triangle in triangles:
+            corners = tuple(sorted(tuple(round(value, 3) for value in vertices[i]) for i in triangle))
+            result[corners] = result.get(corners, 0) + 1
+        return result
+    old, new = keyed(before), keyed(after)
     boxes = []
-    for old, new in zip(old_t, new_t):
-        a = [old_v[i] for i in old]
-        b = [new_v[i] for i in new]
-        if all(_close(p, q, 1e-4) for p, q in zip(a, b)):
+    for corners in set(old) | set(new):
+        if old.get(corners, 0) == new.get(corners, 0):
             continue
-        corners = a + b
         boxes.append((min(p[0] for p in corners), min(p[2] for p in corners),
                       max(p[0] for p in corners), max(p[2] for p in corners)))
     merged = []
     for box in sorted(boxes):
-        if merged and box[0] <= merged[-1][2] + 0.5 and abs(box[1] - merged[-1][1]) < 6 and \
-                abs(box[3] - merged[-1][3]) < 6:
-            last = merged[-1]
-            merged[-1] = (min(last[0], box[0]), min(last[1], box[1]),
-                          max(last[2], box[2]), max(last[3], box[3]))
+        for index, other in enumerate(merged):
+            if (box[0] <= other[2] + 0.5 and box[2] >= other[0] - 0.5 and
+                    box[1] <= other[3] + 0.5 and box[3] >= other[1] - 0.5):
+                merged[index] = (min(other[0], box[0]), min(other[1], box[1]),
+                                 max(other[2], box[2]), max(other[3], box[3]))
+                break
         else:
             merged.append(box)
     return merged
@@ -1450,12 +1479,199 @@ def _update_navmesh(parsed: dict[str, group.Group], base_folder: Path, changed: 
     return f'navmesh: {report.tiles} tiles rebuilt{kept}'
 
 
+def _entity_nodes(parsed):
+    """(path, resource type, item, root spec, node path, node) for every entity spec node."""
+    for path, value in parsed.items():
+        for resource_type in value.types():
+            if resource_type.class_hash != ENTITY_SPEC:
+                continue
+            for item in resource_type.resources:
+                try:
+                    root = resources.decode_entity_spec(item.body)
+                except (ValueError, struct.error):
+                    continue
+                stack = [((), root)]
+                while stack:
+                    node_path, node = stack.pop()
+                    yield path, resource_type, item, root, node_path, node
+                    stack.extend((node_path + (index,), child)
+                                 for index, (_, _, child) in enumerate(node.children))
+
+
+def _name_prop(node):
+    blob = _component(node, 'CIsNamed')
+    return _property(blob, iw_hash('name')) if blob else None
+
+
+def _areas(parsed):
+    for path, value in parsed.items():
+        for resource_type in value.types():
+            if resource_type.class_hash == AREA:
+                for item in resource_type.resources:
+                    blob = resources.decode_reflected(item.body)
+                    if blob is not None:
+                        yield path, item, blob
+
+
+def _apply_copies(parsed, copies, resource, changed) -> int:
+    """Create the copied entities: a new spec resource for a copied top-level entity, a new
+    child for a copied child entity. Names unique in the level get a free _2, _3... suffix and
+    the copy joins every area the original belongs to."""
+    if not copies:
+        return 0
+    counts: dict[str, int] = {}
+    for _, _, _, _, _, node in _entity_nodes(parsed):
+        prop = _name_prop(node)
+        value = reflect.typed_value(prop) if prop else None
+        if isinstance(value, str):
+            counts[value.lower()] = counts.get(value.lower(), 0) + 1
+    taken = set(counts)
+    renames = []
+    created = 0
+    for copy_id, edits in copies.items():
+        info = edits[0].copy
+        source = str(Path(info['group']).resolve())
+        item = resource(source, ENTITY_SPEC, info['index'], info['hash'], 'copied entity')
+        root = resources.decode_entity_spec(item.body)
+        root_path = tuple(info['root_path'])
+        node = _spec_at(root, root_path)
+        clone = resources.decode_entity_spec(resources.encode_entity_spec(node))
+        for edit in edits:
+            target = _spec_at(clone, tuple(edit.copy.get('path', ())))
+            if edit.kind == 'shape':
+                _apply_shape(target, edit)
+                continue
+            _set_transform(target, from_blender(edit.location), rotation_from_blender(edit.rotation),
+                           scale_from_blender(edit.scale))
+            if edit.links:
+                _write_links({n: c.blob for n, c in enumerate(target.components)}, edit.links)
+        stack = [clone]
+        while stack:
+            current = stack.pop()
+            stack.extend(child for _, _, child in current.children)
+            prop = _name_prop(current)
+            name = reflect.typed_value(prop) if prop else None
+            if not isinstance(name, str) or counts.get(name.lower(), 0) != 1:
+                continue  # generic names (shared by several entities) stay as they are
+            number = 2
+            while f'{name}_{number}'.lower() in taken:
+                number += 1
+            new_name = f'{name}_{number}'
+            taken.add(new_name.lower())
+            reflect.set_typed_value(prop, new_name)
+            renames.append((iw_hash(name), iw_hash(new_name)))
+        resource_type = next(t for t in parsed[source].types()
+                             if t.class_hash == ENTITY_SPEC and any(r is item for r in t.resources))
+        if root_path:
+            parent = _spec_at(root, root_path[:-1])
+            class_hash, reserved, _ = parent.children[root_path[-1]]
+            parent.children.append((class_hash, reserved, clone))
+            item.body = resources.encode_entity_spec(root)
+            changed.add((source, ENTITY_SPEC, info['index']))
+        else:
+            existing = {_identity(other) for other in resource_type.resources}
+            number = 1
+            while iw_hash(f'boz_copy_{info["hash"]:08x}_{number}') in existing:
+                number += 1
+            identity = iw_hash(f'boz_copy_{info["hash"]:08x}_{number}')
+            resource_type.resources.append(group.Resource(
+                None if resource_type.names_omitted else identity, identity,
+                resources.encode_entity_spec(clone)))
+            changed.add((source, ENTITY_SPEC, -1))
+        created += 1
+    lookup = dict(renames)
+    for path, item, blob in _areas(parsed):
+        dirty = False
+        for prop in blob.properties:
+            if _LINK_FIELD_NAMES.get(prop.name_hash) not in AREA_FIELDS:
+                continue
+            values = _u32_values(prop.raw) or []
+            extra = [lookup[value] for value in values if value in lookup]
+            if extra:
+                values = values + extra
+                prop.raw = struct.pack(f'<I{len(values)}I', len(values), *values)
+                dirty = True
+        if dirty:
+            item.body = resources.encode_reflected(blob)
+            changed.add((path, AREA, -1))
+    return created
+
+
+def _apply_deletions(parsed, deletions, resource, changed) -> int:
+    if not deletions:
+        return 0
+    targets = []
+    for deletion in deletions:
+        source = str(Path(deletion['group']).resolve())
+        item = resource(source, ENTITY_SPEC, deletion['index'], deletion['hash'], 'deleted entity')
+        targets.append((source, item, tuple(deletion.get('path', ()))))
+    # Names going away, and the nodes that go with them.
+    doomed_names, doomed_nodes = set(), set()
+    for source, item, path in targets:
+        root = resources.decode_entity_spec(item.body)
+        stack = [(path, _spec_at(root, path))]
+        while stack:
+            node_path, node = stack.pop()
+            doomed_nodes.add((id(item), node_path))
+            prop = _name_prop(node)
+            name = reflect.typed_value(prop) if prop else None
+            if isinstance(name, str):
+                doomed_names.add(iw_hash(name))
+            stack.extend((node_path + (index,), child) for index, (_, _, child) in
+                         enumerate(node.children))
+    for _, _, item, _, node_path, node in _entity_nodes(parsed):
+        if (id(item), node_path) in doomed_nodes:
+            continue
+        for link in _node_links(node):
+            if link['kind'] != 'member' and doomed_names & set(link['targets']):
+                prop = _name_prop(node)
+                who = reflect.typed_value(prop) if prop else f'{_identity(item):08x}'
+                raise ValueError(f'cannot delete: {who} still has a {link["field"]} link to it; '
+                                 'remove that link first')
+    for path, item, blob in _areas(parsed):
+        dirty = False
+        for prop in blob.properties:
+            if _LINK_FIELD_NAMES.get(prop.name_hash) not in AREA_FIELDS:
+                continue
+            values = _u32_values(prop.raw) or []
+            kept = [value for value in values if value not in doomed_names]
+            if len(kept) != len(values):
+                prop.raw = struct.pack(f'<I{len(kept)}I', len(kept), *kept)
+                dirty = True
+        if dirty:
+            item.body = resources.encode_reflected(blob)
+            changed.add((path, AREA, -1))
+    # Children first, deepest and last-index first, so remaining paths stay valid.
+    by_item: dict[int, list] = {}
+    for source, item, path in targets:
+        by_item.setdefault(id(item), [source, item, []])[2].append(path)
+    for source, item, paths in by_item.values():
+        if () in paths:
+            for resource_type in parsed[source].types():
+                if any(other is item for other in resource_type.resources):
+                    resource_type.resources[:] = [r for r in resource_type.resources if r is not item]
+            changed.add((source, ENTITY_SPEC, -1))
+            continue
+        root = resources.decode_entity_spec(item.body)
+        for path in sorted(paths, key=lambda value: (-len(value), [-v for v in value])):
+            _spec_at(root, path[:-1]).children.pop(path[-1])
+        item.body = resources.encode_entity_spec(root)
+        changed.add((source, ENTITY_SPEC, -1))
+    return len(targets)
+
+
 def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path], *,
                   write_unchanged: bool = False,
                   replaceable: str | Path | None = None,
                   level_folder: str | Path | None = None,
-                  force_navmesh: bool = False) -> ExportReport:
+                  force_navmesh: bool = False,
+                  deletions=()) -> ExportReport:
     """Patch edits into copies of their source groups.
+
+    Edits with ``copy`` create new entities; *deletions* ({'group', 'index', 'hash', 'path',
+    'collision': [{'group', 'index', 'hash', 'triangles'}]}) remove entities and their collision
+    triangles. Deleting an entity that power, trap, door or area-unlock links still reference is
+    refused; area memberships are removed.
 
     *outputs* maps each source group to the file it is written to. Sources are never overwritten,
     except files inside *replaceable* (a mod's own asset folder, whose groups were written by an
@@ -1510,8 +1726,25 @@ def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path],
     link_edits: list[SceneEdit] = []
     entity_specs = {}
     transforms = {}
+    copies: dict[str, list[SceneEdit]] = {}
+    dropped: dict[tuple, set[int]] = {}
+    for deletion in deletions:
+        for piece in deletion.get('collision', ()):
+            key = (str(Path(piece['group']).resolve()), ENTITY_SPEC, piece['index'])
+            dropped.setdefault(key, set()).update(piece['triangles'])
     for edit in edits:
         _validate_edit(edit)
+        if edit.copy and edit.kind in ('placed_model', 'entity', 'shape'):
+            copies.setdefault(edit.copy['id'], []).append(edit)
+            if edit.kind == 'placed_model':
+                key = (str(Path(edit.source_group).resolve()), MODEL, edit.resource_index)
+                if key in model_edits and _model_edit_key(model_edits[key]) != _model_edit_key(edit):
+                    raise ValueError(f'instances of shared model {edit.resource_hash:#010x} have '
+                                     'different geometry; edit the shared mesh once')
+                model_edits.setdefault(key, edit)
+            continue
+        if edit.copy and edit.kind == 'badge':
+            continue
         source = str(Path(edit.source_group).resolve()) if edit.source_group else default_source
         if not source:
             raise ValueError('edit has no source group')
@@ -1601,7 +1834,7 @@ def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path],
             position, rotation, scale = _local_transform(spec)
             entity_transform = (to_blender(position), rotation_to_blender(rotation),
                                 scale_to_blender(scale))
-        if _assemble_collision(mesh, group_edits, entity_transform):
+        if _assemble_collision(mesh, group_edits, entity_transform, dropped.get(key, frozenset())):
             component.extra = collision.encode(mesh)
             item.body = resources.encode_entity_spec(spec)
             changed.add(key)
@@ -1670,6 +1903,13 @@ def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path],
             item.body = resources.encode_entity_spec(root)
             changed.add(entity_key)
 
+    added = removed = 0
+    if copies or deletions:
+        for source in targets:
+            load(source)
+        added = _apply_copies(parsed, copies, resource, changed)
+        removed = _apply_deletions(parsed, deletions, resource, changed)
+
     navmesh_note = ''
     if level_folder is None and targets:
         # Without a level folder, the folder of the group that holds the navmesh is the level.
@@ -1693,7 +1933,8 @@ def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path],
         temporary.replace(output)
         written.append(str(output))
     total = sum(totals.values())
-    return ExportReport(len(changed), total - len(changed), tuple(written), navmesh_note)
+    return ExportReport(len(changed), total - len(changed), tuple(written), navmesh_note,
+                        added, removed)
 
 
 def export_group(source: str | Path, output: str | Path,
@@ -1772,7 +2013,7 @@ def mod_assets_folder(client_root: str | Path, mod_id: str, create: bool = False
 
 def export_to_mod(edits: list[SceneEdit], client_root: str | Path, mod_id: str, *,
                   level_folder: str | Path | None = None, sources=(),
-                  force_navmesh: bool = False) -> ExportReport:
+                  force_navmesh: bool = False, deletions=()) -> ExportReport:
     """Write every changed group into a client mod, under its game file name.
 
     *level_folder* is the game's level folder (for the navmesh, which is always rebuilt from the
@@ -1783,4 +2024,4 @@ def export_to_mod(edits: list[SceneEdit], client_root: str | Path, mod_id: str, 
                    | {str(path) for path in sources})
     return export_groups(edits, {path: assets / Path(path).name for path in paths},
                          replaceable=assets, level_folder=level_folder,
-                         force_navmesh=force_navmesh)
+                         force_navmesh=force_navmesh, deletions=deletions)

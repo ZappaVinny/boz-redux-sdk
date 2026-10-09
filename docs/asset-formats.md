@@ -310,6 +310,21 @@ entity names, and its resource name matches the visibility sector of the same na
 names the `m_StartingArea`, `MysteryBoxAvoid`, `m_zombiesConfigurations`, `m_StartingWavesSP/MP`,
 `m_PerksAvailable` and `m_Achievements`. Kino has 9 areas; its 137 links all resolve.
 
+## How levels create entities
+
+A level has no list of its entities. `Level_Load` (`0x4a1aae4c`) loads `<level>_sectors`
+(portals and occluders), then `<level>_statics`, and `Entity_CreateAllFromGroup` creates an
+entity for every `CIsEntitySpec` resource in it. `Sector_LoadGroup` (`0x4a230d3c`) does the same
+for each room's `*_shared` group; resources whose names end in `_shell`, `_inside_shell`,
+`_mergemodel`, `_details`, `_decals` (and singular or `_inside_` variants) become the room's shell,
+detail and decal sets. `Entity_CreateFromSpec` gives each entity a fresh runtime id, creates the
+spec's children recursively and applies every component spec. Adding a spec resource to a group
+therefore adds an entity, and removing one removes it. Entities are found by their `CIsNamed`
+name hash, so copies of referable entities need unique names. Entity spec resources store no
+name, only their in-group hash; a new one only needs a hash unique within its group.
+`CIsEntitySpec_Design_Door`, `_PerkMachine`, `_Art_Prop` and similar class names are factory
+aliases of `CIsEntitySpec` left over from the authoring tool.
+
 ## Maps across groups
 
 Placements reference resources by name hash, not by group. Kino's `kino_statics` places 73 objects
