@@ -102,16 +102,20 @@ class FormatTests(unittest.TestCase):
             save.parse_settings(settings[:-1] + b'\1')
 
     def test_writable_texture_preserves_unknown_header(self):
-        header = bytearray(range(16))
-        header[4] = 0x0E
+        # Image header at 4: u8 format, u16 flags, u16 width/height/pitch, u32; texels at 17;
+        # then the texture's u8 "has mipmaps".
+        header = bytearray(range(17))
+        header[4:7] = (0x0E, 0, 0)
         struct.pack_into('<HHH', header, 7, 2, 1, 8)
-        source = bytes(header) + bytes((1, 2, 3, 4, 5, 6, 7, 8))
+        source = bytes(header) + bytes((1, 2, 3, 4, 5, 6, 7, 8)) + b'\0'
         image = Image.new('RGBA', (3, 2), (20, 40, 60, 80))
         encoded = native.encode_texture(image, source)
         layout = native.texture_layout(encoded)
         self.assertEqual((layout.width, layout.height, layout.pitch), (3, 2, 12))
         self.assertEqual(encoded[:7], source[:7])
-        self.assertEqual(encoded[13:16], source[13:16])
+        self.assertEqual(encoded[13:17], source[13:17])
+        self.assertEqual(encoded[-1:], b'\0')
+        self.assertEqual(len(encoded), 17 + 3 * 2 * 4 + 1)
         self.assertEqual(native.decode_texture(encoded).getpixel((0, 0)), (20, 40, 60, 80))
 
     def test_visual_exports_reach_input_validation(self):
@@ -131,28 +135,29 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(native.decode_texture(body).getpixel((0, 0)), (255, 136, 0, 68))
 
     def test_bgr888_decodes_for_preview_only(self):
-        header = bytearray(16)
+        header = bytearray(17)
         header[4] = 0x0A
         struct.pack_into('<HHH', header, 7, 1, 1, 3)
-        body = bytes(header) + bytes((1, 2, 3))
+        body = bytes(header) + bytes((1, 2, 3)) + b'\0'
         self.assertEqual(native.decode_texture_rgba(body).rgba, bytes((3, 2, 1, 255)))
         with self.assertRaises(ValueError):
             native.encode_texture(Image.new('RGB', (1, 1)), body)
 
     def test_argb4444_native_channel_order(self):
         # Kino's 16-bit copy of a tutorial texture: an alpha-0 red background is 0x0f00.
-        header = bytearray(16)
+        header = bytearray(17)
         header[4] = 0x05
         struct.pack_into('<HHH', header, 7, 2, 1, 4)
-        decoded = native.decode_texture_rgba(bytes(header) + struct.pack('<HH', 0x0F00, 0xF48C))
+        decoded = native.decode_texture_rgba(bytes(header) + struct.pack('<HH', 0x0F00, 0xF48C)
+                                             + b'\0')
         self.assertEqual(decoded.format, 'ARGB4444')
         self.assertEqual(decoded.rgba, bytes((255, 0, 0, 0, 68, 136, 204, 255)))
 
     def test_bgra8888_native_channel_order(self):
-        header = bytearray(16)
+        header = bytearray(17)
         header[4] = 0x0E
         struct.pack_into('<HHH', header, 7, 1, 1, 4)
-        image = native.decode_texture(bytes(header) + bytes((0, 0, 255, 255)))
+        image = native.decode_texture(bytes(header) + bytes((0, 0, 255, 255)) + b'\0')
         self.assertEqual(image.getpixel((0, 0)), (255, 0, 0, 255))
 
     def test_cooked_dxt1_texture_without_pillow(self):

@@ -37,6 +37,10 @@ _COLS = iw_hash('CIwModelBlockCols')
 
 @dataclass(frozen=True)
 class TextureLayout:
+    """Where a raw texture's parts are. ``CIwTexture::Serialise`` writes the texture's own fields,
+    then ``CIwImage::Serialise`` at *header_offset* (u8 format, u16 flags, u16 width, u16 height,
+    u16 pitch, u32), the texels at *texel_offset* = *header_offset* + 13, and then the texture's
+    trailer: u8 "has mipmaps" (0 in every shipped raw texture)."""
     header_offset: int
     texel_offset: int
     pixel_format: int
@@ -44,6 +48,7 @@ class TextureLayout:
     height: int
     pitch: int
     bytes_per_pixel: int
+    trailer_offset: int = 0
 
 
 @dataclass(frozen=True)
@@ -183,19 +188,23 @@ def decode_texture_rgba(body: bytes) -> DecodedTexture:
 
 
 def texture_layout(body: bytes) -> TextureLayout:
-    """Locate the dimensions and texel tail of a serialized ``CIwTexture``."""
+    """Locate the image header, texels and trailer of a serialized raw ``CIwTexture``."""
     for off in _TEXTURE_SCAN:
-        if off + 9 > len(body):
+        if off + 13 > len(body):
             break
         width, height, pitch = struct.unpack_from('<HHH', body, off + 3)
         if not width or not height or pitch % width:
             continue
         bpp = pitch // width
-        texel_offset = len(body) - pitch * height
+        texel_offset = off + 13
+        trailer_offset = texel_offset + pitch * height
         pixel_format = body[off]
         known = _TEXTURE_FORMATS.get(pixel_format) or _DECODE_ONLY_FORMATS.get(pixel_format)
-        if known is not None and known[0] == bpp and 12 <= texel_offset <= 40:
-            return TextureLayout(off, texel_offset, pixel_format, width, height, pitch, bpp)
+        flags = struct.unpack_from('<H', body, off + 1)[0]
+        if known is not None and known[0] == bpp and not flags & 6 and \
+                trailer_offset + 1 == len(body):
+            return TextureLayout(off, texel_offset, pixel_format, width, height, pitch, bpp,
+                                 trailer_offset)
     raise ValueError('unsupported CIwTexture layout')
 
 
@@ -204,7 +213,7 @@ def decode_texture(body: bytes) -> Image.Image:
     from PIL import Image
 
     layout = texture_layout(body)
-    raw = body[layout.texel_offset:]
+    raw = body[layout.texel_offset:layout.trailer_offset]
     if layout.pixel_format in (0x05, 0x0A):
         decoded = decode_texture_rgba(body)
         return Image.frombytes('RGBA', (decoded.width, decoded.height), decoded.rgba)
@@ -243,14 +252,16 @@ def encode_texture(image: Image.Image, source: bytes | None = None,
     else:
         texels = image.convert('RGBA').tobytes('raw', 'BGRA')
     if source is None:
-        header = bytearray(16)
         off = 4
+        header = bytearray(off + 13)
+        trailer = b'\0'  # no mipmaps
     else:
         header = bytearray(source[:layout.texel_offset])
         off = layout.header_offset
+        trailer = source[layout.trailer_offset:]
     header[off] = 0x05 if bpp == 2 else 0x0E
     struct.pack_into('<HHH', header, off + 3, width, height, width * bpp)
-    return bytes(header) + texels
+    return bytes(header) + texels + trailer
 
 
 def encode_texture_png(png: str | Path | bytes, source: bytes | None = None,
@@ -538,3 +549,4 @@ def encode_model(model: Model, source: bytes | None = None) -> bytes:
                              *model.triangles[triangle_index])
             triangle_index += 1
     return bytes(out)
+

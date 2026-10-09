@@ -99,6 +99,20 @@ example, the graffiti sign's alpha-0 red background is `00 00 ff 00` in one and 
 other. Most alpha-tested and blended map art uses these formats, so reading `0x05` as RGB565 turns
 red art green and shows transparent areas as solid colour.
 
+Layout (`CIwTexture::Serialise`, then `CIwImage::Serialise`), in every shipped raw texture:
+
+| Offset | Field |
+|--------|-------|
+| 0 | u32 texture flags, u8, u8, two i16 |
+| 10 | image: u8 format, u16 image flags, u16 width, u16 height, u16 pitch, u32 |
+| 23 | texels: pitch × height bytes |
+| end − 1 | u8 "has mipmaps", always 0 |
+
+The image flags' bits 1 and 2 (a palette, or no texels) never occur. The last byte is easy to
+mistake for texel data. Before 2026-10-09, bozkit read the texels from offset 24, one byte late,
+which shifted the colour channels. It also wrote textures without the final byte. The game then
+read a texel byte as "has mipmaps", which can crash it.
+
 ### Cooked texture payloads
 
 In the supported cooked ETC1/DXT1 layout, the u32 at body offset 35 is the mip
