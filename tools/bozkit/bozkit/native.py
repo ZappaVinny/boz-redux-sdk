@@ -18,9 +18,19 @@ if TYPE_CHECKING:
 from .hashing import iw_hash
 
 _TEXTURE_SCAN = range(4, 40)
-_TEXTURE_FORMATS = {0x05: (2, 'RGB565'), 0x0E: (4, 'BGRA8888')}
+# Raw CIwImage formats seen in BOZ. Both store A, R, G, B from the most significant bits of a
+# little-endian word: 0x0e is 32-bit (bytes B, G, R, A) and 0x05 its 16-bit 4444 twin. The same
+# texture appears as 0x0e in the tutorial and 0x05 in Kino with matching values (an alpha-0 red
+# background is 00 00 ff 00 and 0x0f00).
+_TEXTURE_FORMATS = {0x05: (2, 'ARGB4444'), 0x0E: (4, 'BGRA8888')}
+# Decode-only: 24-bit 0x0a, assumed to share the B, G, R byte order. The one shipped instance is a
+# uniform grey 4x4 image, so the channel order is unproven.
+_DECODE_ONLY_FORMATS = {0x0A: (3, 'BGR888')}
 _VERTS = iw_hash('CIwModelBlockVerts')
 _UVS = iw_hash('CIwModelBlockGLUVs')
+# Second texture-coordinate set, used by texture stage 1 (baked lightmaps). Same layout as
+# CIwModelBlockGLUVs: u16 count at +6, then count s16 pairs in 1/4096 units from +10.
+_UVS2 = iw_hash('CIwModelBlockGLUVs2')
 _TRIS = iw_hash('CIwModelBlockGLTriList')
 _COLS = iw_hash('CIwModelBlockCols')
 
@@ -135,6 +145,11 @@ def decode_texture_rgba(body: bytes) -> DecodedTexture:
         layout = None
     if layout is not None:
         raw = body[layout.texel_offset:layout.texel_offset + layout.pitch * layout.height]
+        if layout.pixel_format == 0x0a:
+            rgba = bytearray()
+            for blue, green, red in struct.iter_unpack('3B', raw):
+                rgba += bytes((red, green, blue, 255))
+            return DecodedTexture(layout.width, layout.height, bytes(rgba), 'BGR888')
         if layout.pixel_format == 0x0e:
             rgba = bytearray()
             for blue, green, red, alpha in struct.iter_unpack('4B', raw):
@@ -142,8 +157,9 @@ def decode_texture_rgba(body: bytes) -> DecodedTexture:
             return DecodedTexture(layout.width, layout.height, bytes(rgba), 'BGRA8888')
         rgba = bytearray()
         for (value,) in struct.iter_unpack('<H', raw):
-            rgba += bytes((*_unpack_rgb565(value), 255))
-        return DecodedTexture(layout.width, layout.height, bytes(rgba), 'RGB565')
+            rgba += bytes(((value >> 8 & 15) * 17, (value >> 4 & 15) * 17, (value & 15) * 17,
+                           (value >> 12) * 17))
+        return DecodedTexture(layout.width, layout.height, bytes(rgba), 'ARGB4444')
     if len(body) < 95:
         raise ValueError('unsupported CIwTexture layout')
     mip_count, width, height = struct.unpack_from('<III', body, 35)
@@ -177,7 +193,7 @@ def texture_layout(body: bytes) -> TextureLayout:
         bpp = pitch // width
         texel_offset = len(body) - pitch * height
         pixel_format = body[off]
-        known = _TEXTURE_FORMATS.get(pixel_format)
+        known = _TEXTURE_FORMATS.get(pixel_format) or _DECODE_ONLY_FORMATS.get(pixel_format)
         if known is not None and known[0] == bpp and 12 <= texel_offset <= 40:
             return TextureLayout(off, texel_offset, pixel_format, width, height, pitch, bpp)
     raise ValueError('unsupported CIwTexture layout')
@@ -189,22 +205,21 @@ def decode_texture(body: bytes) -> Image.Image:
 
     layout = texture_layout(body)
     raw = body[layout.texel_offset:]
-    if layout.pixel_format == 0x05:
-        return Image.frombytes('RGB', (layout.width, layout.height), raw, 'raw', 'BGR;16',
-                               layout.pitch, 1)
+    if layout.pixel_format in (0x05, 0x0A):
+        decoded = decode_texture_rgba(body)
+        return Image.frombytes('RGBA', (decoded.width, decoded.height), decoded.rgba)
     if layout.pixel_format == 0x0E:
         return Image.frombytes('RGBA', (layout.width, layout.height), raw, 'raw', 'BGRA',
                                layout.pitch, 1)
     raise ValueError(f'unsupported CIwImage pixel format {layout.pixel_format:#04x}')
 
 
-def _rgb565(image: Image.Image) -> bytes:
+def _argb4444(image: Image.Image) -> bytes:
     out = bytearray()
-    raw = image.convert('RGB').tobytes()
-    for index in range(0, len(raw), 3):
-        red, green, blue = raw[index:index + 3]
-        value = ((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3)
-        out += struct.pack('<H', value)
+    raw = image.convert('RGBA').tobytes()
+    for index in range(0, len(raw), 4):
+        red, green, blue, alpha = ((channel * 15 + 127) // 255 for channel in raw[index:index + 4])
+        out += struct.pack('<H', (alpha << 12) | (red << 8) | (green << 4) | blue)
     return bytes(out)
 
 
@@ -219,12 +234,12 @@ def encode_texture(image: Image.Image, source: bytes | None = None,
     layout = texture_layout(source) if source is not None else None
     bpp = bytes_per_pixel or (layout.bytes_per_pixel if layout else 4)
     if bpp not in (2, 4):
-        raise ValueError('texture bytes_per_pixel must be 2 (RGB565) or 4 (BGRA8888)')
+        raise ValueError('texture bytes_per_pixel must be 2 (ARGB4444) or 4 (BGRA8888)')
     width, height = image.size
     if not 0 < width <= 8192 or not 0 < height <= 8192:
         raise ValueError('texture dimensions must be between 1 and 8192')
     if bpp == 2:
-        texels = _rgb565(image)
+        texels = _argb4444(image)
     else:
         texels = image.convert('RGBA').tobytes('raw', 'BGRA')
     if source is None:
@@ -316,6 +331,7 @@ class Model:
     face_materials: list[int] = field(default_factory=list, compare=False)
     vertex_colours: list[tuple[int, int, int, int]] = field(default_factory=list,
                                                                   compare=False)
+    uvs2: list[tuple[float, float]] = field(default_factory=list, compare=False)
 
 
 def _block(body: bytes, block_hash: int) -> int:
@@ -376,17 +392,8 @@ def decode_model(body: bytes) -> Model:
         vertices = [unique[index] for index in remap]
     else:
         vertices = unique
-    try:
-        uv_offset = _block(body, _UVS)
-    except ValueError:
-        uv_offset = -1
-    uvs = []
-    if uv_offset >= 0:
-        uv_count = struct.unpack_from('<H', body, uv_offset + 6)[0]
-        if uv_count == render_count:
-            uvs = [(u / 4096.0, v / 4096.0) for u, v in
-                   (struct.unpack_from('<hh', body, uv_offset + 10 + index * 4)
-                    for index in range(render_count))]
+    uvs = _decode_uvs(body, _UVS, render_count)
+    uvs2 = _decode_uvs(body, _UVS2, render_count)
     colours = []
     colour_blocks = _blocks(body, _COLS)
     if colour_blocks:
@@ -428,7 +435,28 @@ def decode_model(body: bytes) -> Model:
         face_materials.extend([material_index] * len(valid))
     return Model(vertices, triangles, uvs, raw_triangles=raw_triangles,
                  position_remap=remap, face_materials=face_materials,
-                 vertex_colours=colours)
+                 vertex_colours=colours, uvs2=uvs2)
+
+
+def _decode_uvs(body: bytes, block_hash: int, render_count: int) -> list[tuple[float, float]]:
+    try:
+        offset = _block(body, block_hash)
+    except ValueError:
+        return []
+    if struct.unpack_from('<H', body, offset + 6)[0] != render_count:
+        return []
+    return [(u / 4096.0, v / 4096.0) for u, v in
+            (struct.unpack_from('<hh', body, offset + 10 + index * 4)
+             for index in range(render_count))]
+
+
+def _patch_uvs(out: bytearray, source: bytes, block_hash: int, uvs) -> None:
+    offset = _block(source, block_hash)
+    for index, (u, v) in enumerate(uvs):
+        raw = (round(u * 4096), round(v * 4096))
+        if any(not -32768 <= value <= 32767 for value in raw):
+            raise ValueError('model UV exceeds the native 1/4096 fixed-point range')
+        struct.pack_into('<hh', out, offset + 10 + index * 4, *raw)
 
 
 def encode_model(model: Model, source: bytes | None = None) -> bytes:
@@ -457,6 +485,12 @@ def encode_model(model: Model, source: bytes | None = None) -> bytes:
             raw_uvs = [(round(u * 4096), round(v * 4096)) for u, v in model.uvs]
             uv_data = b''.join(struct.pack('<hh', *value) for value in raw_uvs)
             uvs = struct.pack('<IHHH', _UVS, 10 + len(uv_data), len(raw_uvs), 0) + uv_data
+        if model.uvs2:
+            if len(model.uvs2) != count:
+                raise ValueError('model second UV count must match its vertex count')
+            raw_uvs2 = [(round(u * 4096), round(v * 4096)) for u, v in model.uvs2]
+            uv2_data = b''.join(struct.pack('<hh', *value) for value in raw_uvs2)
+            uvs += struct.pack('<IHHH', _UVS2, 10 + len(uv2_data), len(raw_uvs2), 0) + uv2_data
         indices = [value for triangle in model.triangles for value in triangle]
         tri = bytearray(struct.pack('<IHHHI', _TRIS, 14 + len(indices) * 2, len(indices), 0, 0))
         tri += b''.join(struct.pack('<H', value) for value in indices)
@@ -465,6 +499,8 @@ def encode_model(model: Model, source: bytes | None = None) -> bytes:
     if (len(old.vertices), len(old.triangles), bool(old.uvs)) != \
             (len(model.vertices), len(model.triangles), bool(model.uvs)):
         raise ValueError('lossless source patch requires unchanged vertex, triangle, and UV counts')
+    if model.uvs2 and len(model.uvs2) != len(old.uvs2):
+        raise ValueError('lossless source patch requires an unchanged second UV set')
     out = bytearray(source)
     verts = _block(source, _VERTS)
     render_count = struct.unpack_from('<H', source, verts + 6)[0]
@@ -484,9 +520,10 @@ def encode_model(model: Model, source: bytes | None = None) -> bytes:
             if not -32768 <= delta <= 32767:
                 raise ValueError('model position exceeds the source block encoding range')
             struct.pack_into('<h', out, verts + 14 + axis * unique_count * 2 + index * 2, delta)
-    uv_offset = _block(source, _UVS) if model.uvs else -1
-    for index, (u, v) in enumerate(model.uvs):
-        struct.pack_into('<hh', out, uv_offset + 10 + index * 4, round(u * 4096), round(v * 4096))
+    if model.uvs and model.uvs != old.uvs:
+        _patch_uvs(out, source, _UVS, model.uvs)
+    if model.uvs2 and model.uvs2 != old.uvs2:
+        _patch_uvs(out, source, _UVS2, model.uvs2)
     if model.face_materials and model.face_materials != old.face_materials:
         raise ValueError('model material reassignment is not supported yet')
     triangle_index = 0

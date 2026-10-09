@@ -5,7 +5,7 @@ from __future__ import annotations
 bl_info = {
     "name": "BOZ Redux Map Tools",
     "author": "BOZ Redux contributors",
-    "version": (0, 1, 0),
+    "version": (0, 2, 0),
     "blender": (5, 2, 0),
     "location": "3D View > Sidebar > BOZ Redux",
     "description": "Import, edit, validate, and export BOZ 1.0.11 native map resources",
@@ -19,13 +19,16 @@ except ModuleNotFoundError:  # Allows metadata inspection and packaging outside 
 
 
 if bpy is not None:
+    from . import view
     from .operators import CLASSES
 
     def register():
         for cls in CLASSES:
             bpy.utils.register_class(cls)
+        view.register()  # after the main panel, which its Selected panel nests in
 
 
     def unregister():
+        view.unregister()
         for cls in reversed(CLASSES):
             bpy.utils.unregister_class(cls)

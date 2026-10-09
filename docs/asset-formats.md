@@ -53,23 +53,53 @@ BOZ-specific lossless writing and editing.
 
 ## Writable-format status
 
-### Material rendering evidence
+### Material rendering (GLES1 path)
 
-The GLES material-state function at `0x4a2b74fc` extracts `(flags >> 16) & 7`.
-Modes 0 and 5 disable blending; modes 1 and 4 use `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`;
-mode 2 uses `SRC_ALPHA, ONE`; mode 3 uses `ZERO, ONE_MINUS_SRC_COLOR`.
-Mode 5 additionally enables a greater-than-0.75 alpha test when the primary runtime
-texture's flags at `+0x34` contain bit 3. Explicit alpha-test settings are separately
-encoded in material bits 25–28, with the reference at runtime byte `+0x17`.
-The Blender primary-texture preview implements the blend equations and the
-mode-5 greater-than-0.75 cutout for textures with flag bit 3. Other alpha-test
-branches and the separate texture-combine-mode-5 override (`ZERO, SRC_COLOR`)
-remain unsupported.
-It must not treat every texture's alpha channel as an instruction to blend.
+`Rendering_ApplyMaterialGLES` (`0x4a2b74fc`) applies a `CIwMaterial` to the fixed-function
+pipeline. Its flags word (runtime `+0x10`) selects:
 
-Generated Blender images must set their colour space **before** uploading pixels;
-changing it afterward can reset the image buffer. Shader texture coordinates explicitly
-reference the face-corner `UVMap`, not the preserved point-domain UV attribute.
+| Bits | Meaning |
+| --- | --- |
+| 16–18 | Framebuffer blend: 0/5 opaque, 1/4 `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`, 2 `SRC_ALPHA, ONE`, 3 `ZERO, ONE_MINUS_SRC_COLOR` |
+| 19–21 | Texture stage 1 environment: 0 modulate, 1 decal, 2 add, 3 replace, 4 `GL_BLEND`, 5 modulate ×2, 6 modulate ×4 (`GL_COMBINE` with `GL_RGB_SCALE`) |
+| 22–24 | Stage-0 variant: 4 replaces RGB with the primary colour; 5 overrides blending with `ZERO, SRC_COLOR` |
+| 25–28 | Explicit alpha-test function; the reference is runtime byte `+0x17` |
+| 2 | `GL_SMOOTH` (set) or `GL_FLAT` shading |
+
+- **Stage 0:** texture slot 0 is modulated by the primary colour, which is the vertex colour
+  (`CIwModelBlockCols`) when the model has one.
+- **Stage 1:** texture slot 1 is sampled with the second UV set (`CIwModelBlockGLUVs2`). In
+  shipped maps it is a baked lightmap atlas: in the Zombies levels, 1,849 materials have one, 825
+  using mode 0 and 1,024 using mode 5 (×2).
+- **Alpha test:** blend mode 5 additionally enables `GL_ALPHA_TEST GREATER 0.75` when the primary
+  texture's runtime flags (`+0x34`) contain bit 3.
+
+Models without a lightmap carry real baked lighting in their vertex colours. A preview that shows
+only the primary texture is far too bright.
+
+The Blender preview implements stages 0 and 1, the blend modes and the mode-5 cutout. It does
+everything in the game's display encoding and decodes the result once, under a Standard view
+transform. It does not implement the bits 25–28 alpha functions, the stage-0 variants, or the dot3
+path that swaps the stages when normal mapping is active.
+
+### Texture coordinates
+
+`CIwModelBlockGLUVs` and `CIwModelBlockGLUVs2` share one layout: a u16 render-vertex count at
+block `+6`, then one signed 16-bit (u, v) pair per render vertex from `+10`, in 1/4096 units. They
+follow the GL convention: v = 0 addresses the first stored texel row. Readable textures confirm
+this. On the tutorial's "WISH too OFTEN" sign, its posters and its building facade, the geometric
+top of the surface has v = 0. Tools that display images upright must mirror v (`1 - v`).
+
+### Raw texture formats
+
+Uncompressed textures store A, R, G, B from the most significant bits of a little-endian word:
+format `0x0e` is 32-bit (bytes B, G, R, A) and `0x05` is its 16-bit 4444 twin. The tutorial ships
+some textures as `0x0e` and Kino ships the same textures as `0x05`, with matching values. For
+example, the graffiti sign's alpha-0 red background is `00 00 ff 00` in one and `0x0f00` in the
+other. Most alpha-tested and blended map art uses these formats, so reading `0x05` as RGB565 turns
+red art green and shows transparent areas as solid colour.
+
+### Cooked texture payloads
 
 In the supported cooked ETC1/DXT1 layout, the u32 at body offset 35 is the mip
 count, followed by width and height at 39 and 43. The size table starts at 47
@@ -90,11 +120,11 @@ image blocks and rejected its seven-level texture altogether.
 | Reflected resources | Complete | Named typed properties, including nested objects and lists |
 | Entity specifications | Complete | Components, children, reflected fields; collision payload retained raw |
 | `CIwMaterial` | Complete | Compact records contain flags and one primary texture reference; full records contain four texture slots, packed colours and a shader-technique reference; unknown auxiliary data retained |
-| `CIwModel` | Static GL triangle geometry, render-vertex remaps, vertex colours, explicit primitive material indices, terminal material references, and lossless preservation | glTF/Blender export; source-backed edits retain unknown blocks; additional primitive types remain |
+| `CIwModel` | Static GL triangle geometry, render-vertex remaps, vertex colours, both UV sets, explicit primitive material indices, terminal material references, and lossless preservation | glTF/Blender export; source-backed position and UV edits retain unknown blocks; additional primitive types remain |
 | `CIsNavMesh` | Complete for shipped resources | Recast agent/build settings; Detour tiles retained raw |
-| `CIwTexture` | Row-major RGB565/BGRA8888 plus cooked ETC1 and DXT1 mip payloads | PNG import for writable raw formats; raw and cooked formats decode for Blender/material previews |
+| `CIwTexture` | Row-major ARGB4444 (`0x05`) and 32-bit ARGB (`0x0e`, bytes B, G, R, A) plus cooked ETC1 and DXT1 mip payloads | PNG import for writable raw formats; raw and cooked formats decode for Blender/material previews |
 | `CIsPortal` | Complete | Vertices, plane, and connected sector names |
-| Collision triangle meshes | Complete for Zombies maps | Vertices, indices, per-triangle materials, glTF; Bullet metadata retained raw |
+| Collision triangle meshes | Complete for Zombies maps | Vertices, indices, per-triangle materials, glTF; the embedded Bullet shape is updated to match |
 | `CIsNavMeshConnection` | Complete | Endpoints, rotation, and raw offset-named settings |
 
 Run `bozkit corpus` on private extracted groups for exact machine-readable counts. A corpus report
@@ -211,8 +241,81 @@ index_count * u32 indices
 (index_count / 3) * u8 triangle_material
 ```
 
-The five Zombies map collision resources use this layout. `bozkit` edits triangle geometry and
-material assignment while retaining the serialized Bullet shape byte-for-byte.
+The triangles are stored twice, and the game uses both copies. `CIsCollisionMeshSpec::Serialise`
+(`0x4a0527ec`):
+
+- loads `bullet_shape`, a complete Bullet 2.78 file (`BULLETf_v278`: 32-bit pointers,
+  little-endian), through `btBulletWorldImporter` and keeps collision shape 0 as the physics shape;
+- builds its own bounding interval hierarchy for ray casts (`Collision_BuildBIH`, `0x4a05184c`,
+  limited by the cvars `BIHMaxDepth` and `BIHMaxSingled`) from the plain arrays that follow.
+
+In every shipped map the two copies are identical. Neither one stops the player from walking:
+`CPlayerController::FixedStep` moves the player on the Detour navmesh (`Player_MoveOnNavMesh`,
+`Nav_FindNearestPoly` with extents 0.1 × 3 × 0.1 m, `Nav_MoveAlongSurface`, `Nav_GetPolyHeight`;
+world positions are divided by 100). Collision edits therefore change what bullets and other ray
+casts hit, while walkable space and floor height follow the navmesh. A test with a raised collision
+floor confirmed this: shots hit it and the player walked through it.
+
+The Bullet file's chunks are:
+
+| Chunk | Contents |
+| --- | --- |
+| `SHAP` | `btTriangleMeshShapeData` (60 bytes), shape type 21, one mesh part |
+| `ARAY` | `btMeshPartData` (32 bytes): vertex/index array pointers, triangle and vertex counts |
+| `ARAY` | `btIntIndexData` indices |
+| `ARAY` | `btVector3FloatData` vertices (16 bytes each) |
+| `QBVH` + `ARAY`s | the quantized BVH and its nodes and subtree headers |
+| `DNA1` | Bullet's type catalogue |
+
+When collision geometry changes, `bozkit` (`bullet.py`) rewrites the vertex and index chunks and
+the part counts, and clears the shape's `m_quantizedFloatBvh` pointer. The game's
+`btBulletWorldImporter::createBvhTriangleMeshShape` (`0x4a02020e`) then builds a fresh BVH at load
+instead of trusting the stale one. Unchanged geometry keeps every byte.
+
+The world collision mesh is cooked from the render geometry: in Kino 64,420 of its 78,864
+triangles have all three vertices on vertices of exactly one placed model (133 of 607 models
+contribute). Editors can therefore treat those triangles as belonging to that model.
+
+Collision vertices are in the local space of the entity's `CIsTransform`. Call of the Dead and one
+Ascension collision entity have a non-zero position.
+
+## Entity transforms and hierarchy
+
+`CIsTransform` component blobs store any of `m_localPosition` (`CIwFVec3`), `m_localRotation`
+(`CIwFQuat`, xyzw) and `m_localScale` (`CIwFVec3`); a missing field is the identity. Scales such as
+1/16 and 1/64 occur. An entity spec's children are positioned relative to their parent, and 129
+renderable children exist in the Zombies levels. Reflection reads properties by name, so `bozkit`
+adds a missing field when an edit needs it.
+
+## Entity links and areas
+
+Gameplay entities refer to each other through `CIsNamed` names (IwHashString of the name). These
+field names are missing from the reflection export and were recovered by hashing the game's
+strings:
+
+| Component | Field | Holds |
+| --- | --- | --- |
+| `CPerk`, `CDoor`, `CPackAPunch`, `CTrapSwitch`, `CTeleporter`, `CTVScreen`, `CProjectorScreen`, `CTurret`, `CTeleportMainframe` | `powerSwitch` (u32) | the power switch |
+| `CTrapSwitch` | `traps` (list) | the traps it fires |
+| `CDoor` | `m_Siblings` (list) | doors that open with it |
+| `CDoor` | `m_AreasUnlock` (list) | `CArea` resource names it unlocks |
+| `CSpawnPoint` | `users` (list) | AI configuration names allowed to spawn (`zombie_kino`, `zombie_dog`) |
+| `CPerk` | `m_perkJingle` (string) | the perk's music sting |
+| `CEasterEgg` | `m_GroupName` (string) | its sound |
+
+Lists are serialised as `u32 count` followed by the values. A `CArea` resource is a zone:
+`m_SpawnPoints`, `m_PerkMachines`, `m_GerschTeleportPoints`, `m_Shortcuts` and `m_Locators` list
+entity names, and its resource name matches the visibility sector of the same name. `CLevel`
+names the `m_StartingArea`, `MysteryBoxAvoid`, `m_zombiesConfigurations`, `m_StartingWavesSP/MP`,
+`m_PerksAvailable` and `m_Achievements`. Kino has 9 areas; its 137 links all resolve.
+
+## Maps across groups
+
+Placements reference resources by name hash, not by group. Kino's `kino_statics` places 73 objects
+using 23 models from `kino_dynamics` and `ingame`. Each room's `*_shared` group holds that room's
+models, materials, portals, occluders and light boxes, while many of its textures live in other
+groups. Editors must resolve references across all of a level's groups plus `ingame`, and write
+each edit back to the group that owns the resource.
 
 ## Saves (`.i3d`)
 

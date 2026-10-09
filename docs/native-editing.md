@@ -102,9 +102,11 @@ Export and losslessly re-import the tutorial map's collision triangles:
   /tmp/tutorial-collision.gltf -o /tmp/tutorial-collision-test.group.bin
 ```
 
-The default import requires unchanged vertex and index counts, retaining the Bullet shape,
-material names, and per-triangle material bytes. `--rebuild-mesh` allows topology changes; new
-triangles receive material byte zero when the old material array no longer fits.
+The default import requires unchanged vertex and index counts and keeps the material names and
+per-triangle material bytes. `--rebuild-mesh` allows topology changes; new triangles receive
+material byte zero when the old material array no longer fits. Either way, the embedded Bullet
+physics shape is updated to the same triangles, and its stale BVH is dropped so the game rebuilds
+it at load (see [collision meshes](asset-formats.md#collision-meshes)).
 
 ## Textures
 
@@ -115,10 +117,10 @@ Export the recognizable red main-menu logo:
   /tmp/boz-etc/frontend/frontend.group.bin main_menu_logo /tmp/main_menu_logo.png
 ```
 
-Row-major RGB565 (`0x05`) and BGRA8888 (`0x0e`) textures are supported. PNG import preserves a
-source texture's unknown header fields and native pixel format. Packed, compressed, mipmapped, and
-swizzled layouts are not inferred; unsupported format identifiers fail instead of producing a
-plausible-looking corrupt image.
+Row-major ARGB4444 (`0x05`) and 32-bit ARGB (`0x0e`) textures can be exported and replaced. PNG import
+preserves a source texture's unknown header fields and native pixel format. Cooked ETC1 and DXT1
+textures, which make up most map textures, decode for previews (Blender) but cannot be written yet.
+Other layouts fail rather than producing a plausible-looking corrupt image.
 
 Complete edited groups can be placed under an SDK project's `assets/` tree and built normally.
 They may be used for local testing, but must never be committed to an official BOZ repository.

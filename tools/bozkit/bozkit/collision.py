@@ -1,8 +1,15 @@
-"""Triangle-mesh payload appended to ``CIsCollisionMeshSpec`` components."""
+"""Triangle-mesh payload appended to ``CIsCollisionMeshSpec`` components.
+
+The payload holds the same triangles twice: inside the serialized Bullet shape the physics
+world loads, and as the plain arrays the game builds its BIH ray-cast tree from. Encoding
+writes the arrays and synchronizes the Bullet copy (see bullet.py).
+"""
 from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, field
+
+from . import bullet
 
 
 @dataclass
@@ -59,7 +66,8 @@ def encode(mesh: CollisionMesh) -> bytes:
     names = [name.encode('latin-1') for name in mesh.material_names]
     if any(b'\0' in name for name in names):
         raise ValueError('collision material names cannot contain NULs')
-    out = bytearray(struct.pack('<I', len(mesh.bullet_shape))) + mesh.bullet_shape
+    shape = bullet.sync_triangle_mesh(mesh.bullet_shape, mesh.vertices, mesh.indices)
+    out = bytearray(struct.pack('<I', len(shape))) + shape
     out += struct.pack('<III', len(mesh.vertices), len(mesh.indices), len(names))
     out += b''.join(name + b'\0' for name in names)
     out += b''.join(struct.pack('<3f', *vertex) for vertex in mesh.vertices)

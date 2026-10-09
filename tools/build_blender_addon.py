@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import zipfile
 from pathlib import Path
 
@@ -10,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ADDON = ROOT / 'blender' / 'boz_redux'
 BOZKIT = ROOT / 'tools' / 'bozkit' / 'bozkit'
 VENDORED = {
-    '__init__.py', 'blender_scene.py', 'collision.py', 'group.py', 'hashing.py',
+    '__init__.py', 'blender_scene.py', 'bullet.py', 'collision.py', 'group.py', 'hashing.py',
     'map_resources.py', 'native.py', 'navigation.py', 'reflect.py', 'resources.py',
 }
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
@@ -23,14 +24,23 @@ def _write(archive: zipfile.ZipFile, name: str, data: bytes) -> None:
     archive.writestr(info, data)
 
 
-def build(output: Path) -> None:
+def build(output: Path) -> str:
+    files = {f'boz_redux/{path.name}': path.read_bytes()
+             for path in sorted(ADDON.glob('*.py')) if path.name != '_build.py'}
+    files['boz_redux/_vendor/__init__.py'] = b''
+    for name in sorted(VENDORED):
+        files[f'boz_redux/_vendor/bozkit/{name}'] = (BOZKIT / name).read_bytes()
+    # A content hash identifies the build in Blender's sidebar while keeping the ZIP reproducible.
+    digest = hashlib.sha256()
+    for name in sorted(files):
+        digest.update(name.encode() + b'\0' + files[name])
+    build_id = digest.hexdigest()[:8]
+    files['boz_redux/_build.py'] = f'BUILD = "{build_id}"\n'.encode()
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, 'w') as archive:
-        for path in sorted(ADDON.glob('*.py')):
-            _write(archive, f'boz_redux/{path.name}', path.read_bytes())
-        _write(archive, 'boz_redux/_vendor/__init__.py', b'')
-        for name in sorted(VENDORED):
-            _write(archive, f'boz_redux/_vendor/bozkit/{name}', (BOZKIT / name).read_bytes())
+        for name in sorted(files):
+            _write(archive, name, files[name])
+    return build_id
 
 
 def main() -> int:
@@ -38,8 +48,8 @@ def main() -> int:
     parser.add_argument('output', nargs='?', type=Path,
                         default=ROOT / 'build' / 'blender' / 'boz-redux-blender.zip')
     args = parser.parse_args()
-    build(args.output)
-    print(args.output.resolve())
+    build_id = build(args.output)
+    print(f'{args.output.resolve()} (build {build_id})')
     return 0
 
 

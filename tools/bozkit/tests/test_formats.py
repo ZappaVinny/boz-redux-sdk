@@ -11,7 +11,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bozkit import blender_scene, collision, corpus, gltf, group, map_resources, native, navigation, reflect, resources, save  # noqa: E402
+from bozkit import blender_scene, bullet, collision, corpus, gltf, group, map_resources, native, navigation, reflect, resources, save  # noqa: E402
 from bozkit.hashing import iw_hash  # noqa: E402
 from bozkit.__main__ import main as cli_main  # noqa: E402
 
@@ -121,17 +121,32 @@ class FormatTests(unittest.TestCase):
             self.assertEqual(cli_main(['model-export', 'missing.group.bin', '0x1', 'out.gltf']), 1)
         self.assertNotIn('experimental', errors.getvalue())
 
-    def test_writable_texture_png_and_rgb565(self):
-        image = Image.new('RGB', (2, 2), (255, 128, 0))
+    def test_writable_texture_png_and_argb4444(self):
+        image = Image.new('RGBA', (2, 2), (255, 136, 0, 68))
         with tempfile.TemporaryDirectory() as directory:
             png = Path(directory) / 'source.png'
             image.save(png)
             body = native.encode_texture_png(png, bytes_per_pixel=2)
         self.assertEqual(native.texture_layout(body).bytes_per_pixel, 2)
-        red, green, blue = native.decode_texture(body).getpixel((0, 0))
-        self.assertGreater(red, 245)
-        self.assertGreater(green, 120)
-        self.assertLess(blue, 10)
+        self.assertEqual(native.decode_texture(body).getpixel((0, 0)), (255, 136, 0, 68))
+
+    def test_bgr888_decodes_for_preview_only(self):
+        header = bytearray(16)
+        header[4] = 0x0A
+        struct.pack_into('<HHH', header, 7, 1, 1, 3)
+        body = bytes(header) + bytes((1, 2, 3))
+        self.assertEqual(native.decode_texture_rgba(body).rgba, bytes((3, 2, 1, 255)))
+        with self.assertRaises(ValueError):
+            native.encode_texture(Image.new('RGB', (1, 1)), body)
+
+    def test_argb4444_native_channel_order(self):
+        # Kino's 16-bit copy of a tutorial texture: an alpha-0 red background is 0x0f00.
+        header = bytearray(16)
+        header[4] = 0x05
+        struct.pack_into('<HHH', header, 7, 2, 1, 4)
+        decoded = native.decode_texture_rgba(bytes(header) + struct.pack('<HH', 0x0F00, 0xF48C))
+        self.assertEqual(decoded.format, 'ARGB4444')
+        self.assertEqual(decoded.rgba, bytes((255, 0, 0, 0, 68, 136, 204, 255)))
 
     def test_bgra8888_native_channel_order(self):
         header = bytearray(16)
@@ -224,8 +239,9 @@ class FormatTests(unittest.TestCase):
         portal = map_resources.Portal([(0.0, 0.0, 0.0), (0.0, 10.0, 0.0),
                                        (0.0, 0.0, 10.0)], (1.0, 0.0, 0.0), 0.0,
                                       'front', 'back')
+        triangle = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
         collision_mesh = collision.CollisionMesh(
-            b'bullet', [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            bullet.synthetic_triangle_mesh(triangle, [0, 1, 2]), triangle,
             [0, 1, 2], b'\0', ['default'])
         component = resources.Component(resources.COLLISION_MESH_SPEC, 0,
                                         iw_hash('CIsCollisionMeshSpec'), [],
@@ -310,13 +326,53 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(edited.back_sector, 'theatre')
 
     def test_collision_mesh_roundtrip_and_edit(self):
-        mesh = collision.CollisionMesh(b'BULLET',
-                                       [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0),
-                                        (0.0, 1.0, 0.0)], [0, 1, 2], b'\x07')
+        vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+        shape = bullet.synthetic_triangle_mesh(vertices, [0, 1, 2])
+        mesh = collision.CollisionMesh(shape, list(vertices), [0, 1, 2], b'\x07')
         encoded = collision.encode(mesh)
         self.assertEqual(collision.decode(encoded), mesh)
         mesh.vertices[1] = (2.0, 0.0, 0.0)
-        self.assertEqual(collision.decode(collision.encode(mesh)).vertices[1], (2.0, 0.0, 0.0))
+        edited = collision.decode(collision.encode(mesh))
+        self.assertEqual(edited.vertices[1], (2.0, 0.0, 0.0))
+        # The physics copy must follow the ray-cast arrays.
+        self.assertEqual(bullet.triangle_mesh(edited.bullet_shape), (edited.vertices, [0, 1, 2]))
+
+    def test_collision_rejects_unknown_shape_payload(self):
+        mesh = collision.CollisionMesh(b'not bullet', [(0.0, 0.0, 0.0)] * 3, [0, 1, 2], b'\0')
+        with self.assertRaises(ValueError):
+            collision.encode(mesh)
+
+    def test_bullet_sync_preserves_or_invalidates_bvh(self):
+        vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+        shape = bullet.synthetic_triangle_mesh(vertices, [0, 1, 2])
+        self.assertIs(bullet.sync_triangle_mesh(shape, vertices, [0, 1, 2]), shape)
+        moved = bullet.sync_triangle_mesh(shape, vertices + [(0.0, 0.0, 1.0)],
+                                          [0, 1, 2, 0, 2, 3])
+        self.assertEqual(bullet.triangle_mesh(moved),
+                         (vertices + [(0.0, 0.0, 1.0)], [0, 1, 2, 0, 2, 3]))
+        chunks = bullet.parse(moved)
+        shape_chunk = next(chunk for chunk in chunks if chunk.code == b'SHAP')
+        self.assertEqual(struct.unpack_from('<I', shape_chunk.data, 40)[0], 0)  # BVH rebuilt at load
+        part = next(chunk for chunk in chunks if chunk.old_pointer == 2)
+        self.assertEqual(struct.unpack_from('<ii', part.data, 24), (2, 4))
+        self.assertTrue(any(chunk.code == b'QBVH' for chunk in chunks))  # orphan kept intact
+        with self.assertRaises(ValueError):
+            bullet.parse(b'BULLETd_v278')
+
+    def test_model_second_uv_set(self):
+        model = native.Model([(0, 0, 0), (10, 0, 0), (0, 10, 0)], [(0, 1, 2)],
+                             [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)],
+                             uvs2=[(0.25, 0.5), (0.5, 0.5), (0.25, 0.75)])
+        body = native.encode_model(model)
+        decoded = native.decode_model(body)
+        self.assertEqual(decoded.uvs2, model.uvs2)
+        decoded.uvs2 = [(0.125, 0.5), (0.5, 0.5), (0.25, 0.75)]
+        patched = native.decode_model(native.encode_model(decoded, body))
+        self.assertEqual(patched.uvs2[0], (0.125, 0.5))
+        self.assertEqual(patched.uvs, model.uvs)
+        self.assertEqual(blender_scene.uv_from_blender(blender_scene.uv_to_blender((0.25, 0.125))),
+                         (0.25, 0.125))
+        self.assertEqual(blender_scene.uv_to_blender((0.0, 0.0)), (0.0, 1.0))
 
     def test_private_corpus_report_contains_hashes_not_bodies(self):
         res = blob('CWave', [record('CWave', 'unsigned int', 'm_ZombieCount', struct.pack('<I', 6))])

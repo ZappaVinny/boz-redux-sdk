@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / 'blender'), str(ROOT / 'tools' / 'bozkit')]
 import bpy
-from boz_redux.operators import _native_materials, _mesh_object
+from boz_redux.operators import _native_materials, _mesh_object, _display_like_game
 from bozkit.blender_scene import SceneImport, SceneTexture, SceneMaterial, SceneMesh
 
 bpy.ops.object.select_all(action='SELECT')
@@ -14,7 +14,7 @@ bpy.ops.object.delete(use_global=False)
 result = SceneImport('synthetic')
 result.textures[1] = SceneTexture(1, 2, 2, bytes((
     255, 0, 0, 255, 0, 255, 0, 255,
-    0, 0, 255, 255, 255, 255, 0, 255)), 'synthetic')
+    0, 0, 255, 255, 128, 64, 32, 255)), 'synthetic')
 result.materials[2] = SceneMaterial(2, [1])
 _native_materials(result)
 item = SceneMesh('placed_model', 0, 0, 0, 'synthetic', 'UV test', 'Test',
@@ -36,15 +36,19 @@ scene.camera = camera
 scene.render.engine = 'BLENDER_EEVEE'
 scene.render.resolution_x = scene.render.resolution_y = 64
 scene.render.resolution_percentage = 100
-scene.view_settings.view_transform = 'Standard'
+_display_like_game(scene)
 scene.render.image_settings.file_format = 'PNG'
 with tempfile.TemporaryDirectory(prefix='boz-uv-render-') as directory:
     scene.render.filepath = str(Path(directory) / 'uv.png')
     bpy.ops.render.render(write_still=True)
     rendered = bpy.data.images.load(scene.render.filepath)
     pixels = rendered.pixels[:]
-    for x, y, expected in [(16,16,(0,0,1)), (48,16,(1,1,0)),
-                            (16,48,(1,0,0)), (48,48,(0,1,0))]:
+    # Native UVs follow GL: v = 0 samples the first stored row (red, green), so it renders at
+    # the bottom of this quad. The mid-grey texel checks that the game's display-encoded value
+    # reaches the screen unchanged through the decode node and the Standard view transform.
+    assert scene.view_settings.view_transform == 'Standard'
+    for x, y, expected in [(16,16,(1,0,0)), (48,16,(0,1,0)),
+                            (16,48,(0,0,1)), (48,48,(128/255,64/255,32/255))]:
         actual = pixels[(y*64+x)*4:(y*64+x)*4+3]
-        assert all(abs(a-b)<0.03 for a,b in zip(actual,expected)), (x,y,actual)
+        assert all(abs(a-b)<0.01 for a,b in zip(actual,expected)), (x,y,actual)
 print('BOZ_TEXTURE_SAMPLING_OK')

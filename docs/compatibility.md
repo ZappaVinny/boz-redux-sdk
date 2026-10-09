@@ -10,7 +10,7 @@ baseline; a public SDK release is not planned until custom-map support has matur
 | SDK | Unreleased development line | Project schema 1 |
 | Gamedef | Schema 1 | Target `boz-1.0.11` |
 | Lua | 5.4 | Public client API and `boz.*` source compatibility |
-| Blender | 5.2 LTS | Existing-map add-on schema 1; bundled bozkit map codecs |
+| Blender | 5.2 LTS | Existing-map add-on schema 2 (re-import scenes made by schema 1); bundled bozkit map codecs |
 | Python | 3.11 or newer | Required by SDK tools |
 
 Changes to the project schema, package format, gamedef schema or public Lua API require migration
