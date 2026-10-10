@@ -218,7 +218,8 @@ def _print_validation(result: sdk_project.ValidationResult) -> None:
 def cmd_new(args) -> int:
     try:
         project = sdk_project.create_project(args.directory, args.id, args.name or args.id,
-                                             args.author, args.version, args.description)
+                                             args.author, args.version, args.description,
+                                             kind=args.kind, template=args.template)
     except sdk_project.ProjectError as exc:
         print(f'error: {exc}', file=sys.stderr)
         return 1
@@ -262,12 +263,21 @@ def cmd_validate(args) -> int:
     return 0 if result.ok else 1
 
 
+def _game(project, args):
+    """The game's groups for map projects: the SDK's asset library, else --client's pack."""
+    if project.kind != 'map':
+        return None
+    from . import library
+    return library.open_game(getattr(args, 'client', None))
+
+
 def cmd_build(args) -> int:
     project = _load_project(args)
     if project is None:
         return 1
     try:
-        output, report = sdk_project.build_project(project, args.output, args.profile)
+        output, report = sdk_project.build_project(project, args.output, args.profile,
+                                                   _game(project, args))
     except sdk_project.ProjectError as exc:
         print(f'error: {exc}', file=sys.stderr)
         return 1
@@ -282,7 +292,8 @@ def cmd_package(args) -> int:
     if project is None:
         return 1
     try:
-        output, report = sdk_project.package_project(project, args.output, args.profile)
+        output, report = sdk_project.package_project(project, args.output, args.profile,
+                                                     _game(project, args))
     except sdk_project.ProjectError as exc:
         print(f'error: {exc}', file=sys.stderr)
         return 1
@@ -297,7 +308,8 @@ def cmd_install(args) -> int:
     if project is None:
         return 1
     try:
-        output = sdk_project.install_project(project, args.client, args.force, args.profile)
+        output = sdk_project.install_project(project, args.client, args.force, args.profile,
+                                             _game(project, args))
     except sdk_project.ProjectError as exc:
         print(f'error: {exc}', file=sys.stderr)
         return 1
@@ -641,6 +653,9 @@ def main(argv=None) -> int:
     new.add_argument('--author', required=True)
     new.add_argument('--version', default='0.1.0')
     new.add_argument('--description', default='')
+    new.add_argument('--kind', choices=sdk_project.KINDS, default='script')
+    new.add_argument('--template', default='',
+                     help='script: blank, round, hotkey, settings; map: empty, debug or a map name')
     new.set_defaults(func=cmd_new)
     for command, help_text, function in (
         ('inspect', 'show an SDK project and its validation result', cmd_inspect),
@@ -654,6 +669,8 @@ def main(argv=None) -> int:
                             default='distribution' if command == 'package' else 'development')
         if command in ('build', 'package'):
             parser.add_argument('-o', '--output')
+            parser.add_argument('--client', help='client root whose game data map projects read '
+                                '(used when the SDK asset library is not built)')
         parser.set_defaults(func=function)
     install = sub.add_parser('install', help='build and install a project into a client root')
     install.add_argument('project', nargs='?', default='.')

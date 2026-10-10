@@ -82,10 +82,12 @@ extraction is needed.
 Replacing `fixed.group.bin` from a mod conflicts with any other mod that also replaces it. A
 client feature for adding groups at startup would remove the conflict.
 
-## Generated arena (`levels.generate_arena`)
+## Generated arena (`levels.generate_arena`, now `world.arena_world` + `world.compile_world`)
 
 `redux_arena` is the first level with its own geometry. It is a walled 24 m square, and it loads
-and plays: rounds, zombies, power, and a perk you can buy.
+and plays: rounds, zombies, power, and a perk you can buy. It is now the **Debug arena** map
+template: `world.arena_world` describes it as a map project world (see *Map worlds* in
+`sdk-projects.md`) and `world.compile_world` compiles any such world the same way.
 
 | Part | Where it comes from |
 |------|---------------------|

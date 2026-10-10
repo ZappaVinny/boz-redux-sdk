@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Starts the SDK launcher from this checkout (no install needed; needs PySide6).
+here="$(cd "$(dirname "$0")" && pwd)"
+PYTHONPATH="$here/tools/bozkit${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m bozkit.desktop "$@"

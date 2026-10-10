@@ -112,6 +112,13 @@ _LINK_FIELD_NAMES = {iw_hash(name): name for name in
                      ('powerSwitch', 'traps', 'm_Siblings', 'm_AreasUnlock', *AREA_FIELDS)}
 
 
+def add_names(names) -> None:
+    """Add names (e.g. the asset library's recovered strings) to the hash lookup."""
+    lookup = _names()
+    for name in names:
+        lookup.setdefault(iw_hash(name), name)
+
+
 def _names() -> dict[int, str]:
     """The optional local name dictionary (``bozkit names``), for readable hashes."""
     global _NAMES

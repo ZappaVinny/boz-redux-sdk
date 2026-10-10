@@ -47,14 +47,16 @@ my-mod/
   boz-project.toml
   scripts/
     main.lua
+    boz/                 a copy of the standard library
+    .luarc.json          tells Lua editors (VS Code with LuaLS) where boz.* is
   assets/
   build/                 generated and ignored
 ```
 
-The initial project manifest is:
+A new project's manifest (schema 2):
 
 ```toml
-schema = 1
+schema = 2
 
 [mod]
 id = "my_mod"
@@ -64,16 +66,72 @@ author = "Your name"
 game = "1.0.11"
 description = ""
 
+[project]
+kind = "script"          # "script" (a Lua mod) or "map" (a level made in the editor)
+
 [paths]
 scripts = "scripts"
 assets = "assets"
 
 [build]
-include_standard_library = true
+include_standard_library = false
 ```
 
-With `include_standard_library`, the compiler copies the SDK's current `lib/boz` into
-`scripts/boz`. The editable project does not need to carry duplicate library files.
+A map project also has a `[map]` table with the level's internal `name` (the mod id with `-`
+turned into `_`; it cannot be one of the game's own level names) and the `template` it started
+from (`empty`, `debug`, `kino`, `callofthedead`, `ascension` or `tutorial`).
+
+### Map worlds
+
+A map project's world is source the compiler reads, in `source/`:
+
+```text
+source/
+  world.json             base level, meshes, placed entities
+  meshes/<name>.json     vertices (centimetres, Y up), UVs, triangles
+  textures/<name>.png    each mesh's texture (power-of-two sides, 4 to 1024)
+```
+
+```json
+{
+  "format": 1,
+  "base": "kino",
+  "meshes": [
+    {"name": "floor", "file": "meshes/floor.json", "texture": "textures/floor.png", "collision": "floor", "double_sided": true}
+  ],
+  "entities": [
+    {"source": "spawn_player_1", "position": [-100.0, 5.0, -100.0], "yaw": 0.0}
+  ]
+}
+```
+
+- `base` is the shipped level that provides the rounds, zombie types, sounds, cameras, weapons
+  and arms.
+- Each mesh becomes a model with its own texture and material. Triangles use the game's
+  winding; `double_sided` also draws their backs. `collision` is `floor` (walked on), `solid`
+  (blocks) or `none` (decoration).
+- Entities are copies of the base level's entities, by name or `0x` hash, at `position` turned
+  by `yaw` degrees. Zombie spawn points among them become the starting area's spawns. Props
+  get a solid box in the collision and navmesh.
+- The compiler (`bozkit.world.compile_world`) writes the level's groups into the mod's assets:
+  its `fixed` loading entry, renamed weapon and arms groups, the level group and its statics
+  with the collision mesh and a navmesh built from the floor and solid meshes.
+
+Templates: **Empty** is a 6 m floor and the four player spawns (no zombie spawns; the Colt is
+the only weapon). **Debug arena** is a walled 24 m square with the base level's starting-area
+zombie spawns, Juggernog and the power switch; it needs the game data. Original-map templates
+arrive with the editor.
+
+Building a map needs the game's groups: `bozkit build` reads the SDK's asset library, or the
+client pack given with `--client`.
+
+New projects carry their own copy of the standard library in `scripts/boz`, so editors can
+autocomplete it; the launcher refreshes the copy. With `include_standard_library = true` the
+compiler copies the SDK's current `lib/boz` into `scripts/boz` at build time instead. Schema 1
+projects still load; the SDK writes schema 2 when it saves one.
+
+`bozkit new` takes `--kind script|map` and `--template`. Script templates: `blank`, `round` (code
+at every round start), `hotkey` (a key runs a console line) and `settings` (pause-menu settings).
 
 Dependencies are recorded in the build report and generated manifest:
 
@@ -117,12 +175,55 @@ bozkit extract kino_statics.group.bin kino_statics/ --kind group
 
 The original source archive remains in place.
 
-## Desktop application
+## Desktop application (the SDK launcher)
 
-Run `boz-sdk`. **Create Project** selects an empty destination folder and collects the mod id,
-display name, author, version and description. It displays the fixed game version, 1.0.11; projects
-targeting any other version are rejected. The application creates the complete project there:
-`boz-project.toml`, `scripts/main.lua`, `assets/` and `.gitignore`. **Open Existing**
-selects a project that already has a manifest. The same application validates, builds and installs
-the project through the shared compiler. Asset editors and Blender integration will use this same
-project model rather than implementing separate serializers.
+Run `boz-sdk` (or `./boz-sdk` in the SDK checkout without installing). On the first run it asks
+for the BOZ Redux client folder and checks that the game data is installed; without it, maps
+can't be built, but script-only projects still work.
+
+- **Projects:** the project list, with search and sorting. **New project** makes a map or a
+  script-only mod from a template; projects go in `~/BOZ Projects` by default. Open, Duplicate,
+  Rename, Delete (to the trash), Show in file manager and Remove from list work on the selected
+  project.
+- **Project page:** edit the details, **Open folder** (VS Code if installed, else the file
+  manager), **Run in game** for script mods (installs the mod and the Developer mod into the
+  client, then starts the game), and the game log filtered to the mod and errors. For maps,
+  **Build & Run** compiles the world, installs the mod last in the load order with the Developer
+  mod, and the Developer mod starts the level once the main menu is up. Map projects open in
+  the editor, which arrives in a later update.
+- **Client:** the client folder, its game data, and the installed mods, which can be switched on
+  and off; **Open client launcher** starts the client's own launcher.
+- **Library:** every Zombies asset in the game with previews (see *Asset library* below).
+  Search by name, description or `0x` hash, filter by kind and map, and copy an asset's name or
+  hash for scripts.
+- **Learn:** the guides and references, and the Developer and Redux mods as examples.
+- **Settings:** client folder, where new projects go, default author, and **Rebuild library**.
+
+Settings and the project list live in the SDK data folder (`~/.local/share/boz-redux-sdk` on
+Linux, `%APPDATA%\BOZ Redux SDK` on Windows; `BOZ_SDK_HOME` overrides it). The launcher uses the
+same compiler as `bozkit` and never writes game formats itself.
+
+## Asset library
+
+The launcher builds the asset library from the user's own game files the first time it sees
+installed game data, in the background (about 30 seconds), and again whenever the game files or
+the library format change. Nothing in it is shipped or committed. It lives in the SDK data folder
+under `library/1.0.11/`:
+
+| Path | What it is |
+|------|------------|
+| `groups/` | Pristine copies of every Zombies group from `blackops_etc.dz`; map templates start from these |
+| `index.sqlite` | One row per asset: kind, hash, variant, name, label, description, groups, maps, size, triangles, thumbnail |
+| `thumbs/` | 128-pixel previews: textures, models (flat-shaded with their materials' colours), map loading screens |
+| `names.txt` | Names recovered from the game's strings, for hash lookups |
+| `stamp.json` | The pack's size and time and the library version it was built from |
+
+The game stores most resources by name hash only, so many assets have no name: the library labels
+them from what uses them (for example *Model of Juggernog perk*) or shows the hash. The same name
+can hold different contents in different groups (each map's loading screen, sounds, waves); each
+distinct body is a separate *variant*, and references resolve in the referring group first, then
+in the same map.
+
+Kinds: props (entities with behaviour or a model, from the levels and `ingame`), weapons, models,
+textures, materials, effects, sounds and animations. `bozkit.library.Library` reads the index for
+other tools (the editor's palettes use the same index).
