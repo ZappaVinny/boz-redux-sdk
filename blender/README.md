@@ -1,4 +1,74 @@
-# Blender existing-map tools
+# Blender: the BOZ Redux editor and the map tools
+
+Two parts live here:
+
+- `boz_suite/`: the **BOZ Redux editor**, a Blender application template. The SDK launcher
+  opens map projects in it (**Open in Editor**). `tools/build_suite.py` assembles it with the
+  add-on and the bozkit modules into `build/suite/` (a Blender user scripts folder) and
+  generates its `startup.blend` from `boz_suite/tabs.py`; the launcher rebuilds it in a checkout
+  when the sources change. Test: `python3 blender/tests/run_suite_test.py`.
+- `boz_redux/`: the add-on with the existing-map tools (below). In the editor they sit in the
+  World tab's sidebar; on their own they install into any Blender 5.2.
+
+## The editor
+
+- **Tabs:** Game, World, Weapons, Characters, Assets, Effects, Animation, Scripts, Audio,
+  UI / HUD, drawn in the top bar in that order. **Build & Run** (and its ⚙ settings) is at the
+  right of the top bar on every tab. The menus are Project, Edit and Help.
+- **Properties** shows only Object, Modifiers, Data and Material; stock panels that cannot reach
+  the game are hidden. The object tab's **Game** panel sets a mesh's **Collision** (floor, solid,
+  none) and double-sidedness, or the base level entity an empty places.
+- **Log** areas show build output and the game's `boz-log.txt`; the sidebar's **Problems** tab
+  lists what would stop a build, with a button that selects the object.
+- **Objects** have a role (Properties → Object → Game): **level mesh** (in place), **prop**
+  (objects sharing a mesh, made with Alt+D, are copies of one prop), **game model** (a model
+  from the game), **game entity** (perks, spawns, ...), **base level entity** or **base level**
+  (rooms of an inherited original map, read only). Entities and game models show the model the game draws (`boz_suite/game.py`,
+  from the asset library). **Make prop** turns a level mesh, game model or entity into a prop with
+  its own editable mesh and textures.
+- **Original maps:** the base level's own entities (perks, doors, wall buys, spawns, triggers,
+  traps, ...) are base level entities: move, rotate, scale, delete (X) or copy (Shift+D) them,
+  and change their settings like a toolkit piece's. Only what changed is written; **Put back as
+  the level has it** undoes the edits. Rooms stay read only.
+- **Markers:** entities that draw no model (triggers, effects, spawns, sounds, ...) are small
+  cubes coloured by type, in the add-on's colours.
+- **Show** (World viewport header, and the sidebar's BOZ tab): Markers, Triggers (entity volumes),
+  Links, and **Walkable** / **Collision**, which compile the map and show its navmesh (blue, orange
+  where a door blocks it) and collision mesh. **Refresh** compiles again after edits.
+- **Palettes:** the World tab's asset browser shows the "BOZ Game" library:
+  - **Toolkit**: one curated piece for each thing a map needs (perk machines, Pack-a-Punch, the
+    box, the power switch, wall buys, doors, barricades, traps, player, zombie and dog spawns,
+    jump and interact points, sound emitters; `bozkit.toolkit`). A dropped piece resolves to a
+    working entity of the map's base level (else the shared `ingame` template) and shows its
+    settings (cost, needs power, ...) in Properties → Object → Game.
+  - **Models** and **Textures**: everything in the game, for use anywhere.
+
+  `palette_build.py` builds it in a background Blender from the SDK's asset library (about 30 s,
+  the first time and after the library changes); `palette.py` turns a dropped stand-in into the
+  real thing.
+- **Edit its model** on a game entity gives it an editable copy of its mesh: it keeps its
+  behaviour (a Pack-a-Punch still upgrades weapons) and the game draws your mesh. **Use the
+  game's model** goes back.
+- **Wall buy** is one piece: **Choose…** picks any weapon of the level; the editor shows the
+  weapon and its chalk (the weapon's own, one drawn from its model, your image, or none). **Doors** and **barricades** come in every design the game's maps have. Pieces from
+  another map work in any level (the compiler repacks what they use).
+- **Textures** (Properties → Material): every slot's texture with its preview, **Replace…** from
+  an image file and **From game…** (any game texture, with game shading). Dropping a texture from
+  the palette gives the same game-shaded material.
+- **Shading** matches the game: game models use the shipped-map tools' materials (vertex colours,
+  lightmaps, blend modes), project materials are unlit, and the viewport is in material preview
+  with the Standard view transform.
+- **Placeholders:** every planned feature is a panel in its tab (`boz_suite/placeholders.py`).
+- **Project link:** the launcher passes the project in `BOZ_PROJECT`. The first open builds the
+  scene from `source/world.json` and saves `map.blend`; every save writes `source/` back (one
+  Blender unit is one game centimetre).
+- Background Blender cannot split areas or create editors in screens that are not shown, so
+  each tab's editors are changed the first time the tab is on screen.
+
+What Python cannot change in Blender (the case for a fork) is tracked in
+`docs/internal/blender-walls.md`.
+
+## Existing-map tools (add-on)
 
 The add-on targets Blender 5.2 LTS and delegates all native parsing and writing to the bundled
 `bozkit` modules. Build the installable ZIP from the repository root:

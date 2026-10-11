@@ -28,7 +28,7 @@ from . import derbh, group, native, reflect, resources
 from .hashing import iw_hash
 from .schema import Names
 
-LIBRARY_VERSION = 2  # 2: models seen from the front
+LIBRARY_VERSION = 3  # 3: raw textures read as R, G, B, A
 GAME_VERSION = '1.0.11'
 PACK = 'blackops_etc.dz'
 THUMB = 128
@@ -614,6 +614,10 @@ class LibraryPack:
     def __contains__(self, path: str) -> bool:
         return (self.folder / path).is_file()
 
+    def names(self) -> list[str]:
+        return sorted(path.relative_to(self.folder).as_posix()
+                      for path in self.folder.rglob('*') if path.is_file())
+
     def close(self) -> None:
         pass
 
@@ -716,6 +720,13 @@ class Library:
         args.append(limit)
         return [Asset(*row[:7], json.loads(row[7]), json.loads(row[8]), *row[9:])
                 for row in self.database.execute(sql, args)]
+
+    def thumb_for(self, kind: str, value: int) -> Path | None:
+        """The preview of an asset by kind and hash (its first variant with one)."""
+        row = self.database.execute(
+            "SELECT thumb FROM assets WHERE kind = ? AND hash = ? AND thumb != '' LIMIT 1",
+            (kind, value)).fetchone()
+        return self.folder / 'thumbs' / row[0] if row else None
 
     def thumb_path(self, asset: Asset | MapTemplate) -> Path | None:
         return self.folder / 'thumbs' / asset.thumb if asset.thumb else None

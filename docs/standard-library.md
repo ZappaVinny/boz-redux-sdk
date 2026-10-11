@@ -22,7 +22,7 @@ Functions that need a Zombies match return `nil` (or `false`) outside one instea
 - **Menus and text**: [boz.pause_settings](#bozpausesettings), [boz.text](#boztext)
 - **Game UI building blocks**: [boz.iwui](#boziwui), [boz.frontend](#bozfrontend), [boz.flash](#bozflash)
 - **Low-level helpers**: [boz.components](#bozcomponents), [boz.hash](#bozhash), [boz.swf](#bozswf), [boz.avm1](#bozavm1)
-- **Other**: [boz.levels](#bozlevels)
+- **Other**: [boz.levels](#bozlevels), [boz.world](#bozworld)
 
 ## Gameplay
 
@@ -383,4 +383,18 @@ the front end's StartLevel console command starts a single-player match on a lev
 | Function | Description |
 | --- | --- |
 | `levels.start(name)` | Starts a single-player match on the level (e.g. "kino") once the front end is up. Call it while the mod's script starts; the match starts after the main menu appears. |
-| `levels.autostart()` | Starts the level a tool asked for, once: reads and clears the mod's "autostart_level" setting (the Blender add-on's Build & Run writes it). Returns the level name or nil. |
+| `levels.autostart()` | Starts the level a tool asked for, once: reads and clears the mod's "autostart_level" setting (the SDK's Build & Run writes it), and its "autostart_vars" ("Name=value;..."), console variables set just before the level starts (e.g. UnlimitedHealth=true). Returns the level name or nil. |
+
+### boz.world
+
+Game behaviour a map project's world asks for that the game's data cannot express.
+
+```lua
+require("boz.world").start()   (map projects call this from main.lua; the SDK adds it)
+```
+
+Perk machines that work without power: the editor's "Needs power" off writes the power switch name "boz_no_power". The game only powers a machine when its power switch is turned on (Quick Revive in solo is the exception), so when such a machine starts this powers it the same way (CPerk +0x7c powered, +0x7d lit, and the machine's own "power_switch_on" event for its lights and jingle).
+
+| Function | Description |
+| --- | --- |
+| `world.start()` | Turns on what map projects need from the standard library (call once, from main.lua). |

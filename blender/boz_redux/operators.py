@@ -1350,6 +1350,12 @@ class BOZ_PT_map_tools(Panel):
     bl_region_type = "UI"
     bl_category = "BOZ Redux"
 
+    @classmethod
+    def poll(cls, context):
+        # The BOZ editor (its tabs carry "boz_layout") has its own tools for all of this.
+        workspace = context.workspace
+        return workspace is None or workspace.get("boz_layout") is None
+
     def draw(self, context):
         layout = self.layout
         layout.label(text=f"Build {BUILD}")

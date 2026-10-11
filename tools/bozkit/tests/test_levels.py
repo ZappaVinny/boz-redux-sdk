@@ -180,7 +180,7 @@ class GeneratedAssetTests(unittest.TestCase):
         body = native.build_texture(4, 4, texels, bytes(template))
         self.assertEqual(len(body), 17 + 64 + 1)  # header, texels, "has mipmaps" = 0
         decoded = native.decode_texture_rgba(body)
-        self.assertEqual((decoded.width, decoded.height, decoded.format), (4, 4, 'BGRA8888'))
+        self.assertEqual((decoded.width, decoded.height, decoded.format), (4, 4, 'ABGR8888'))
         self.assertEqual(decoded.rgba[:4], bytes((2, 1, 0, 3)))
 
     def test_prop_box_from_collision_box_is_placed_and_turned(self):

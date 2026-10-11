@@ -119,8 +119,13 @@ class _SurfaceIndex:
 BUILD_OPTIONS = int(os.environ.get('BOZ_NAVMESH_OPTIONS', '0'))  # see tools/navmesh
 
 
-def _request(settings: Settings, mesh: navigation.NavMesh, vertices, triangles, tiles, links) -> bytes:
-    out = bytearray(b'BOZN' + struct.pack('<II', 2, BUILD_OPTIONS))
+def _request(settings: Settings, mesh: navigation.NavMesh, vertices, triangles, tiles, links,
+             blocking=None, volumes=()) -> bytes:
+    """The helper's request. *blocking* flags triangles that block but are never walkable on
+    top (version 3); triangles past its end are ordinary. *volumes*: (XZ polygon, min y, max y)
+    marked as areas 1, 2, ... (version 4)."""
+    version = 4 if volumes else 3 if blocking else 2
+    out = bytearray(b'BOZN' + struct.pack('<II', version, BUILD_OPTIONS))
     out += struct.pack('<6f2i2fi2ff', settings.cell_size, settings.cell_height,
                        settings.agent_height, settings.agent_radius, settings.agent_max_climb,
                        settings.agent_max_slope, settings.region_min_size,
@@ -131,6 +136,15 @@ def _request(settings: Settings, mesh: navigation.NavMesh, vertices, triangles, 
     out += struct.pack('<3f3f3f', *mesh.origin, *settings.bmin, *settings.bmax)
     out += struct.pack('<I', len(vertices)) + b''.join(struct.pack('<3f', *v) for v in vertices)
     out += struct.pack('<I', len(triangles)) + b''.join(struct.pack('<3i', *t) for t in triangles)
+    if version >= 3:
+        flags = [1 if flag else 0 for flag in (blocking or [])][:len(triangles)]
+        out += bytes(flags + [0] * (len(triangles) - len(flags)))
+    if version >= 4:
+        out += struct.pack('<I', len(volumes))
+        for number, (polygon, low, high) in enumerate(volumes, 1):
+            out += struct.pack('<BI', number, len(polygon))
+            out += b''.join(struct.pack('<2f', x, z) for x, z in polygon)
+            out += struct.pack('<2f', low, high)
     out += struct.pack('<I', len(tiles)) + b''.join(struct.pack('<2i', *t) for t in tiles)
     out += struct.pack('<I', len(links))
     for start, end, radius, bidirectional, user in links:
@@ -153,6 +167,14 @@ def _read_reply(data: bytes) -> list[tuple[int, int, bytes]]:
 
 def _align(value: int) -> int:
     return (value + 3) & ~3
+
+
+def _door_tag(flags: int, doors) -> tuple[int, int]:
+    """(flags, name hash) of a freshly built polygon: door volumes come back as 1 | id << 8."""
+    volume = flags >> 8
+    if volume and volume <= len(doors):
+        return 1 | DOOR_FLAG, doors[volume - 1][0]
+    return 1, 0
 
 
 def to_boz_tile(stock: bytes, tag, link_extras) -> bytes:
@@ -179,7 +201,10 @@ def to_boz_tile(stock: bytes, tag, link_extras) -> bytes:
         extra = 0
         if area_type >> 6 == 0 and count:
             centre = tuple(sum(vertices[v][axis] for v in verts[:count]) / count for axis in range(3))
-            flags, extra = tag(index, centre)
+            try:
+                flags, extra = tag(index, centre, flags)
+            except TypeError:
+                flags, extra = tag(index, centre)
         out += _BOZ_POLY.pack(first_link, *verts, *neis, flags, extra, count, area_type)
     rest_size = (_align(max_links * 12) + _align(detail_count * 12) + _align(detail_verts * 12)
                  + _align(detail_tris * 4) + _align(bv_count * 16))
@@ -275,8 +300,8 @@ def _inside(point, boxes, margin=0.0) -> bool:
                box[1] - margin <= point[2] <= box[3] + margin for box in boxes)
 
 
-def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | None = None
-            ) -> tuple[bytes, RebuildReport]:
+def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | None = None,
+            blocking=None, doors=()) -> tuple[bytes, RebuildReport]:
     """Rebuild the tiles of a CIsNavMesh that edits touched.
 
     *vertices_m*/*triangles* are the level's navmesh input (collision, metres, the game's Y-up
@@ -347,7 +372,9 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
             vertices_m += [a, b, c]
             up = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2])
             triangles.append((base, base + 1, base + 2) if up > 0 else (base, base + 2, base + 1))
-    request = _request(settings, mesh, vertices_m, triangles, grid, links)
+    doors = list(doors)[:62]
+    request = _request(settings, mesh, vertices_m, triangles, grid, links, blocking,
+                       [(polygon, low - 0.5, high) for _name, polygon, low, high in doors])
     with tempfile.TemporaryDirectory(prefix='boz-navmesh-') as directory:
         request_path = Path(directory) / 'request.bin'
         reply_path = Path(directory) / 'tiles.bin'
@@ -359,7 +386,9 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
     boxes = dirty or []
     report = RebuildReport(0, 0, 0, len(links), 0)
 
-    def tag(index, centre):
+    def tag(index, centre, flags=1):
+        if flags >> 8 and flags >> 8 <= len(doors):   # an added door's volume (see build)
+            return _door_tag(flags, doors)
         old = surfaces.find(centre, tolerance)
         if old is None:
             return (1, 0) if _inside(centre, boxes, settings.agent_radius) else (0, 0)
@@ -405,10 +434,14 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
     return navigation.encode(mesh), report
 
 
-def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None) -> bytes:
+def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None,
+          blocking=None, doors=()) -> bytes:
     """A new navmesh for new geometry, on *body*'s settings and tile grid (a shipped navmesh as
     template). Every tile the geometry touches is built; all floor is plain walkable (flags 1, no
-    name) and there are no off-mesh links. Input as for :func:`rebuild`."""
+    name) and there are no off-mesh links. Input as for :func:`rebuild`; *blocking* flags
+    obstacle triangles that are never walkable on top. *doors*: (name hash, XZ polygon, min y,
+    max y): floor under each is cut out as its own polygons, tagged as the game tags doors
+    (flags | 2, the door's name), so it opens only when the door is bought."""
     triangles = [(a, c, b) for a, b, c in triangles]
     mesh = navigation.decode(body)
     settings = Settings.from_raw(mesh.config.raw)
@@ -426,7 +459,9 @@ def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None) -> 
     first_y = max(0, math.floor((min(zs) - mesh.origin[2]) / mesh.tile_width) - 1)
     last_y = min(rows - 1, math.floor((max(zs) - mesh.origin[2]) / mesh.tile_width) + 1)
     grid = [(x, y) for y in range(first_y, last_y + 1) for x in range(first_x, last_x + 1)]
-    request = _request(settings, mesh, vertices_m, triangles, grid, [])
+    doors = list(doors)[:62]
+    request = _request(settings, mesh, vertices_m, triangles, grid, [], blocking,
+                       [(polygon, low - 0.5, high) for _name, polygon, low, high in doors])
     with tempfile.TemporaryDirectory(prefix='boz-navmesh-') as directory:
         request_path = Path(directory) / 'request.bin'
         reply_path = Path(directory) / 'tiles.bin'
@@ -438,7 +473,7 @@ def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None) -> 
     poly_bits = max(1, math.ceil(math.log2(mesh.max_polygons)))
     tiles = []
     for x, y, stock in sorted(built, key=lambda item: (item[1], item[0])):
-        data = to_boz_tile(stock, lambda index, centre: (1, 0), {})
+        data = to_boz_tile(stock, lambda index, centre, flags=1: _door_tag(flags, doors), {})
         decoded = navigation.decode_tile(data)
         if not decoded.polys:
             continue
@@ -466,3 +501,48 @@ def coverage(a_tiles, b_tiles, tolerance: float = 0.3) -> float:
             if index.find(centre, tolerance) is not None:
                 covered += area
     return covered / total if total else 1.0
+
+
+DOOR_FLAG = 2   # navmesh polygons under a door: the game shuts them until the door is bought
+
+
+def _in_polygon(point, polygon) -> bool:
+    """Whether an XZ point is inside a convex XZ polygon (either winding)."""
+    sign = 0
+    for (ax, az), (bx, bz) in zip(polygon, polygon[1:] + polygon[:1]):
+        cross = (bx - ax) * (point[1] - az) - (bz - az) * (point[0] - ax)
+        if abs(cross) < 1e-9:
+            continue
+        side = 1 if cross > 0 else -1
+        if sign and side != sign:
+            return False
+        sign = side
+    return True
+
+
+def tag_doors(body: bytes, doors) -> bytes:
+    """Tag the polygons under each door as the game's shipped navmeshes do: flags | 2 and the
+    door's name hash. *doors*: (name hash, XZ footprint polygon in metres, min y, max y)."""
+    if not doors:
+        return body
+    mesh = navigation.decode(body)
+    for tile in mesh.tiles:
+        decoded = navigation.decode_tile(tile.data)
+        out = bytearray(tile.data)
+        vert_count = struct.unpack_from('<i', tile.data, 28)[0]
+        base = navigation._TILE_HEADER.size + _align(vert_count * 12)
+        changed = False
+        for index, poly in enumerate(decoded.polys):
+            if not poly.vertices:
+                continue
+            points = [decoded.vertices[i] for i in poly.vertices]
+            centre = tuple(sum(v[k] for v in points) / len(points) for k in range(3))
+            for name_hash, footprint, low, high in doors:
+                if low - 1.0 <= centre[1] <= high + 0.5 and _in_polygon((centre[0], centre[2]), footprint):
+                    struct.pack_into('<II', out, base + index * POLY_STRIDE + 28,
+                                     poly.flags | DOOR_FLAG, name_hash)
+                    changed = True
+                    break
+        if changed:
+            tile.data = bytes(out)
+    return navigation.encode(mesh)

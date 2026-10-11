@@ -13,7 +13,7 @@ BOZKIT = ROOT / 'tools' / 'bozkit' / 'bozkit'
 VENDORED = {
     '__init__.py', 'blender_scene.py', 'bullet.py', 'collision.py', 'derbh.py', 'group.py',
     'hashing.py', 'levels.py', 'map_resources.py', 'native.py', 'navbuild.py', 'navigation.py',
-    'reflect.py', 'resources.py', 'world.py',
+    'reflect.py', 'resources.py', 'world.py', 'chalk.py', 'png.py',
 }
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 NAVMESH_HELPERS = [ROOT / 'tools' / 'navmesh' / 'build' / name

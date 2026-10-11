@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -294,11 +295,10 @@ def create_project(path: str | Path, mod_id: str, name: str, author: str,
             levels.check_name(mod_id.replace('-', '_'))
         except levels.LevelError as exc:
             raise ProjectError(f'mod id {mod_id!r} cannot be a level name: {exc}') from None
-        if template in ('empty', 'debug'):
-            try:
-                starting_world = world.template_world(template, game)
-            except (world.WorldError, levels.LevelError, KeyError) as exc:
-                raise ProjectError(str(exc)) from None
+        try:
+            starting_world = world.template_world(template, game)
+        except (world.WorldError, levels.LevelError, KeyError) as exc:
+            raise ProjectError(str(exc)) from None
     root = Path(path).resolve()
     if root.exists() and any(root.iterdir()):
         raise ProjectError(f'directory is not empty: {root}')
@@ -420,6 +420,8 @@ def _copy_tree(source: Path, destination: Path) -> None:
 def standard_library_path() -> Path:
     """Find the Lua standard library in a checkout or an installed SDK."""
     candidates = (
+        *((Path(os.environ['BOZ_SDK_ROOT']) / 'lib' / 'boz',) if os.environ.get('BOZ_SDK_ROOT')
+          else ()),
         SDK_ROOT / 'lib' / 'boz',
         Path(sys.executable).parent / 'lib' / 'boz',  # the SDK release (frozen launcher)
         Path(sys.prefix) / 'share' / 'boz-redux-sdk' / 'lib' / 'boz',
@@ -453,6 +455,21 @@ def compile_map(project: Project, game, fixed=None):
                                    fixed)
     except (world.WorldError, levels.LevelError) as exc:
         raise ProjectError(str(exc)) from None
+
+
+MAP_RUNTIME = 'require("boz.world").start()'
+
+
+def _map_runtime(scripts: Path) -> None:
+    """Map projects run boz.world (behaviour the world asks for that the game's data cannot
+    express): the SDK's current copy goes in, and main.lua starts it."""
+    (scripts / 'boz').mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(standard_library_path() / 'world.lua', scripts / 'boz' / 'world.lua')
+    main = scripts / 'main.lua'
+    text = main.read_text(encoding='utf-8') if main.is_file() else ''
+    if MAP_RUNTIME not in text:
+        main.write_text(f'{MAP_RUNTIME}  -- added by the SDK for map projects\n' + text,
+                        encoding='utf-8', newline='\n')
 
 
 def build_project(project: Project, output: str | Path | None = None,
@@ -490,6 +507,7 @@ def build_project(project: Project, output: str | Path | None = None,
     _copy_tree(project.assets, target / 'assets')
     if level_files is not None:
         level_files.write(target / 'assets')
+        _map_runtime(target / 'scripts')
     if project.include_standard_library:
         _copy_tree(standard_library_path(), target / 'scripts' / 'boz')
     report = {

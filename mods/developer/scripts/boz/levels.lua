@@ -11,9 +11,11 @@
 local levels = {}
 
 local AUTOSTART_KEY = "autostart_level"
+local AUTOSTART_VARS_KEY = "autostart_vars"   -- "Name=value;Name=value", set before the level starts
 local SETTLE_FRAMES = 60
 
 local pending = nil      -- level waiting for the front end
+local pending_vars = nil -- console variables to set just before it starts
 local countdown = nil    -- frames left once the front end is up
 local watching = false
 
@@ -22,6 +24,17 @@ local function start_now(name)
     if console == 0 then
         log("boz.levels: the console is not ready; start " .. name .. " from the menu")
         return false
+    end
+    if pending_vars then
+        local ok, boz_console = pcall(require, "boz.console")
+        for entry in string.gmatch(pending_vars, "[^;]+") do
+            local var, value = string.match(entry, "^%s*([%w_]+)%s*=%s*(.-)%s*$")
+            if var and ok then
+                local kept, err = boz_console.register(var, value)
+                log("boz.levels: " .. var .. " = " .. tostring(kept or err))
+            end
+        end
+        pending_vars = nil
     end
     log("boz.levels: starting " .. name)
     game.call("Console_Execute", console, "StartLevel " .. name)
@@ -67,13 +80,18 @@ function levels.start(name)
 end
 
 --- Starts the level a tool asked for, once: reads and clears the mod's "autostart_level"
---- setting (the Blender add-on's Build & Run writes it). Returns the level name or nil.
+--- setting (the SDK's Build & Run writes it), and its "autostart_vars" ("Name=value;..."), console
+--- variables set just before the level starts (e.g. UnlimitedHealth=true). Returns the level name
+--- or nil.
 function levels.autostart()
     local name = settings.get(AUTOSTART_KEY)
     if type(name) ~= "string" or name == "" then
         return nil
     end
     settings.set(AUTOSTART_KEY, nil)
+    local vars = settings.get(AUTOSTART_VARS_KEY)
+    settings.set(AUTOSTART_VARS_KEY, nil)
+    pending_vars = type(vars) == "string" and vars ~= "" and vars or nil
     levels.start(name)
     return name
 end

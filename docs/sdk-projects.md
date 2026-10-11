@@ -83,44 +83,92 @@ from (`empty`, `debug`, `kino`, `callofthedead`, `ascension` or `tutorial`).
 
 ### Map worlds
 
-A map project's world is source the compiler reads, in `source/`:
+A map project's world is source the compiler reads, in `source/`. The editor writes it on every
+save; it can also be edited by hand.
 
 ```text
 source/
-  world.json             base level, meshes, placed entities
-  meshes/<name>.json     vertices (centimetres, Y up), UVs, triangles
-  textures/<name>.png    each mesh's texture (power-of-two sides, 4 to 1024)
+  world.json             base level, meshes, props, instances, entities
+  meshes/<name>.json     level geometry: vertices (centimetres, Y up, world space), UVs,
+                         triangles, and per triangle which texture it uses
+  props/<name>.json      a prop's geometry, in its own space
+  textures/<name>.png    textures (power-of-two sides, 4 to 1024); <name>_1.png, ... for a
+                         mesh's further textures
 ```
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "base": "kino",
   "meshes": [
-    {"name": "floor", "file": "meshes/floor.json", "texture": "textures/floor.png", "collision": "floor", "double_sided": true}
+    {"name": "floor", "file": "meshes/floor.json", "textures": ["textures/floor.png"], "collision": "floor", "double_sided": true}
+  ],
+  "props": [
+    {"name": "crate", "file": "props/crate.json", "textures": ["textures/crate.png"], "collision": "solid", "shape": "box", "double_sided": false}
+  ],
+  "instances": [
+    {"prop": "crate", "position": [300.0, 0.0, 300.0], "yaw": 45.0},
+    {"model": "levels/kino/alley_shared.group.bin#0x1a2b3c4d", "collision": "solid", "shape": "box", "position": [0.0, 0.0, 600.0], "yaw": 90.0}
   ],
   "entities": [
-    {"source": "spawn_player_1", "position": [-100.0, 5.0, -100.0], "yaw": 0.0}
+    {"source": "spawn_player_1", "position": [-100.0, 5.0, -100.0], "yaw": 0.0},
+    {"source": "0x9f1e2d3c", "group": "ingame/ingame.group.bin", "position": [600.0, 0.0, -600.0], "yaw": 180.0}
   ]
 }
 ```
 
 - `base` is the shipped level that provides the rounds, zombie types, sounds, cameras, weapons
-  and arms.
-- Each mesh becomes a model with its own texture and material. Triangles use the game's
-  winding; `double_sided` also draws their backs. `collision` is `floor` (walked on), `solid`
-  (blocks) or `none` (decoration).
-- Entities are copies of the base level's entities, by name or `0x` hash, at `position` turned
-  by `yaw` degrees. Zombie spawn points among them become the starting area's spawns. Props
-  get a solid box in the collision and navmesh.
-- The compiler (`bozkit.world.compile_world`) writes the level's groups into the mod's assets:
-  its `fixed` loading entry, renamed weapon and arms groups, the level group and its statics
-  with the collision mesh and a navmesh built from the floor and solid meshes.
+  and arms. With `"inherit": true` the map is the **whole base level** (rooms, entities,
+  navmesh) plus the world's contents: the original-map templates.
+- **Meshes** are level geometry, each a model with its textures and materials. Triangles use the
+  game's winding; `double_sided` also draws their backs. `collision` is `floor` (walkable:
+  players stand on it and the navmesh is built on its top), `solid` (blocking: nobody passes
+  through or walks on it; it cuts the navmesh) or `none` (decoration). The editor calls these
+  Walkable, Blocking and None.
+- **Props** are models of the project's own, in their own space, placed any number of times by
+  **instances**. An instance can also place a **game model** (`<group path>#0x<hash>`); the
+  compiler copies the model, its materials and its textures into the level. A prop or model's
+  `shape` is `box` (its bounds) or `mesh` (its triangles) for collision.
+- **Entities** are copies of the game's entities (perks, spawns, the power switch, ...), by name
+  or `0x` hash, from the base level or from any `group`. Templates without a transform (in
+  `ingame`) get one. Placing the same entity again makes a renamed copy; in an inherited map the
+  first placement of a base-level entity (by its `0x` hash, without `piece` or `group`) moves and
+  edits the original, and later ones are copies. `removed` lists base-level entities (`0x`
+  hashes) taken out of an inherited map; the navmesh around them is rebuilt. `piece` names the toolkit piece it
+  came from, `fields` sets its settings (`"CPerk.m_perkSinglePCost": 2000`; names and the power
+  link as names, `0` for none) and `prop` draws a project prop instead of its own model, keeping
+  its behaviour. Zombie spawn points become the starting area's spawns in a generated map.
+- Instances and entities have a `position`, a `rotation` (x, y, z, w quaternion in the game's
+  axes; older files have a `yaw` in degrees) and an optional `scale`. An entity's scale
+  multiplies its own (wall buys and weapons are drawn at 1/64).
+- **Repacking:** an entity or model from another map brings what it uses (models, materials,
+  textures, animation skins, skeletons, animations, state machines, sounds), found by name hash in
+  that map's groups and `ingame` and copied into the level unless the level already loads it.
+  Weapons are not repacked: a wall buy sells a weapon of the level's own weapons group.
+- `"boz.weapon"` in a wall buy's `fields` picks its weapon: its "model" child's asset name,
+  skeleton, model and skin are set from a shipped wall buy of that weapon, else from the weapon.
+- **Chalk:** a shipped wall buy's chalk drawing is a separate decal (a quad with a 128 x 64
+  texture) next to it. Each placed wall buy gets one at the same offset (`bozkit.chalk`): the
+  weapon's own chalk when the game has one, else an outline drawn from the weapon model's side
+  silhouette. `"boz.chalk"` in its `settings` is `""` (automatic), `"none"`, or an image in
+  `source/chalk/`.
+- **Doors** gate the navmesh as in the shipped maps: the floor under a door's collision box is
+  cut out as its own polygons, flagged as door floor (flags | 2) with the door's name, so players
+  and zombies pass only once the door is bought. Copies get names of their own; doors in
+  generated maps unlock no areas.
+- Map projects get `require("boz.world").start()` in `main.lua` at build time, with the SDK's
+  `boz/world.lua`: it powers perk machines whose power switch is `boz_no_power` (the editor's
+  "Needs power" off), as the game powers Quick Revive in solo. Pack-a-Punch gets
+  `m_HasPower`; doors and trap switches without a power switch need none.
+- The compiler (`bozkit.world.compile_world`) writes the level's groups into the mod's assets.
+  A generated map gets a collision mesh and a navmesh built from its floor and solid geometry
+  (entities with a model get a box). An inherited map adds its own collision entity and rebuilds
+  only the navmesh tiles near what changed.
 
 Templates: **Empty** is a 6 m floor and the four player spawns (no zombie spawns; the Colt is
 the only weapon). **Debug arena** is a walled 24 m square with the base level's starting-area
-zombie spawns, Juggernog and the power switch; it needs the game data. Original-map templates
-arrive with the editor.
+zombie spawns, Juggernog and the power switch. **Kino der Toten, Call of the Dead, Ascension and
+the Tutorial** inherit the whole original map. All but Empty need the asset library.
 
 Building a map needs the game's groups: `bozkit build` reads the SDK's asset library, or the
 client pack given with `--client`.
@@ -189,15 +237,18 @@ can't be built, but script-only projects still work.
   manager), **Run in game** for script mods (installs the mod and the Developer mod into the
   client, then starts the game), and the game log filtered to the mod and errors. For maps,
   **Build & Run** compiles the world, installs the mod last in the load order with the Developer
-  mod, and the Developer mod starts the level once the main menu is up. Map projects open in
-  the editor, which arrives in a later update.
+  mod, and the Developer mod starts the level once the main menu is up. **Open in Editor**
+  opens a map in the BOZ Redux editor (Blender with the SDK's app template; see
+  `blender/README.md`), which has its own Build & Run with start options (unlimited health or
+  points, starting points).
 - **Client:** the client folder, its game data, and the installed mods, which can be switched on
   and off; **Open client launcher** starts the client's own launcher.
 - **Library:** every Zombies asset in the game with previews (see *Asset library* below).
   Search by name, description or `0x` hash, filter by kind and map, and copy an asset's name or
   hash for scripts.
 - **Learn:** the guides and references, and the Developer and Redux mods as examples.
-- **Settings:** client folder, where new projects go, default author, and **Rebuild library**.
+- **Settings:** client folder, where new projects go, default author, the editor's Blender
+  (automatic: the SDK's own, else `blender` on PATH), and **Rebuild library**.
 
 Settings and the project list live in the SDK data folder (`~/.local/share/boz-redux-sdk` on
 Linux, `%APPDATA%\BOZ Redux SDK` on Windows; `BOZ_SDK_HOME` overrides it). The launcher uses the

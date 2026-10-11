@@ -250,14 +250,14 @@ def _build_window():
                 entries = [('empty', 'Empty', 'A 6 m floor and the player spawns; the Colt is '
                             'the only weapon', True),
                            ('debug', 'Debug arena', 'A walled arena with zombie spawns, Juggernog '
-                            'and power: the quickest way to test', self.game_ready)]
+                            'and power: the quickest way to test', bool(self.maps))]
                 for key, label in asset_library.MAPS.items():
-                    entries.append((key, label, 'A fresh copy of the original map (arrives with '
-                                    'the editor)', False))
-                self.note.setText('Build && Run on the project page compiles the map and starts '
-                                  'the game in it. The editor arrives in a later SDK update.'
-                                  + ('' if self.game_ready else ' The debug arena needs the '
-                                     'game data.'))
+                    entries.append((key, label, 'The whole original map to change and add to '
+                                    '(a fresh copy)', key in self.maps))
+                self.note.setText('Open in Editor to build the map; Build && Run compiles it and '
+                                  'starts the game in it.'
+                                  + ('' if self.maps else ' The debug arena and original maps '
+                                     'need the asset library (Library page).'))
             else:
                 entries = [(key, label, text, True)
                            for key, (label, text) in sdk_project.SCRIPT_TEMPLATES.items()]
@@ -528,7 +528,8 @@ def _build_window():
                 if widget:
                     widget.deleteLater()
             if project.kind == 'map':
-                widgets = [coming('Open in Editor'),
+                widgets = [button('Open in Editor', self.open_editor,
+                                  'Opens the map in the BOZ Redux editor (Blender)'),
                            button('▶ Build && Run', self.run_in_game,
                                   'Compiles the map into a mod, installs it with the Developer '
                                   'mod and starts the game straight into the level'),
@@ -559,6 +560,18 @@ def _build_window():
                 sdkhome.start_detached(command, folder)
             else:
                 open_path(folder)
+
+        def open_editor(self) -> None:
+            from PySide6.QtWidgets import QApplication
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                sdkhome.open_editor(self.project, self.main.settings)
+            except (OSError, sdk_project.ProjectError) as exc:
+                QApplication.restoreOverrideCursor()
+                QMessageBox.warning(self, 'Open in Editor', str(exc))
+                return
+            QApplication.restoreOverrideCursor()
+            self.main.statusBar().showMessage('Opening the editor…', 8000)
 
         def run_in_game(self) -> None:
             from PySide6.QtWidgets import QApplication
@@ -985,6 +998,13 @@ def _build_window():
             self.author = QLineEdit()
             self.author.editingFinished.connect(self.save)
             form.addRow('Default author', self.author)
+            blender_row = QHBoxLayout()
+            self.blender = QLineEdit()
+            self.blender.setPlaceholderText('Automatic: the SDK\'s own Blender, else blender on PATH')
+            self.blender.editingFinished.connect(self.save)
+            blender_row.addWidget(self.blender, 1)
+            blender_row.addWidget(button('Browse…', self.browse_blender))
+            form.addRow('Editor (Blender)', blender_row)
             data = QLabel(str(sdkhome.data_dir()))
             data.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             form.addRow('SDK data folder', data)
@@ -1003,6 +1023,7 @@ def _build_window():
             self.client.setText(settings.client or 'Not chosen')
             self.projects.setText(str(settings.projects_folder()))
             self.author.setText(settings.author)
+            self.blender.setText(settings.blender)
 
         def browse_projects(self) -> None:
             chosen = QFileDialog.getExistingDirectory(self, 'Where new projects go',
@@ -1011,9 +1032,16 @@ def _build_window():
                 self.projects.setText(chosen)
                 self.save()
 
+        def browse_blender(self) -> None:
+            chosen, _ = QFileDialog.getOpenFileName(self, 'Blender 5.2', str(Path.home()))
+            if chosen:
+                self.blender.setText(chosen)
+                self.save()
+
         def save(self) -> None:
             self.main.settings.projects_dir = self.projects.text().strip()
             self.main.settings.author = self.author.text().strip()
+            self.main.settings.blender = self.blender.text().strip()
             self.main.settings.save()
 
     # The window

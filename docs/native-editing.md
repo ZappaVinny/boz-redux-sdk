@@ -117,7 +117,7 @@ Export the recognizable red main-menu logo:
   /tmp/boz-etc/frontend/frontend.group.bin main_menu_logo /tmp/main_menu_logo.png
 ```
 
-Row-major ARGB4444 (`0x05`) and 32-bit ARGB (`0x0e`) textures can be exported and replaced. PNG import
+Row-major ABGR_4444 (`0x05`) and ABGR_8888 (`0x0e`, bytes R, G, B, A) textures can be exported and replaced. PNG import
 preserves a source texture's unknown header fields and native pixel format. Cooked ETC1 and DXT1
 textures, which make up most map textures, decode for previews (Blender) but cannot be written yet.
 Other layouts fail rather than producing a plausible-looking corrupt image.

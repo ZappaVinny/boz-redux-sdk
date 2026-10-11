@@ -70,6 +70,23 @@ class NavRebuildTests(unittest.TestCase):
             navbuild.build(empty_navmesh(), [(v[0] + 50, v[1], v[2]) for v in vertices],
                            triangles)
 
+    def test_blocking_obstacles_are_not_floor(self):
+        # A raised slab: walkable floor on its own, never walkable when flagged as blocking.
+        def with_slab(blocking):
+            vertices, triangles = floor()
+            count = len(triangles)
+            base = len(vertices)
+            vertices += [(1.0, 0.6, 1.0), (5.4, 0.6, 1.0), (5.4, 0.6, 5.4), (1.0, 0.6, 5.4)]
+            triangles += [(base, base + 1, base + 2), (base, base + 2, base + 3)]
+            flags = [0] * count + [1, 1] if blocking else None
+            return navbuild.build(empty_navmesh(), vertices, triangles, blocking=flags)
+
+        def heights(body):
+            tiles = [navigation.decode_tile(tile.data) for tile in navigation.decode(body).tiles]
+            return {round(v[1], 1) for tile in tiles for v in tile.vertices}
+        self.assertTrue(any(h > 0.5 for h in heights(with_slab(False))))
+        self.assertFalse(any(h > 0.5 for h in heights(with_slab(True))))
+
     def test_layout_and_walkable_floor(self):
         mesh = navigation.decode(self.shipped)
         self.assertEqual(len(mesh.tiles), 2)

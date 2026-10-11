@@ -36,7 +36,10 @@ def data_dir() -> Path:
 
 
 def sdk_root() -> Path:
-    """The SDK folder: the release folder next to the launcher, or the repository checkout."""
+    """The SDK folder: BOZ_SDK_ROOT (set for the editor), the release folder next to the
+    launcher, or the repository checkout."""
+    if os.environ.get('BOZ_SDK_ROOT'):
+        return Path(os.environ['BOZ_SDK_ROOT'])
     if getattr(sys, 'frozen', False):
         return Path(sys.executable).parent
     return sdk_project.SDK_ROOT
@@ -61,6 +64,7 @@ class Settings:
     author: str = ''
     projects_dir: str = ''
     projects: list[ProjectEntry] = field(default_factory=list)
+    blender: str = ''        # the editor's Blender; empty: the SDK's own, else blender on PATH
 
     @classmethod
     def load(cls) -> 'Settings':
@@ -71,12 +75,13 @@ class Settings:
         entries = [ProjectEntry(Path(item['path']), float(item.get('last_opened', 0)))
                    for item in data.get('projects', []) if isinstance(item, dict) and item.get('path')]
         return cls(str(data.get('client', '')), str(data.get('author', '')),
-                   str(data.get('projects_dir', '')), entries)
+                   str(data.get('projects_dir', '')), entries, str(data.get('blender', '')))
 
     def save(self) -> None:
         folder = data_dir()
         folder.mkdir(parents=True, exist_ok=True)
         data = {'client': self.client, 'author': self.author, 'projects_dir': self.projects_dir,
+                'blender': self.blender,
                 'projects': [{'path': str(entry.path), 'last_opened': entry.last_opened}
                              for entry in self.projects]}
         temporary = folder / (SETTINGS_FILE + '.tmp')
@@ -395,11 +400,12 @@ def game_command(root: Path) -> list[str] | None:
     return None
 
 
-def start_detached(command: list[str], cwd: Path, log: Path | None = None) -> subprocess.Popen:
+def start_detached(command: list[str], cwd: Path, log: Path | None = None,
+                   env: dict | None = None) -> subprocess.Popen:
     output = open(log, 'w') if log else subprocess.DEVNULL
     options = {'creationflags': 0x00000008} if sys.platform == 'win32' else {'start_new_session': True}
     return subprocess.Popen(command, cwd=cwd, stdout=output, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL, **options)
+                            stdin=subprocess.DEVNULL, env=env, **options)
 
 
 def game_running() -> bool:
@@ -447,7 +453,13 @@ def load_last(root: Path, mod_id: str) -> None:
     ini_set(root, 'mods', 'order', ', '.join(new))
 
 
-def run_in_game(project: sdk_project.Project, root: str | Path) -> str:
+def start_vars_text(start_vars: dict | None) -> str:
+    """Console variables for the level start, as the Developer mod reads them."""
+    return ';'.join(f'{name}={value}' for name, value in (start_vars or {}).items())
+
+
+def run_in_game(project: sdk_project.Project, root: str | Path,
+                start_vars: dict | None = None) -> str:
     """Install a project (and the Developer mod) into the client and start the game. A map
     project is compiled first, and the Developer mod starts its level once the menu is up."""
     from . import library
@@ -476,6 +488,78 @@ def run_in_game(project: sdk_project.Project, root: str | Path) -> str:
                                            'levels; replace it with the SDK\'s copy')
         load_last(root, project.mod.id)
         set_mod_setting(root, DEVELOPER_MOD, 'autostart_level', project.map_name)
+        set_mod_setting(root, DEVELOPER_MOD, 'autostart_vars', start_vars_text(start_vars))
         message = f'built {project.map_name}; the game starts it after the main menu'
     start_detached(command, root, root / 'boz-log.txt')
     return message
+
+
+# The editor
+
+
+def find_blender(settings: Settings) -> Path | None:
+    """The Blender the editor runs in: the settings' choice, the SDK's own, or one on PATH."""
+    candidates = [Path(settings.blender)] if settings.blender else []
+    names = ('blender.exe',) if sys.platform == 'win32' else ('blender',)
+    candidates += [sdk_root() / 'blender' / name for name in names]
+    found = shutil.which('blender')
+    if found:
+        candidates.append(Path(found))
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def suite_dir() -> Path:
+    """The assembled editor (a Blender user scripts folder): the release's suite/, or the
+    checkout's build/suite (tools/build_suite.py)."""
+    release = sdk_root() / 'suite'
+    return release if release.is_dir() else sdk_root() / 'build' / 'suite'
+
+
+def editor_command(project: sdk_project.Project, settings: Settings) -> tuple[list[str], dict]:
+    """The command and environment that open *project* in the editor."""
+    blender = find_blender(settings)
+    if blender is None:
+        raise sdk_project.ProjectError('Blender was not found: choose it in Settings')
+    suite = suite_dir()
+    if not (suite / 'scripts' / 'startup' / 'bl_app_templates_user' / 'boz_suite').is_dir():
+        raise sdk_project.ProjectError(f'the editor is missing from {suite}')
+    env = dict(os.environ)
+    env.update({'BLENDER_USER_SCRIPTS': str(suite / 'scripts'),
+                'BLENDER_USER_CONFIG': str(data_dir() / 'blender' / 'config'),
+                'BOZ_PROJECT': str(project.root), 'BOZ_SDK_ROOT': str(sdk_root()),
+                'BOZ_SDK_HOME': str(data_dir()), 'BOZ_CLIENT': settings.client})
+    command = [str(blender), '--offline-mode', '--app-template', 'boz_suite']
+    blend = project.root / 'map.blend'
+    if blend.is_file():
+        command.append(str(blend))
+    return command, env
+
+
+def prepare_editor(settings: Settings) -> None:
+    """In an SDK checkout, rebuild the editor (tools/build_suite.py) when its sources changed."""
+    script = sdk_root() / 'tools' / 'build_suite.py'
+    if getattr(sys, 'frozen', False) or not script.is_file():
+        return
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('boz_build_suite', script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if module.stale():
+        blender = find_blender(settings)
+        if blender is None:
+            raise sdk_project.ProjectError('Blender was not found: choose it in Settings')
+        try:
+            module.build(blender)
+        except RuntimeError as exc:
+            raise sdk_project.ProjectError(str(exc)) from None
+
+
+def open_editor(project: sdk_project.Project, settings: Settings):
+    """Start the editor on a map project (building it first in a checkout)."""
+    if project.kind != 'map':
+        raise sdk_project.ProjectError('only map projects open in the editor')
+    prepare_editor(settings)
+    command, env = editor_command(project, settings)
+    log = data_dir() / 'editor-log.txt'
+    log.parent.mkdir(parents=True, exist_ok=True)
+    return start_detached(command, project.root, log, env)

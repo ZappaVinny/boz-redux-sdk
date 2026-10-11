@@ -92,11 +92,15 @@ top of the surface has v = 0. Tools that display images upright must mirror v (`
 
 ### Raw texture formats
 
-Uncompressed textures store A, R, G, B from the most significant bits of a little-endian word:
-format `0x0e` is 32-bit (bytes B, G, R, A) and `0x05` is its 16-bit 4444 twin. The tutorial ships
-some textures as `0x0e` and Kino ships the same textures as `0x05`, with matching values. For
-example, the graffiti sign's alpha-0 red background is `00 00 ff 00` in one and `0x0f00` in the
-other. Most alpha-tested and blended map art uses these formats, so reading `0x05` as RGB565 turns
+Uncompressed textures use Marmalade's formats, named by channel from the most significant bits of
+a little-endian word: `0x0e` is ABGR_8888 (bytes **R, G, B, A**), `0x0a` is BGR_888 (bytes
+R, G, B) and `0x05` is ABGR_4444 (alpha in the top nibble, red in the bottom). Evidence: textures
+that are ETC1 in `blackops_etc.dz` and `0x0a` in `blackops_gles1.dz` match pixel for pixel in
+R, G, B order; a texture written as B, G, R, A showed red and blue swapped in the game; and the
+tutorial's graffiti sign, `0x0e` in one level and `0x05` in another, has the same alpha-0
+background in both (`00 00 ff 00` and `0x0f00`, blue). bozkit before 2026-10-10 read these as
+B, G, R, A, which swapped red and blue in previews and in re-encoded textures.
+Most alpha-tested and blended map art uses these formats, so reading `0x05` as RGB565 turns
 red art green and shows transparent areas as solid colour.
 
 Layout (`CIwTexture::Serialise`, then `CIwImage::Serialise`), in every shipped raw texture:
@@ -136,7 +140,7 @@ image blocks and rejected its seven-level texture altogether.
 | `CIwMaterial` | Complete | Compact records contain flags and one primary texture reference; full records contain four texture slots, packed colours and a shader-technique reference; unknown auxiliary data retained |
 | `CIwModel` | Static GL triangle geometry, render-vertex remaps, vertex colours, both UV sets, explicit primitive material indices, terminal material references, and lossless preservation | glTF/Blender export; source-backed position and UV edits retain unknown blocks; additional primitive types remain |
 | `CIsNavMesh` | Complete for shipped resources | Recast agent/build settings; Detour tiles retained raw |
-| `CIwTexture` | Row-major ARGB4444 (`0x05`) and 32-bit ARGB (`0x0e`, bytes B, G, R, A) plus cooked ETC1 and DXT1 mip payloads | PNG import for writable raw formats; raw and cooked formats decode for Blender/material previews |
+| `CIwTexture` | Row-major ABGR_4444 (`0x05`) and ABGR_8888 (`0x0e`, bytes R, G, B, A) plus cooked ETC1 and DXT1 mip payloads | PNG import for writable raw formats; raw and cooked formats decode for Blender/material previews |
 | `CIsPortal` | Complete | Vertices, plane, and connected sector names |
 | Collision triangle meshes | Complete for Zombies maps | Vertices, indices, per-triangle materials, glTF; the embedded Bullet shape is updated to match |
 | `CIsNavMeshConnection` | Complete | Endpoints, rotation, and raw offset-named settings |
@@ -150,7 +154,7 @@ navmeshes. All 3,562 model bodies are preserved byte-identically. Static model e
 validated with the named `colt45` resource, including its planar center-offset positions,
 render-vertex remap, UVs, and all material-indexed triangle lists. `CIwModelBlockCols` stores either
 four component planes or one compact grayscale byte per render vertex; the latter expands to opaque
-RGBA at load. BGRA8888 texture export was visually
+RGBA at load. 32-bit texture export was visually
 validated with the named `main_menu_logo` resource. ETC1 and DXT1 decoding was visually validated
 against the same tutorial floor material from the corresponding platform archives.
 

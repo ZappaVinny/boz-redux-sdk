@@ -29,28 +29,28 @@ class WorldTests(unittest.TestCase):
         self.assertEqual((mesh.name, mesh.collision, mesh.double_sided), ('floor', 'floor', True))
         self.assertEqual(mesh.vertices, original.meshes[0].vertices)
         self.assertEqual(mesh.triangles, original.meshes[0].triangles)
-        self.assertEqual(mesh.texture, original.meshes[0].texture)  # PNG keeps the texels
+        self.assertEqual(mesh.textures, original.meshes[0].textures)  # PNG keeps the texels
         data = json.loads((self.source / 'world.json').read_text())
-        self.assertEqual(data['meshes'][0]['texture'], 'textures/floor.png')
+        self.assertEqual(data['meshes'][0]['textures'], ['textures/floor.png'])
 
     def test_double_sided_adds_backs(self):
         mesh = world.empty_world().meshes[0]
-        front = mesh.model_triangles()[:len(mesh.triangles)]
-        backs = mesh.model_triangles()[len(mesh.triangles):]
-        self.assertEqual(front, mesh.triangles)
-        self.assertEqual(backs, [(a, c, b) for a, b, c in mesh.triangles])
+        triangles, faces = mesh.model_triangles()
+        self.assertEqual(triangles[:len(mesh.triangles)], mesh.triangles)
+        self.assertEqual(triangles[len(mesh.triangles):], [(a, c, b) for a, b, c in mesh.triangles])
+        self.assertEqual(faces, [0] * len(triangles))
 
     def test_validation_finds_problems(self):
         broken = world.empty_world()
         mesh = broken.meshes[0]
         mesh.name = 'Bad Name'
         mesh.collision = 'sticky'
-        mesh.texture = world.Texture(100, 64, bytes(100 * 64 * 4))
+        mesh.textures = [world.Texture(100, 64, bytes(100 * 64 * 4))]
         mesh.vertices[0] = (40000, 0, 0)
-        broken.entities = [world.Placement('Juggernog', (0, 0, 0))] * 2
+        broken.entities = [world.Placement('Juggernog', (0, 0, 0), prop='missing')]
         problems = ' | '.join(world.validate(broken))
         for text in ('names use', 'collision must be', 'powers of two', '±327 m',
-                     'placed more than once', 'player spawn'):
+                     "draws prop 'missing'", 'player spawn'):
             self.assertIn(text, problems)
 
     def test_removed_meshes_lose_their_files(self):
@@ -68,12 +68,70 @@ class WorldTests(unittest.TestCase):
         with self.assertRaises(world.WorldError):
             world.load(self.source)
 
+    def test_props_instances_and_several_textures(self):
+        built = world.empty_world()
+        floor = built.meshes[0]
+        second = world.Texture(4, 4, bytes(range(64)))
+        floor.textures.append(second)
+        floor.face_textures = [i % 2 for i in range(len(floor.triangles))]
+        crate = world.Mesh('crate', [(0, 0, 0), (100, 0, 0), (0, 100, 0)],
+                           [(0.0, 0.0)] * 3, [(0, 1, 2)], [second], 'solid', shape='box')
+        built.props.append(crate)
+        built.instances = [world.Instance((10.0, 0.0, 20.0), 45.0, prop='crate'),
+                           world.Instance((0.0, 0.0, 0.0), model='ingame/ingame.group.bin#0x0000002a')]
+        built.entities.append(world.Placement('0x0000abcd', (1.0, 2.0, 3.0), 0.0,
+                                              'ingame/ingame.group.bin'))
+        self.assertEqual(world.validate(built), [])
+        world.save(built, self.source)
+        loaded = world.load(self.source)
+        self.assertEqual(loaded.meshes[0].face_textures, floor.face_textures)
+        self.assertEqual(loaded.meshes[0].textures[1], second)
+        self.assertEqual((loaded.props[0].name, loaded.props[0].shape), ('crate', 'box'))
+        self.assertEqual(loaded.instances, built.instances)
+        self.assertEqual(loaded.instances[1].model_ref(), ('ingame/ingame.group.bin', 42))
+        self.assertEqual(loaded.entities[-1].group, 'ingame/ingame.group.bin')
+        self.assertTrue((self.source / 'textures' / 'floor_1.png').is_file())
+        built.instances.append(world.Instance((0.0, 0.0, 0.0), prop='barrel'))
+        self.assertTrue(any('barrel' in p for p in world.validate(built)))
+
+    def test_format_1_still_loads(self):
+        world.save(world.empty_world(), self.source)
+        data = json.loads((self.source / 'world.json').read_text())
+        data['format'] = 1
+        mesh = data['meshes'][0]
+        mesh['texture'] = mesh.pop('textures')[0]
+        (self.source / 'world.json').write_text(json.dumps(data))
+        self.assertEqual(len(world.load(self.source).meshes[0].textures), 1)
+
+    def test_full_transforms_round_trip(self):
+        built = world.empty_world()
+        built.entities[0] = world.Placement('spawn_player_1', (1.0, 2.0, 3.0),
+                                            rotation=(0.5, 0.5, 0.5, 0.5), scale=(2.0, 1.0, 1.0),
+                                            fields={'CSpawnPoint.spawnType': 'hole'})
+        world.save(built, self.source)
+        loaded = world.load(self.source).entities[0]
+        self.assertEqual((loaded.rotation, loaded.scale, loaded.fields),
+                         ((0.5, 0.5, 0.5, 0.5), (2.0, 1.0, 1.0), {'CSpawnPoint.spawnType': 'hole'}))
+        self.assertEqual(world.load(self.source).entities[1].quaternion(), (0.0, 0.0, 0.0, 1.0))
+
+    def test_inherited_worlds(self):
+        with self.assertRaises(world.WorldError):
+            world.template_world('kino')          # needs the game's data
+        inherited = world.World('kino', inherit=True)
+        self.assertEqual(world.validate(inherited), [])   # the base brings floors and spawns
+        world.save(inherited, self.source)
+        self.assertTrue(world.load(self.source).inherit)
+        self.assertIn('"inherit": true', (self.source / 'world.json').read_text())
+        inherited.removed = ['0x88ec4490']   # base entities deleted in the editor
+        world.save(inherited, self.source)
+        self.assertEqual(world.load(self.source).removed, ['0x88ec4490'])
+
     def test_hash_sources(self):
         self.assertEqual(world.Placement('0x0000002a', (0, 0, 0)).hash, 42)
         with self.assertRaises(world.WorldError):
             world.template_world('debug')  # needs the game's data
         with self.assertRaises(world.WorldError):
-            world.template_world('kino')
+            world.template_world('nowhere')
 
 
 if __name__ == '__main__':

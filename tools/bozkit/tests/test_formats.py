@@ -134,31 +134,38 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(native.texture_layout(body).bytes_per_pixel, 2)
         self.assertEqual(native.decode_texture(body).getpixel((0, 0)), (255, 136, 0, 68))
 
-    def test_bgr888_decodes_for_preview_only(self):
+    def test_bgr888_bytes_are_red_green_blue(self):
         header = bytearray(17)
         header[4] = 0x0A
         struct.pack_into('<HHH', header, 7, 1, 1, 3)
         body = bytes(header) + bytes((1, 2, 3)) + b'\0'
-        self.assertEqual(native.decode_texture_rgba(body).rgba, bytes((3, 2, 1, 255)))
+        self.assertEqual(native.decode_texture_rgba(body).rgba, bytes((1, 2, 3, 255)))
         with self.assertRaises(ValueError):
             native.encode_texture(Image.new('RGB', (1, 1)), body)
 
-    def test_argb4444_native_channel_order(self):
-        # Kino's 16-bit copy of a tutorial texture: an alpha-0 red background is 0x0f00.
+    def test_abgr4444_native_channel_order(self):
+        # Alpha in the top nibble, red in the bottom (Marmalade's ABGR_4444). The tutorial's
+        # graffiti background is 0x0f00 here and 00 00 ff 00 as ABGR_8888: blue, alpha 0.
         header = bytearray(17)
         header[4] = 0x05
         struct.pack_into('<HHH', header, 7, 2, 1, 4)
-        decoded = native.decode_texture_rgba(bytes(header) + struct.pack('<HH', 0x0F00, 0xF48C)
+        decoded = native.decode_texture_rgba(bytes(header) + struct.pack('<HH', 0x0F00, 0xFC84)
                                              + b'\0')
-        self.assertEqual(decoded.format, 'ARGB4444')
-        self.assertEqual(decoded.rgba, bytes((255, 0, 0, 0, 68, 136, 204, 255)))
+        self.assertEqual(decoded.format, 'ABGR4444')
+        self.assertEqual(decoded.rgba, bytes((0, 0, 255, 0, 68, 136, 204, 255)))
+        image = Image.frombytes('RGBA', (2, 1), decoded.rgba)
+        self.assertEqual(native.encode_texture(image, bytes(header) + bytes(4) + b'\0')[17:21],
+                         struct.pack('<HH', 0x0F00, 0xFC84))
 
-    def test_bgra8888_native_channel_order(self):
+    def test_abgr8888_bytes_are_red_green_blue_alpha(self):
         header = bytearray(17)
         header[4] = 0x0E
         struct.pack_into('<HHH', header, 7, 1, 1, 4)
-        image = native.decode_texture(bytes(header) + bytes((0, 0, 255, 255)) + b'\0')
+        image = native.decode_texture(bytes(header) + bytes((255, 0, 0, 255)) + b'\0')
         self.assertEqual(image.getpixel((0, 0)), (255, 0, 0, 255))
+        # bozkit.world keeps B, G, R, A; build_texture writes the game's R, G, B, A.
+        built = native.build_texture(1, 1, bytes((0, 0, 255, 255)), bytes(header) + bytes(4) + b'\0')
+        self.assertEqual(built[17:21], bytes((255, 0, 0, 255)))
 
     def test_cooked_dxt1_texture_without_pillow(self):
         body = bytearray(103)

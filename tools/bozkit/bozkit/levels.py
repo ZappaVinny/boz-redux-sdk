@@ -33,6 +33,7 @@ LEVEL = iw_hash('CLevel')
 RESOLUTION_STRING = iw_hash('CResolutionSpecificString')
 HEADER = bytes((0x3D, 0x03, 0x07, 0x01, 0x00, 0x00))
 SHIPPED_LEVELS = ('kino', 'ascension', 'callofthedead', 'tutorial')
+GEAR = {'tutorial': 'kino'}  # levels whose weapons and arms groups belong to another level
 PACK = 'blackops_etc.dz'
 
 
@@ -216,13 +217,19 @@ def common_files(pack: derbh.Pack, name: str, template: str = 'kino',
     fixed = fixed or _read(pack, 'fixed/fixed')
     add_loading_screen(fixed, template, name)
     files.groups['fixed.group.bin'] = fixed
+    template = GEAR.get(template, template)   # the tutorial uses Kino's weapons and arms
     projectiles = f'weapon_projectiles_{name}'
     weapons = _copy(pack, f'weapons_{name}', 'ingame/weapons', f'weapons_{template}')
     weapon_children = []
     for path, name_hash, flags in children(weapons):
-        if name_hash != iw_hash(f'weapon_projectiles_{template}'):
-            raise LevelError(f'weapons_{template} has an unexpected child {path}')
-        weapon_children.append(Child(f'ingame/weapons//{projectiles}.group', projectiles, flags))
+        if name_hash == iw_hash(f'weapon_projectiles_{template}'):
+            weapon_children.append(Child(f'ingame/weapons//{projectiles}.group', projectiles, flags))
+            continue
+        # Shared children (Call of the Dead's ai_weapons) stay the game's own groups.
+        own = Path(path.replace('//', '/')).name.removesuffix('.group')
+        if iw_hash(own) != name_hash:
+            raise LevelError(f'weapons_{template}: child {path} does not match its file name')
+        weapon_children.append(Child(path, own, flags))
     files.groups[f'weapons_{name}.group.bin'] = renamed(weapons, f'weapons_{name}',
                                                         weapon_children)
     files.groups[f'{projectiles}.group.bin'] = _copy(pack, projectiles, 'ingame/weapons',
@@ -240,7 +247,10 @@ def clone_level(pack: derbh.Pack, name: str, template: str = 'kino',
     folder = f'levels/{template}'
     root = _read(pack, f'{folder}/{template}')
     statics = _read(pack, f'{folder}/{template}_statics')
-    sectors = _read(pack, f'{folder}/{template}_sectors')
+    try:
+        sectors = _read(pack, f'{folder}/{template}_sectors')
+    except LevelError:
+        sectors = None   # the tutorial has no rooms
 
     def child(level_name: str, suffix: str) -> Child:
         return Child(f'levels/{level_name}//{level_name}{suffix}.group', f'{level_name}{suffix}')
@@ -263,7 +273,8 @@ def clone_level(pack: derbh.Pack, name: str, template: str = 'kino',
     files.groups[f'{name}.group.bin'] = renamed(root, name, root_children)
     files.groups[f'{name}_statics.group.bin'] = renamed(statics, f'{name}_statics',
                                                         statics_children)
-    files.groups[f'{name}_sectors.group.bin'] = renamed(sectors, f'{name}_sectors')
+    if sectors is not None:
+        files.groups[f'{name}_sectors.group.bin'] = renamed(sectors, f'{name}_sectors')
     return files
 
 
@@ -302,6 +313,30 @@ def _set_transform(spec, position, rotation=None) -> None:
     reflect.set_typed_value(_blob_prop(blob, 'm_localPosition'), tuple(map(float, position)))
     if rotation is not None:
         reflect.set_typed_value(_blob_prop(blob, 'm_localRotation'), tuple(map(float, rotation)))
+
+
+def _set_scale(spec, scale) -> None:
+    """Set a spec's m_localScale, adding the field when the transform has none."""
+    from . import reflect
+
+    scale = tuple(map(float, scale))
+    blob = _component(spec, 'CIsTransform').blob
+    prop = _blob_prop(blob, 'm_localScale')
+    if prop is None:
+        if scale == (1.0, 1.0, 1.0):
+            return
+        prop = reflect.Property(iw_hash('CIsTransform'), iw_hash('CIwFVec3'),
+                                iw_hash('m_localScale'), b'')
+        blob.properties.append(prop)
+    reflect.set_typed_value(prop, scale)
+
+
+def _scale_by(spec, scale) -> None:
+    """Multiply a spec's own m_localScale by *scale* (placements are relative to it)."""
+    from . import blender_scene as scene
+
+    own = scene._local_transform(spec)[2]
+    _set_scale(spec, tuple(own[i] * float(scale[i]) for i in range(3)))
 
 
 def _yaw(degrees: float) -> tuple[float, float, float, float]:

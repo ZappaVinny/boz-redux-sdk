@@ -5,7 +5,7 @@
 // only knows standard Recast/Detour and follows the RecastDemo tiled build (Sample_TileMesh).
 //
 // Request (little-endian):
-//   char[4] "BOZN", u32 version (1, or 2 followed by u32 options: bit 0 skips the low-hanging
+//   char[4] "BOZN", u32 version (1, or 2/3 followed by u32 options: bit 0 skips the low-hanging
 //   obstacle filter, bit 1 the ledge filter, bit 2 the low-height filter; bits 3-4 select region
 //   partitioning: 0 watershed, 1 monotone, 2 layers)
 //   f32 cellSize, cellHeight, agentHeight, agentRadius, agentMaxClimb, agentMaxSlope
@@ -13,6 +13,10 @@
 //   f32 detailSampleDist, detailSampleMaxError; f32 tileWidth; f32 origin[3]; f32 bmin[3], bmax[3]
 //   u32 vertexCount, f32 vertices[3 * vertexCount]      (metres, Y up)
 //   u32 triangleCount, i32 triangles[3 * triangleCount]
+//   (version 3) u8 blocking[triangleCount]: 1 = an obstacle that is never walkable on top
+//   (version 4) u32 volumeCount, per volume: u8 id (1-62), u32 n, f32 xz[2 * n] (convex), f32 ymin,
+//   ymax: floor inside is marked with the id (rcMarkConvexPolyArea), so polygons split along the
+//   volume, and its polygons get flags 1 | id << 8 (bozkit turns them into door tags)
 //   u32 tileCount, i32 tiles[2 * tileCount]              (tile x, tile y)
 //   u32 linkCount, per link: f32 start[3], f32 end[3], f32 radius, u8 bidirectional, u32 userId
 // Reply:
@@ -46,6 +50,9 @@ struct Request {
 	uint32_t options = 0;
 	std::vector<float> verts;
 	std::vector<int> tris;
+	std::vector<unsigned char> blocking;  // per triangle (version 3); empty: none
+	struct Volume { unsigned char id; std::vector<float> verts; float ymin, ymax; };
+	std::vector<Volume> volumes;          // version 4
 	std::vector<int> tiles;
 	std::vector<Link> links;
 };
@@ -70,11 +77,11 @@ bool readRequest(const char* path, Request& r) {
 	char magic[4];
 	in.get(magic, 4);
 	uint32_t version = in.get<uint32_t>();
-	if (std::memcmp(magic, "BOZN", 4) != 0 || (version != 1 && version != 2)) {
+	if (std::memcmp(magic, "BOZN", 4) != 0 || version < 1 || version > 4) {
 		std::fclose(file);
 		return false;
 	}
-	if (version == 2) r.options = in.get<uint32_t>();
+	if (version >= 2) r.options = in.get<uint32_t>();
 	r.cs = in.get<float>(); r.ch = in.get<float>();
 	r.agentHeight = in.get<float>(); r.agentRadius = in.get<float>();
 	r.agentClimb = in.get<float>(); r.agentSlope = in.get<float>();
@@ -86,6 +93,26 @@ bool readRequest(const char* path, Request& r) {
 	in.get(r.origin, 3); in.get(r.bmin, 3); in.get(r.bmax, 3);
 	r.verts.resize(in.get<uint32_t>() * 3); in.get(r.verts.data(), r.verts.size());
 	r.tris.resize(in.get<uint32_t>() * 3); in.get(r.tris.data(), r.tris.size());
+	if (version >= 3) {
+		r.blocking.resize(r.tris.size() / 3);
+		in.get(r.blocking.data(), r.blocking.size());
+	}
+	if (version >= 4) {
+		r.volumes.resize(in.get<uint32_t>());
+		for (Request::Volume& volume : r.volumes) {
+			volume.id = in.get<uint8_t>();
+			uint32_t n = in.get<uint32_t>();
+			std::vector<float> xz(n * 2);
+			in.get(xz.data(), xz.size());
+			volume.ymin = in.get<float>();
+			volume.ymax = in.get<float>();
+			for (uint32_t i = 0; i < n; ++i) {
+				volume.verts.push_back(xz[i * 2]);
+				volume.verts.push_back(volume.ymin);
+				volume.verts.push_back(xz[i * 2 + 1]);
+			}
+		}
+	}
 	r.tiles.resize(in.get<uint32_t>() * 2); in.get(r.tiles.data(), r.tiles.size());
 	r.links.resize(in.get<uint32_t>());
 	for (Link& link : r.links) {
@@ -100,7 +127,7 @@ bool readRequest(const char* path, Request& r) {
 
 // Recast build of one tile; returns Detour tile data (dtAlloc'd) or nullptr when empty.
 unsigned char* buildTile(const Request& r, int tx, int ty, const std::vector<int>& tileTris,
-                         int& dataSize) {
+                         const std::vector<unsigned char>& tileBlocking, int& dataSize) {
 	rcContext ctx(false);
 	rcConfig cfg{};
 	cfg.cs = r.cs;
@@ -140,6 +167,8 @@ unsigned char* buildTile(const Request& r, int tx, int ty, const std::vector<int
 	std::vector<unsigned char> areas(tileTris.size() / 3, 0);
 	rcMarkWalkableTriangles(&ctx, cfg.walkableSlopeAngle, r.verts.data(), (int)r.verts.size() / 3,
 	                        tileTris.data(), (int)tileTris.size() / 3, areas.data());
+	for (size_t i = 0; i < tileBlocking.size(); ++i)
+		if (tileBlocking[i]) areas[i] = RC_NULL_AREA;  // obstacles block but are never floor
 	rcRasterizeTriangles(&ctx, r.verts.data(), (int)r.verts.size() / 3, tileTris.data(),
 	                     areas.data(), (int)tileTris.size() / 3, *solid, cfg.walkableClimb);
 	if (!(r.options & 1)) rcFilterLowHangingWalkableObstacles(&ctx, cfg.walkableClimb, *solid);
@@ -151,6 +180,10 @@ unsigned char* buildTile(const Request& r, int tx, int ty, const std::vector<int
 	                                              *solid, *chf);
 	rcFreeHeightField(solid);
 	built = built && rcErodeWalkableArea(&ctx, cfg.walkableRadius, *chf);
+	for (const Request::Volume& volume : r.volumes)
+		if (built)
+			rcMarkConvexPolyArea(&ctx, volume.verts.data(), (int)volume.verts.size() / 3,
+			                     volume.ymin, volume.ymax, volume.id, *chf);
 	const unsigned partition = (r.options >> 3) & 3;
 	if (partition == 1) {
 		built = built && rcBuildRegionsMonotone(&ctx, *chf, cfg.borderSize, cfg.minRegionArea,
@@ -176,7 +209,9 @@ unsigned char* buildTile(const Request& r, int tx, int ty, const std::vector<int
 	if (built && pmesh->npolys > 0) {
 		std::vector<unsigned short> flags(pmesh->npolys, 0);
 		for (int i = 0; i < pmesh->npolys; ++i) {
-			flags[i] = pmesh->areas[i] == RC_WALKABLE_AREA ? 1 : 0;
+			unsigned char area = pmesh->areas[i];
+			flags[i] = area == RC_WALKABLE_AREA ? 1
+			         : (area > 0 && area < RC_WALKABLE_AREA) ? (unsigned short)(1 | (area << 8)) : 0;
 			pmesh->areas[i] = 0;  // BOZ keeps area 0; bozkit restores the game's flags
 		}
 		// Off-mesh links start in the tile that contains their start point.
@@ -261,6 +296,7 @@ int main(int argc, char** argv) {
 		float minX = r.origin[0] + tx * r.tileWidth - pad, maxX = minX + r.tileWidth + 2 * pad;
 		float minZ = r.origin[2] + ty * r.tileWidth - pad, maxZ = minZ + r.tileWidth + 2 * pad;
 		std::vector<int> tileTris;
+		std::vector<unsigned char> tileBlocking;
 		for (size_t i = 0; i < r.tris.size(); i += 3) {
 			float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
 			for (int k = 0; k < 3; ++k) {
@@ -268,11 +304,13 @@ int main(int argc, char** argv) {
 				lo[0] = std::fmin(lo[0], v[0]); hi[0] = std::fmax(hi[0], v[0]);
 				lo[1] = std::fmin(lo[1], v[2]); hi[1] = std::fmax(hi[1], v[2]);
 			}
-			if (hi[0] >= minX && lo[0] <= maxX && hi[1] >= minZ && lo[1] <= maxZ)
+			if (hi[0] >= minX && lo[0] <= maxX && hi[1] >= minZ && lo[1] <= maxZ) {
 				tileTris.insert(tileTris.end(), &r.tris[i], &r.tris[i] + 3);
+				if (!r.blocking.empty()) tileBlocking.push_back(r.blocking[i / 3]);
+			}
 		}
 		int size = 0;
-		unsigned char* data = buildTile(r, tx, ty, tileTris, size);
+		unsigned char* data = buildTile(r, tx, ty, tileTris, tileBlocking, size);
 		if (!data) continue;
 		int32_t header[2] = {tx, ty};
 		uint32_t usize = (uint32_t)size;

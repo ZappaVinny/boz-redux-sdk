@@ -19,13 +19,14 @@ if TYPE_CHECKING:
 from .hashing import iw_hash
 
 _TEXTURE_SCAN = range(4, 40)
-# Raw CIwImage formats seen in BOZ. Both store A, R, G, B from the most significant bits of a
-# little-endian word: 0x0e is 32-bit (bytes B, G, R, A) and 0x05 its 16-bit 4444 twin. The same
-# texture appears as 0x0e in the tutorial and 0x05 in Kino with matching values (an alpha-0 red
-# background is 00 00 ff 00 and 0x0f00).
-_TEXTURE_FORMATS = {0x05: (2, 'ARGB4444'), 0x0E: (4, 'BGRA8888')}
-# Decode-only: 24-bit 0x0a, assumed to share the B, G, R byte order. The one shipped instance is a
-# uniform grey 4x4 image, so the channel order is unproven.
+# Raw CIwImage formats seen in BOZ, named as Marmalade names them (channels from the most
+# significant bits of a little-endian word): 0x0e ABGR_8888 (bytes R, G, B, A), 0x0a BGR_888
+# (bytes R, G, B) and 0x05 ABGR_4444 (alpha in the top nibble, red in the bottom). Evidence:
+# textures that are ETC1 in blackops_etc.dz and 0x0a in blackops_gles1.dz match pixel for pixel
+# in R, G, B order; a texture written as B, G, R, A showed red and blue swapped in the game
+# (2026-10-10); and the tutorial's graffiti sign, 0x0e in one level and 0x05 in another, has the
+# same alpha-0 background in both (00 00 ff 00 and 0x0f00: blue). Older bozkit read B, G, R, A.
+_TEXTURE_FORMATS = {0x05: (2, 'ABGR4444'), 0x0E: (4, 'ABGR8888')}
 _DECODE_ONLY_FORMATS = {0x0A: (3, 'BGR888')}
 _VERTS = iw_hash('CIwModelBlockVerts')
 _UVS = iw_hash('CIwModelBlockGLUVs')
@@ -153,19 +154,16 @@ def decode_texture_rgba(body: bytes) -> DecodedTexture:
         raw = body[layout.texel_offset:layout.texel_offset + layout.pitch * layout.height]
         if layout.pixel_format == 0x0a:
             rgba = bytearray()
-            for blue, green, red in struct.iter_unpack('3B', raw):
+            for red, green, blue in struct.iter_unpack('3B', raw):
                 rgba += bytes((red, green, blue, 255))
             return DecodedTexture(layout.width, layout.height, bytes(rgba), 'BGR888')
         if layout.pixel_format == 0x0e:
-            rgba = bytearray()
-            for blue, green, red, alpha in struct.iter_unpack('4B', raw):
-                rgba += bytes((red, green, blue, alpha))
-            return DecodedTexture(layout.width, layout.height, bytes(rgba), 'BGRA8888')
+            return DecodedTexture(layout.width, layout.height, bytes(raw), 'ABGR8888')
         rgba = bytearray()
         for (value,) in struct.iter_unpack('<H', raw):
-            rgba += bytes(((value >> 8 & 15) * 17, (value >> 4 & 15) * 17, (value & 15) * 17,
+            rgba += bytes(((value & 15) * 17, (value >> 4 & 15) * 17, (value >> 8 & 15) * 17,
                            (value >> 12) * 17))
-        return DecodedTexture(layout.width, layout.height, bytes(rgba), 'ARGB4444')
+        return DecodedTexture(layout.width, layout.height, bytes(rgba), 'ABGR4444')
     if len(body) < 95:
         raise ValueError('unsupported CIwTexture layout')
     mip_count, width, height = struct.unpack_from('<III', body, 35)
@@ -219,17 +217,17 @@ def decode_texture(body: bytes) -> Image.Image:
         decoded = decode_texture_rgba(body)
         return Image.frombytes('RGBA', (decoded.width, decoded.height), decoded.rgba)
     if layout.pixel_format == 0x0E:
-        return Image.frombytes('RGBA', (layout.width, layout.height), raw, 'raw', 'BGRA',
+        return Image.frombytes('RGBA', (layout.width, layout.height), raw, 'raw', 'RGBA',
                                layout.pitch, 1)
     raise ValueError(f'unsupported CIwImage pixel format {layout.pixel_format:#04x}')
 
 
-def _argb4444(image: Image.Image) -> bytes:
+def _abgr4444(image: Image.Image) -> bytes:
     out = bytearray()
     raw = image.convert('RGBA').tobytes()
     for index in range(0, len(raw), 4):
         red, green, blue, alpha = ((channel * 15 + 127) // 255 for channel in raw[index:index + 4])
-        out += struct.pack('<H', (alpha << 12) | (red << 8) | (green << 4) | blue)
+        out += struct.pack('<H', (alpha << 12) | (blue << 8) | (green << 4) | red)
     return bytes(out)
 
 
@@ -244,14 +242,14 @@ def encode_texture(image: Image.Image, source: bytes | None = None,
     layout = texture_layout(source) if source is not None else None
     bpp = bytes_per_pixel or (layout.bytes_per_pixel if layout else 4)
     if bpp not in (2, 4):
-        raise ValueError('texture bytes_per_pixel must be 2 (ARGB4444) or 4 (BGRA8888)')
+        raise ValueError('texture bytes_per_pixel must be 2 (ABGR4444) or 4 (ABGR8888)')
     width, height = image.size
     if not 0 < width <= 8192 or not 0 < height <= 8192:
         raise ValueError('texture dimensions must be between 1 and 8192')
     if bpp == 2:
-        texels = _argb4444(image)
+        texels = _abgr4444(image)
     else:
-        texels = image.convert('RGBA').tobytes('raw', 'BGRA')
+        texels = image.convert('RGBA').tobytes()
     if source is None:
         off = 4
         header = bytearray(off + 13)
@@ -613,8 +611,9 @@ def build_model(vertices, uvs, triangles, materials: Sequence[int],
 
 
 def build_texture(width: int, height: int, bgra: bytes, template: bytes) -> bytes:
-    """A raw BGRA8888 ``CIwTexture`` from *bgra* texels, keeping a shipped raw texture's other
-    header bytes (*template* must be a raw 0x05 or 0x0e texture). No image library needed."""
+    """A raw ABGR_8888 (0x0e, bytes R, G, B, A) ``CIwTexture`` from *bgra* texels (B, G, R, A, as bozkit.world
+    keeps them), keeping a shipped raw texture's other header bytes (*template* must be a raw
+    0x05 or 0x0e texture). No image library needed."""
     layout = texture_layout(template)
     if len(bgra) != width * height * 4:
         raise ValueError('texture data must be width x height BGRA texels')
@@ -623,4 +622,6 @@ def build_texture(width: int, height: int, bgra: bytes, template: bytes) -> byte
     header = bytearray(template[:layout.texel_offset])
     header[layout.header_offset] = 0x0E
     struct.pack_into('<HHH', header, layout.header_offset + 3, width, height, width * 4)
-    return bytes(header) + bgra + template[layout.trailer_offset:]
+    rgba = bytearray(bgra)
+    rgba[0::4], rgba[2::4] = bgra[2::4], bgra[0::4]
+    return bytes(header) + bytes(rgba) + template[layout.trailer_offset:]
