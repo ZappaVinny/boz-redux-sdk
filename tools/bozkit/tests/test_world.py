@@ -126,6 +126,24 @@ class WorldTests(unittest.TestCase):
         world.save(inherited, self.source)
         self.assertEqual(world.load(self.source).removed, ['0x88ec4490'])
 
+    def test_script_settings(self):
+        scripted = world.World('kino', inherit=True)
+        scripted.instances.append(world.Instance((0.0, 0.0, 0.0), model='levels/kino/x#0x00000001',
+                                                 script={'name': 'Secret_Wall', 'visible': False,
+                                                         'blocks': True}))
+        scripted.entities.append(world.Placement('Juggernog', (0.0, 0.0, 0.0), piece='juggernog',
+                                                 script={'name': 'Hidden_Jug'}))
+        world.save(scripted, self.source)
+        loaded = world.load(self.source)
+        self.assertEqual(world.script_of(loaded.instances[0]),
+                         {'name': 'Secret_Wall', 'visible': False, 'collision': True, 'blocks': True})
+        self.assertEqual(loaded.entities[0].script, {'name': 'Hidden_Jug'})
+        self.assertEqual(world.validate(loaded), [])
+        loaded.entities[0].script['name'] = 'secret_wall'
+        self.assertTrue(any('two objects' in p for p in world.validate(loaded)))
+        loaded.entities[0].script['name'] = '9 bad'
+        self.assertTrue(any('script name' in p for p in world.validate(loaded)))
+
     def test_hash_sources(self):
         self.assertEqual(world.Placement('0x0000002a', (0, 0, 0)).hash, 42)
         with self.assertRaises(world.WorldError):

@@ -34,6 +34,18 @@ class ProjectTests(unittest.TestCase):
         self.assertTrue((loaded.scripts / 'main.lua').is_file())
         self.assertTrue(project.validate_project(loaded).ok)
 
+    def test_world_data_lua(self) -> None:
+        import shutil
+        import subprocess
+        text = project.world_data_lua({'hidden': ['Secret_Wall'], 'blocked': ['Gate "A"']})
+        self.assertIn('hidden = {"Secret_Wall"}', text)
+        self.assertIn('no_collision = {}', text)
+        luac = shutil.which('luac')
+        if luac:
+            path = Path(self.temp.name) / 'world_data.lua'
+            path.write_text(text)
+            self.assertEqual(subprocess.run([luac, '-p', str(path)]).returncode, 0)
+
     def test_invalid_id_is_reported(self) -> None:
         loaded = self.make_project()
         manifest = loaded.root / project.PROJECT_FILE

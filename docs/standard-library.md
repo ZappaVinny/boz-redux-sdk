@@ -22,7 +22,7 @@ Functions that need a Zombies match return `nil` (or `false`) outside one instea
 - **Menus and text**: [boz.pause_settings](#bozpausesettings), [boz.text](#boztext)
 - **Game UI building blocks**: [boz.iwui](#boziwui), [boz.frontend](#bozfrontend), [boz.flash](#bozflash)
 - **Low-level helpers**: [boz.components](#bozcomponents), [boz.hash](#bozhash), [boz.swf](#bozswf), [boz.avm1](#bozavm1)
-- **Other**: [boz.levels](#bozlevels), [boz.world](#bozworld)
+- **Other**: [boz.levels](#bozlevels), [boz.objects](#bozobjects), [boz.world](#bozworld)
 
 ## Gameplay
 
@@ -385,6 +385,78 @@ the front end's StartLevel console command starts a single-player match on a lev
 | `levels.start(name)` | Starts a single-player match on the level (e.g. "kino") once the front end is up. Call it while the mod's script starts; the match starts after the main menu appears. |
 | `levels.autostart()` | Starts the level a tool asked for, once: reads and clears the mod's "autostart_level" setting (the SDK's Build & Run writes it), and its "autostart_vars" ("Name=value;..."), console variables set just before the level starts (e.g. UnlimitedHealth=true). Returns the level name or nil. |
 
+### boz.objects
+
+The map's objects by name: show and hide them, switch their collision, open and
+
+close the walkable area under them, and react when players walk into them, use them or shoot them. The building blocks for triggers and easter eggs.
+
+```lua
+local objects = require("boz.objects")
+local skull = objects.get("Skull_1")
+skull:on("use", function(object) object:hide() end)
+objects.on("Secret_Room_Trigger", "enter", function(object, who)
+    if who.player then objects.get("Secret_Wall"):hide():set_collision(false):open_navmesh() end
+end)
+```
+
+Names are the script names the editor shows for each object (Properties → Object → Game → Scripts): turn on "Scripts can change it" there. Shipped entities use their own names.
+
+<details><summary>How it works</summary>
+
+- CIsEntityDB::FindEntity(name hash) gives the entity (a pointer; its id is at +4). A
+
+</details>
+
+```lua
+component's entity pointer is at component +0xc; children hang off CIsHierarchy +0x24.
+```
+
+- Visibility: CIsRenderableModel::SetVisible (doors hide this way after opening). - Collision: CIsCollisionObject::Enable / Disable on the entity's collision box, sphere,
+
+```lua
+capsule or mesh (what SUBJECT_ENABLE/DISABLE_COLLISION do).
+```
+
+- Walkable area: navmesh polygons carry a tag (a name hash); NavMesh_SetTagOpen(navmesh, tag,
+
+```lua
+open) opens or closes them, as doors do with their own name. The editor tags the polygons
+under objects set to block the walkable area with the object's name.
+```
+
+- "enter"/"exit": CIsCollisionObject::OnCollisionEnter/OnCollisionExit (this, other) run
+
+```lua
+when two collision objects start or stop touching; ghost volumes (triggers) get them too.
+```
+
+- "use": Poi_SendUse runs when the player presses use at the point of interest in reach
+
+```lua
+(entity at CLevelManager +0x214).
+```
+
+- "damage": CHealth::Damage(health, amount, attacker) on objects with health (shootables).
+
+| Function | Description |
+| --- | --- |
+| `objects.level()` | A key that changes when another level loads (0 outside a match). |
+| `objects.get(name)` | The object called `name` (a handle: it finds the entity when used, so it can be made before the level loads). Names are not case-sensitive. |
+| `objects.find(name)` | The object called `name` if it exists in the running level, else nil. |
+| `Object:entity_pointer()` | The entity pointer, or 0 when the object is not in the running level. |
+| `Object:exists()` | True when the object is in the running level. |
+| `Object:set_visible(visible)` | Shows or hides the object's models (its collision and behaviour stay). Returns the object. |
+| `Object:show()` | Shows the object. Returns the object. |
+| `Object:hide()` | Hides the object. Returns the object. |
+| `Object:set_collision(enabled)` | Switches the object's collision on or off (players and bullets pass through it when off). Returns the object. |
+| `objects.set_navmesh(tag, open)` | Opens (true) or closes (false) the walkable area tagged `tag` (a name: an object set to block the walkable area, or a door). Returns true when the level has a navmesh. |
+| `Object:set_navmesh(open)` | Opens or closes the walkable area under the object (it must be set to block the walkable area in the editor). Returns the object. |
+| `Object:open_navmesh()` | Lets zombies and players walk where the object blocked them. Returns the object. |
+| `Object:close_navmesh()` | Blocks the walkable area under the object again. Returns the object. |
+| `Object:on(event, fn)` | Calls `fn(object, info)` on the object's `event`: "enter" / "exit" (something starts or stops touching it; info.player, info.zombie, info.entity), "use" (the player pressed use at it), "damage" (it was hurt; info.amount, info.attacker). Returns the object. |
+| `objects.on(name, event, fn)` | objects.on(name, event, fn): the same as objects.get(name):on(event, fn). |
+
 ### boz.world
 
 Game behaviour a map project's world asks for that the game's data cannot express.
@@ -392,6 +464,8 @@ Game behaviour a map project's world asks for that the game's data cannot expres
 ```lua
 require("boz.world").start()   (map projects call this from main.lua; the SDK adds it)
 ```
+
+Objects scripts change: the editor writes each map's start state into boz/world_data.lua (hidden objects, objects without collision, walkable areas that start blocked); this applies it with boz.objects as soon as each level has started.
 
 Perk machines that work without power: the editor's "Needs power" off writes the power switch name "boz_no_power". The game only powers a machine when its power switch is turned on (Quick Revive in solo is the exception), so when such a machine starts this powers it the same way (CPerk +0x7c powered, +0x7d lit, and the machine's own "power_switch_on" event for its lights and jingle).
 

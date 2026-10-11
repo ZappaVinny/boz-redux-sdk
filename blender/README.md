@@ -30,6 +30,11 @@ Two parts live here:
   traps, ...) are base level entities: move, rotate, scale, delete (X) or copy (Shift+D) them,
   and change their settings like a toolkit piece's. Only what changed is written; **Put back as
   the level has it** undoes the edits. Rooms stay read only.
+- **Building:** Add → **Game shapes** (also the World header's **Shapes** button) adds blocks,
+  walls, floors, ramps, stairs and pillars at game size with a tiling default texture and the
+  right Collision. Blender's own Add → Mesh shapes are 2 cm big here (one unit is a centimetre);
+  the Problems panel flags anything that small. Project → **Import model…** brings in FBX, glTF
+  and OBJ files, scaled from metres.
 - **Markers:** entities that draw no model (triggers, effects, spawns, sounds, ...) are small
   cubes coloured by type, in the add-on's colours.
 - **Show** (World viewport header, and the sidebar's BOZ tab): Markers, Triggers (entity volumes),

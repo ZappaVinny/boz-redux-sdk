@@ -147,7 +147,7 @@ def realize() -> None:
         else:
             made = convert.model_object(world.Instance(position, model=source, rotation=rotation),
                                         scene)
-            _land_at(made, obj.matrix_world.translation)
+            _land_at(made, convert.world_matrix(obj).translation)
         bpy.data.objects.remove(obj)
         if made is None:
             continue
@@ -182,7 +182,14 @@ def _land_at(obj, point) -> None:
         return
     from mathutils import Vector
 
-    corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    # Just made: neither matrix_world nor bound_box is evaluated yet, so use the object's own
+    # transform and its mesh's vertices.
+    matrix = convert.world_matrix(obj)
+    points = [v.co for v in obj.data.vertices]
+    low = Vector(tuple(min(p[i] for p in points) for i in range(3)))
+    high = Vector(tuple(max(p[i] for p in points) for i in range(3)))
+    corners = [matrix @ Vector((x, y, z)) for x in (low.x, high.x) for y in (low.y, high.y)
+               for z in (low.z, high.z)]
     bottom = Vector(((min(c.x for c in corners) + max(c.x for c in corners)) / 2,
                      (min(c.y for c in corners) + max(c.y for c in corners)) / 2,
                      min(c.z for c in corners)))

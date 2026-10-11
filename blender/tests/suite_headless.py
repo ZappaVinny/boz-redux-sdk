@@ -79,6 +79,21 @@ if source.inherit:
     output, report = sdk_project.build_project(built, game=suite.palette.library.LibraryPack())
     check((output / "assets" / f"{built.map_name}_statics.group.bin").is_file(),
           "the edited base level compiles")
+    # Game shapes are game-sized, textured and set to block; a pickup model from Models/Shared.
+    bpy.ops.boz.add_shape(kind="wall")
+    wall = bpy.context.view_layer.objects.active
+    check(wall.boz.role == "mesh" and wall.boz.collision == "solid"
+          and abs(max(wall.dimensions) - 300.0) < 0.1, f"a game-sized wall ({tuple(wall.dimensions)})")
+    pickup = convert.model_object(world.Instance(
+        (0.0, 0.0, 0.0), model="ingame/pickups/pickups.group.bin#0x105caeb0"), scene)
+    check(pickup.type == "MESH", "a pickup model shows in the editor")
+    problems = []
+    back = link.scene_to_world(scene, problems)
+    check(any(m.name.startswith("wall") for m in back.meshes) and not problems,
+          f"the wall is written ({problems})")
+    bpy.ops.wm.save_mainfile()
+    output, report = sdk_project.build_project(built, game=suite.palette.library.LibraryPack())
+    check((output / "scripts" / "boz" / "objects.lua").is_file(), "the map runtime is installed")
     message = suite.preview.build(bpy.context)
     navmesh = bpy.data.collections[suite.preview.COLLECTIONS["navmesh"]]
     collision = bpy.data.collections[suite.preview.COLLECTIONS["collision"]]
@@ -166,7 +181,8 @@ if os.environ.get("BOZ_TEST_LIBRARY"):
     texture = built.search(kind="texture", limit=1)[0]
     built.close()
     for kind, source, extra in (("entity", f"0x{perk.hash:08x}", perk.groups[0]),
-                                ("model", f"{model.groups[0]}#0x{model.hash:08x}", "")):
+                                ("model", f"{model.groups[0]}#0x{model.hash:08x}", ""),
+                                ("model", "ingame/pickups/pickups.group.bin#0x105caeb0", "")):
         stand_in = bpy.data.objects.new(f"dropped {kind}", None)
         stand_in["boz_asset_kind"] = kind
         stand_in["boz_source"] = source
@@ -212,8 +228,8 @@ if os.environ.get("BOZ_TEST_LIBRARY"):
     bpy.context.view_layer.update()
     back = link.scene_to_world(bpy.context.scene, [])
     jugs = [e for e in back.entities if e.piece == "juggernog"]
-    check(jugs and jugs[0].fields == {"CPerk.m_perkSinglePCost": 1234,
-                                      "CPerk.powerSwitch": "boz_no_power"}
+    check(jugs and {"CPerk.m_perkSinglePCost": 1234,
+                    "CPerk.powerSwitch": "boz_no_power"}.items() <= jugs[0].fields.items()
           and jugs[0].settings.get("CPerk.powerSwitch") is False,
           f"piece settings are written ({jugs[0].fields if jugs else None})")
     check(sum(1 for e in back.entities if e.source == "Juggernog") == 2,
@@ -225,8 +241,20 @@ if os.environ.get("BOZ_TEST_LIBRARY"):
     check(rotated, "a model tilted on its side keeps its full rotation")
     placed = [o for o in bpy.context.scene.objects if o.name.startswith("dropped")]
     roles = sorted(o.boz.role for o in placed)
-    check(roles == ["entity", "model"] and all(o.type == "MESH" for o in placed),
-          f"dropped assets become an entity and a model with meshes ({roles})")
+    check(roles == ["entity", "model", "model"] and all(o.type == "MESH" for o in placed),
+          f"dropped assets become an entity and models with meshes ({roles})")
+    # Dropped assets land where they were dropped (not somewhere off-screen).
+    bpy.context.view_layer.update()
+    for obj in placed:
+        corners = [obj.matrix_world @ v.co for v in obj.data.vertices]
+        if obj.boz.role == "model":
+            spot = (sum(min(c[i] for c in corners) + max(c[i] for c in corners) for i in (0,)) / 2,
+                    (min(c.y for c in corners) + max(c.y for c in corners)) / 2,
+                    min(c.z for c in corners))
+        else:
+            spot = tuple(obj.matrix_world.translation)
+        check(abs(spot[0] - 100.0) < 0.5 and abs(spot[1] - 200.0) < 0.5 and abs(spot[2]) < 0.5,
+              f"{obj.name} landed at the drop point (it is at {tuple(round(c, 1) for c in spot)})")
     check(not any("boz_asset_kind" in o for o in bpy.context.scene.objects), "stand-ins are gone")
     dropped_on = bpy.context.scene.objects["crate"].material_slots[-1].material
     check(dropped_on is not None and dropped_on.name.startswith("BOZ Material")

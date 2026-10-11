@@ -166,6 +166,10 @@ def on_load(_dummy):
     project = current_project()
     if project is None or project.kind != "map":
         return
+    scene = bpy.context.scene
+    if hasattr(scene, "boz_links_selected_only") and "boz_links_shown" not in scene:
+        scene.boz_links_selected_only = False   # Links shows every link until narrowed
+        scene["boz_links_shown"] = True
     if bpy.data.filepath:
         scene = bpy.context.scene
         view = scene.view_settings
@@ -363,11 +367,13 @@ class BOZ_OT_game_model(Operator):
         obj = context.object
         placement = world.Placement(obj.boz.source, (0.0, 0.0, 0.0), group=obj.boz.group)
         data = game.entity_mesh(context.scene.boz.base, placement.hash, obj.boz.group)
-        if data is None:
-            self.report({"ERROR"}, "The game's model is not available (build the asset library)")
-            return {"CANCELLED"}
-        convert.show_mesh(obj, data)
-        del obj["boz_custom_model"]
+        if "boz_custom_model" in obj:
+            del obj["boz_custom_model"]
+        if data is not None:
+            convert.show_mesh(obj, data)
+        else:   # it draws nothing of its own: back to its marker
+            convert.colour_marker(obj, convert.entity_category(
+                context.scene.boz.base, placement.hash, obj.boz.group))
         return {"FINISHED"}
 
 

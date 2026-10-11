@@ -58,6 +58,10 @@ class BOZ_MT_project(Menu):
         layout.operator("wm.save_mainfile", text="Save", icon="FILE_TICK")
         layout.operator("boz.suite_build_and_run", icon="PLAY")
         layout.operator("boz.suite_build_settings", icon="PREFERENCES")
+        layout.separator()
+        layout.operator("boz.import_model", icon="IMPORT")
+        layout.menu("BOZ_MT_shapes", text="Add game shape", icon="MESH_CUBE")
+        layout.separator()
         row = layout.row()
         row.enabled = False
         row.operator("boz.coming", text="Export…", icon="EXPORT").feature = "Export"

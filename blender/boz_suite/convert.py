@@ -151,9 +151,19 @@ def _place(obj, item, scene) -> None:
     scene.collection.objects.link(obj)
 
 
+def world_matrix(obj):
+    """An object's world matrix from its own location, rotation and scale (and its parents').
+    obj.matrix_world is only updated when Blender evaluates the scene, so it is stale for an
+    object made or moved in the same operation (a dropped palette asset)."""
+    matrix = obj.matrix_basis.copy()
+    if obj.parent is not None:
+        matrix = world_matrix(obj.parent) @ obj.matrix_parent_inverse @ matrix
+    return matrix
+
+
 def _transform(obj):
     """(position, x/y/z/w rotation, scale) of an object in the game's axes."""
-    location, rotation, scale = obj.matrix_world.decompose()
+    location, rotation, scale = world_matrix(obj).decompose()
     native = blender_scene.rotation_from_blender((rotation.x, rotation.y, rotation.z, rotation.w))
     return (tuple(blender_scene.from_blender(tuple(location))),
             tuple(round(c, 6) for c in native),
@@ -264,6 +274,7 @@ def entity_object(entity: "world.Placement", base: str, scene, custom=None):
     if data is None:
         colour_marker(obj, entity_category(base, entity.hash, entity.group))
     obj.boz.role = "entity"
+    set_links(obj, base, entity.hash, entity.group)
     obj.boz.source = entity.source
     obj.boz.group = entity.group
     if custom is not None:
@@ -275,6 +286,22 @@ def entity_object(entity: "world.Placement", base: str, scene, custom=None):
     if weapon:
         refresh_chalk(obj, base)
     return obj
+
+
+def set_links(obj, base: str, source_hash: int, group_path: str = "") -> None:
+    """The links the add-on draws (Show → Links): which power switch a machine waits for, which
+    traps a switch fires, what a door unlocks."""
+    spec = game.entity_spec(base, source_hash, group_path)
+    if spec is None:
+        return
+    links = blender_scene._node_links(spec)
+    if links:
+        obj["boz_links"] = json.dumps(links)
+    named = blender_scene._blob_value(blender_scene._component(spec, "CIsNamed"), "name", None)
+    if isinstance(named, str):
+        obj["boz_link_id"] = f"0x{world.iw_hash(named):08x}"
+        # The add-on draws links between markers and placed models (not hidden with markers).
+        obj["boz_kind"] = obj.get("boz_kind") or ("entity" if is_marker(obj) else "placed_model")
 
 
 def model_object(instance: "world.Instance", scene):
@@ -400,6 +427,9 @@ def make_base_editable(scene, base: str) -> int:
         obj.boz.group = ""
         obj.hide_select = False
         obj["boz_base_origin"] = [c for part in _transform(obj) for c in part]
+        named = blender_scene._blob_value(blender_scene._component(spec, "CIsNamed"), "name", None)
+        if isinstance(named, str):
+            obj["boz_entity_name"] = named
         key, values = toolkit.settings_for(spec, names)
         if key:
             obj["boz_piece"] = key
@@ -555,7 +585,7 @@ def show_game_models(scene) -> int:
         if data is None:
             colour_marker(replacement, entity_category(scene.boz.base, entity.hash, obj.boz.group)
                           if obj.boz.role == "entity" else "entity")
-        replacement.matrix_world = obj.matrix_world
+        replacement.matrix_world = world_matrix(obj)
         for key in ("role", "source", "group", "collision", "shape", "double_sided"):
             setattr(replacement.boz, key, getattr(obj.boz, key))
         for key, value in obj.items():
@@ -695,10 +725,15 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
 
     for obj in scene.objects:
         role = obj.boz.role
+        if role in ("mesh", "prop") and obj.type == "MESH" and max(obj.dimensions) < 5.0:
+            problems.append((f"{obj.name} is only {max(obj.dimensions):.1f} cm across (one "
+                             "Blender unit is a centimetre): scale it up, or use Add → Game shapes",
+                             obj.name))
+            continue
         if role == "mesh" and obj.type == "MESH":
             name = mesh_name(obj)
             if claim(name, obj.name, obj):
-                mesh = _mesh_of(obj, depsgraph, obj.matrix_world, name, problems)
+                mesh = _mesh_of(obj, depsgraph, world_matrix(obj), name, problems)
                 if mesh is not None:
                     result.meshes.append(mesh)
         elif role == "prop" and obj.type == "MESH":
@@ -768,7 +803,7 @@ def make_prop(obj, name: str) -> None:
         del data[key]
     if obj.boz.role == "mesh":
         # Level meshes are in world space: move the geometry to its own origin.
-        data.transform(obj.matrix_world)
+        data.transform(world_matrix(obj))
         corners = [v.co for v in data.vertices]
         low = Vector(tuple(min(c[i] for c in corners) for i in range(3)))
         high = Vector(tuple(max(c[i] for c in corners) for i in range(3)))

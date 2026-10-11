@@ -181,6 +181,12 @@ def draw_switches(layout, context, compact=False) -> None:
     row.prop(scene, "boz_show_shapes", text="" if compact else "Triggers", icon="CUBE",
              toggle=True)
     row.prop(scene, "boz_show_links", text="" if compact else "Links", icon="LINKED", toggle=True)
+    if scene.boz_show_links:
+        row.prop(scene, "boz_links_selected_only", text="" if compact else "Selected",
+                 icon="RESTRICT_SELECT_OFF", toggle=True)
+        error = game._tools().view.draw_error
+        if error and not compact:
+            layout.label(text=f"Links could not be drawn: {error}", icon="ERROR")
     row = layout.row(align=True)
     for kind, text, icon in (("navmesh", "Walkable", "MOD_TRIANGULATE"),
                              ("collision", "Collision", "MOD_PHYSICS")):
@@ -195,6 +201,7 @@ def draw_header(self, context):
     if workspace is None or workspace.name != "World":
         return
     self.layout.separator()
+    self.layout.menu("BOZ_MT_shapes", text="Shapes", icon="MESH_CUBE")
     draw_switches(self.layout, context, compact=True)
 
 
@@ -210,6 +217,7 @@ class BOZ_PT_show(Panel):
         draw_switches(layout, context)
         layout.label(text="Markers: entities without a model, coloured by type")
         layout.label(text="Triggers: trigger and collision volumes of entities")
+        layout.label(text="Links: power, traps, doors and what they unlock")
         layout.label(text="Walkable: blue floor, orange behind doors (Refresh after edits)")
 
 

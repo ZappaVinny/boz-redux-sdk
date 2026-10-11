@@ -70,6 +70,8 @@ def _update(self, context):
 
 
 def _redraw(self, context):
+    global draw_error
+    draw_error = ""
     for area in context.screen.areas if context.screen else []:
         if area.type == "VIEW_3D":
             area.tag_redraw()
@@ -96,14 +98,19 @@ def _hex(value) -> str:
 
 
 _handle = None
+draw_error = ""   # why link drawing stopped (shown in the panels; cleared by toggling Links)
 
 
 def _draw_links():
+    global draw_error
+    if draw_error:
+        return
     try:
         _draw_link_lines()
     except Exception as exc:  # a draw callback must never break the viewport
-        print(f"BOZ Redux: link drawing failed: {exc}")
-        bpy.context.scene.boz_show_links = False
+        # Blend data cannot be changed while drawing, so Links stays on and the error is shown.
+        draw_error = f"{type(exc).__name__}: {exc}"
+        print(f"BOZ Redux: link drawing failed: {draw_error}")
 
 
 def _draw_link_lines():
@@ -310,6 +317,8 @@ def draw_switches(layout, scene):
         grid.prop(scene, switch, text=text, toggle=True)
     if scene.boz_show_links:
         box.prop(scene, "boz_links_selected_only")
+        if draw_error:
+            box.label(text=f"Links could not be drawn: {draw_error}", icon="ERROR")
     if scene.boz_show_markers or scene.boz_show_badges:
         box.prop(scene, "boz_marker_types_expanded", text="Marker types",
                  icon="TRIA_DOWN" if scene.boz_marker_types_expanded else "TRIA_RIGHT",

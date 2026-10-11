@@ -29,8 +29,10 @@ SEARCH_ORDER = ('kino', 'callofthedead', 'ascension', 'tutorial')
 class Setting:
     key: str          # "Component.field"
     label: str
-    kind: str         # int, power (needs the power switch), name (a hashed name), weapon
+    kind: str         # int, float, bool, seconds (a ms field shown in seconds), power (needs
+                      # the power switch), name (a hashed name), weapon, chalk
     description: str = ''
+    default: object = None   # when the entity leaves the field at the game's default
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,11 @@ def _cost(component: str, field_name: str = 'm_Cost') -> Setting:
     return Setting(f'{component}.{field_name}', 'Cost', 'int', 'Points it costs')
 
 
+def _reach(default: float = 200.0) -> Setting:
+    return Setting('CPOI.m_MaxDistance', 'Use distance (cm)', 'float',
+                   'How close players must be to use it', default)
+
+
 def _power(component: str) -> Setting:
     return Setting(f'{component}.powerSwitch', 'Needs power', 'power',
                    'On: works once the power switch is turned on. Off: works from the start')
@@ -64,54 +71,87 @@ PERKS = (('juggernog', 'Juggernog', 'jugg'), ('quick_revive', 'Quick Revive', 'r
 
 PIECES = [
     *(Piece(key, label, 'Toolkit/Perk machines', 'perk', (word,),
-            settings=(_cost('CPerk', 'm_perkSinglePCost'), _power('CPerk')),
+            settings=(_cost('CPerk', 'm_perkSinglePCost'),
+                      Setting('CPerk.m_perkMultiPCost', 'Co-op cost', 'int',
+                              'Points it costs in a co-op game', 1500),
+                      _power('CPerk'), _reach(300.0)),
             description=f'{label} perk machine') for key, label, word in PERKS),
     Piece('pack_a_punch', 'Pack-a-Punch', 'Toolkit/Machines', 'pack_a_punch',
-          settings=(_cost('CPackAPunch'), _power('CPackAPunch')),
+          settings=(_cost('CPackAPunch'), _power('CPackAPunch'), _reach(300.0)),
           description='Upgrades the weapon a player puts in'),
     Piece('mystery_box', 'Mystery box', 'Toolkit/Machines', 'mystery_box',
-          settings=(_cost('CMysteryBox'),),
+          settings=(_cost('CMysteryBox'),
+                    Setting('CMysteryBox.m_FireSaleCost', 'Fire sale cost', 'int',
+                            'Points it costs during a Fire Sale', 10),
+                    Setting('CMysteryBox.m_MinWeapons', 'Uses before it moves: at least', 'int',
+                            'The box moves after a random number of uses between these', 4),
+                    Setting('CMysteryBox.m_MaxWeapons', 'Uses before it moves: at most', 'int',
+                            '', 10)),
           description='A mystery box location (the game picks the active one)'),
     Piece('power_switch', 'Power switch', 'Toolkit/Machines', 'power', ('power',),
+          settings=(Setting('CPowerSwitch.StartEnabled', 'Usable from the start', 'bool',
+                            'Off: players cannot pull it until a script or the game enables it '
+                            '(Ascension\'s launch switch)', True),),
           description='Turns on everything that needs power'),
     Piece('wall_buy', 'Wall buy', 'Toolkit/Buying', 'wall_buy',
           settings=(Setting(WEAPON_FIELD, 'Weapon', 'weapon', 'The weapon players buy here'),
                     _cost('CWeaponChalkOutline'),
+                    Setting('CWeaponChalkOutline.m_ammoCost', 'Ammo cost', 'int',
+                            'Points a refill costs when players already have the weapon', 0),
+                    Setting('CWeaponChalkOutline.m_upgradedAmmoCost', 'Upgraded ammo cost', 'int',
+                            'Points a refill costs for the Pack-a-Punched weapon', 0),
                     Setting(CHALK_FIELD, 'Chalk', 'chalk',
                             'The chalk drawing on the wall: the weapon\'s own, one drawn from its '
                             'model, your image, or none')),
           description='Where players buy a weapon (any weapon of the level)'),
     Piece('trap', 'Trap', 'Toolkit/Defence', 'trap', exclude=('CTrapSwitch',),
-          settings=(Setting('CTrap.m_ActivePeriodMS', 'Active (ms)', 'int'),
-                    Setting('CTrap.m_CoolDownPeriodMS', 'Cool-down (ms)', 'int'),
-                    Setting('CTrap.m_PlayerDamage', 'Player damage', 'int')),
+          settings=(Setting('CTrap.m_ActivePeriodMS', 'Runs for (s)', 'seconds',
+                            'How long it stays on once bought'),
+                    Setting('CTrap.m_CoolDownPeriodMS', 'Cool-down (s)', 'seconds',
+                            'How long before it can be bought again'),
+                    Setting('CTrap.m_PlayerDamage', 'Player damage', 'int',
+                            'Damage to players who walk into it')),
           description='A trap a trap switch turns on'),
     Piece('trap_switch', 'Trap switch', 'Toolkit/Defence', 'trap', require=('CTrapSwitch',),
-          settings=(_cost('CTrapSwitch'), _power('CTrapSwitch')),
+          settings=(_cost('CTrapSwitch'), _power('CTrapSwitch'), _reach(260.0)),
           description='The switch players pay to run a trap'),
     Piece('player_spawn', 'Player spawn', 'Toolkit/Spawns', 'spawn', ('spawn_player',),
           description='Where a player starts (up to four)'),
-    Piece('zombie_window', 'Zombie spawn: window', 'Toolkit/Spawns', 'spawn',
-          spawn_type='WINDOWS', description='Zombies climb in through a window here'),
-    Piece('zombie_crawler', 'Zombie spawn: from above', 'Toolkit/Spawns', 'spawn',
-          spawn_type='hole', description='Zombies drop in from a hole here'),
-    Piece('dog_spawn', 'Dog spawn', 'Toolkit/Spawns', 'spawn', spawn_type='LIGHTNING',
-          description='Hellhounds appear here in dog rounds'),
+    *(Piece(key, label, 'Toolkit/Spawns', 'spawn', spawn_type=kind,
+            settings=(Setting('CSpawnPoint.m_StartActive', 'Active from the start', 'bool',
+                              'On: used from the first round wherever players are. Off: used '
+                              'once players reach its area', False),),
+            description=description)
+      for key, label, kind, description in (
+          ('zombie_window', 'Zombie spawn: window', 'WINDOWS',
+           'Zombies climb in through a window here'),
+          ('zombie_crawler', 'Zombie spawn: from above', 'hole',
+           'Zombies drop in from a hole here'),
+          ('dog_spawn', 'Dog spawn', 'LIGHTNING', 'Hellhounds appear here in dog rounds'))),
     Piece('jump_point', 'Jump point', 'Toolkit/Logic', 'jump',
           description='Where zombies jump across a gap'),
     Piece('interact_point', 'Interact point', 'Toolkit/Logic', 'interact', model=False,
+          settings=(_reach(),),
           description='A point players use with the action button'),
     Piece('sound_emitter', 'Sound emitter', 'Toolkit/Logic', 'sound', model=False,
           settings=(Setting('CSoundEmitter.soundName', 'Sound', 'name',
-                            'The name of the sound it plays'),),
+                            'The name of the sound it plays'),
+                    Setting('CSoundEmitter.StartEnabled', 'Plays from the start', 'bool',
+                            'Off: silent until a script or the game starts it', True)),
           description='Plays a sound at this spot'),
 ]
 BY_KEY = {piece.key: piece for piece in PIECES}
 WALL_BUY_PREFIX = 'wall_'   # older maps: one piece per shipped wall buy
 VARIANTS = {   # pieces with one design per distinct model in the game's levels
-    'door': ('Door', 'Toolkit/Doors', (_cost('CDoor'), _power('CDoor')),
+    'door': ('Door', 'Toolkit/Doors',
+             (_cost('CDoor'), _power('CDoor'),
+              Setting('CDoor.m_HideAfterActivate', 'Disappears when opened', 'bool',
+                      'On: the model vanishes once bought (debris). Off: it plays its opening '
+                      'animation and stays', False)),
              'A door or debris players pay to open'),
-    'barricade': ('Window barricade', 'Toolkit/Barricades', (),
+    'barricade': ('Window barricade', 'Toolkit/Barricades',
+                  (Setting('CBarricade.m_StartBroken', 'Starts broken', 'bool',
+                           'On: the boards start torn down', False),),
                   'Boards zombies tear down and players rebuild'),
 }
 # Wall buys: which weapon a chalk outline sells is not in its reflected fields (it is not the
@@ -282,6 +322,12 @@ def field_value(setting: Setting, value):
     see fields_for)."""
     if setting.kind == 'int':
         return int(value)
+    if setting.kind == 'seconds':
+        return int(round(float(value) * 1000))
+    if setting.kind == 'float':
+        return float(value)
+    if setting.kind == 'bool':
+        return bool(value)
     return str(value)
 
 
@@ -340,8 +386,12 @@ def _defaults(piece_: Piece, spec, names: dict[int, str]) -> dict:
             continue
         value = _weapon_of(spec, names) if setting.key == WEAPON_FIELD else _value(spec, setting.key)
         if value is None:
+            value = setting.default
+        if value is None:
             continue
-        if setting.kind == 'power':
+        if setting.kind == 'seconds':
+            value = round(value / 1000.0, 3)
+        elif setting.kind == 'power':
             value = bool(value)
         elif setting.kind in ('name', 'weapon') and isinstance(value, int):
             value = names.get(value, f'0x{value:08x}')

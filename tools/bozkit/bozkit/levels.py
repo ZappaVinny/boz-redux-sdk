@@ -190,6 +190,7 @@ class LevelFiles:
     """Groups of a new level by file name (all flat in a mod's assets folder)."""
     name: str
     groups: dict[str, group.Group] = field(default_factory=dict)
+    runtime: dict = field(default_factory=dict)   # what boz.world does at level start (world.py)
 
     def write(self, assets: str | Path) -> list[Path]:
         assets = Path(assets)

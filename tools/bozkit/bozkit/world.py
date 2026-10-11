@@ -50,6 +50,12 @@ FORMAT = 2
 COLLISION_KINDS = ('floor', 'solid', 'none')
 SHAPES = ('box', 'mesh')
 NAME_RE = re.compile(r'^[a-z][a-z0-9_]{0,31}$')
+SCRIPT_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{0,47}$')
+# An object scripts can change ("script": {...}): its name in the game (CIsNamed, what
+# boz.objects finds), and how it starts. Scripted meshes and props get a collision entity of their
+# own (<name>_collision) and, when they block, a tagged walkable area instead of a hole, so
+# boz.objects can switch both; boz.world applies the start state when the level starts.
+SCRIPT_DEFAULTS = {'name': '', 'visible': True, 'collision': True, 'blocks': False}
 MAX_TEXTURE = 1024
 INGAME = 'ingame/ingame.group.bin'
 
@@ -85,6 +91,7 @@ class Mesh:
     double_sided: bool = False
     face_textures: list[int] = field(default_factory=list)  # per triangle; empty: all 0
     shape: str = 'mesh'
+    script: dict = field(default_factory=dict)   # level meshes only (SCRIPT_DEFAULTS)
 
     def faces(self) -> list[int]:
         return self.face_textures or [0] * len(self.triangles)
@@ -117,6 +124,7 @@ class Instance:
     shape: str = 'box'
     rotation: tuple[float, float, float, float] | None = None   # x, y, z, w; None: from yaw
     scale: tuple[float, float, float] = UNIT
+    script: dict = field(default_factory=dict)   # SCRIPT_DEFAULTS
 
     def model_ref(self) -> tuple[str, int]:
         path, _, value = self.model.partition('#')
@@ -135,10 +143,12 @@ class Placement:
     rotation: tuple[float, float, float, float] | None = None   # x, y, z, w; None: from yaw
     scale: tuple[float, float, float] = UNIT
     prop: str = ''                           # a project prop drawn instead of its own model
+    model: str = ''                          # or a game model ('<group path>#0x<hash>')
     fields: dict = field(default_factory=dict)   # "Component.field": value overrides
     piece: str = ''                          # the toolkit piece it was placed as (bozkit.toolkit)
     settings: dict = field(default_factory=dict)  # the piece's settings as the editor shows them
     chalk_texture: Texture | None = field(default=None, compare=False, repr=False)  # boz.chalk image
+    script: dict = field(default_factory=dict)   # SCRIPT_DEFAULTS; a copy's name is script name
 
     @property
     def hash(self) -> int:
@@ -203,7 +213,22 @@ def _write_mesh(source: Path, folder: str, mesh: Mesh) -> dict:
     if folder == 'props':
         item['shape'] = mesh.shape
     item['double_sided'] = mesh.double_sided
+    if mesh.script:
+        item['script'] = _script_json(mesh.script)
     return item
+
+
+def script_of(item) -> dict:
+    """The script settings of a mesh, instance or entity with the defaults filled in ({} when
+    scripts do not change it)."""
+    if not item.script:
+        return {}
+    return {**SCRIPT_DEFAULTS, **item.script}
+
+
+def _script_json(script: dict) -> dict:
+    return {key: value for key, value in script.items()
+            if key == 'name' or SCRIPT_DEFAULTS.get(key) != value}
 
 
 def _transform_json(item) -> dict:
@@ -252,6 +277,8 @@ def save(world: World, source: str | Path) -> None:
         entry = {'prop': item.prop} if item.prop else {
             'model': item.model, 'collision': item.collision, 'shape': item.shape}
         entry.update(_transform_json(item))
+        if item.script:
+            entry['script'] = _script_json(item.script)
         instances.append(entry)
     entities = []
     for entity in world.entities:
@@ -262,10 +289,14 @@ def save(world: World, source: str | Path) -> None:
             entry['piece'] = entity.piece
         if entity.prop:
             entry['prop'] = entity.prop
+        if entity.model:
+            entry['model'] = entity.model
         if entity.settings:
             entry['settings'] = entity.settings
         if entity.fields:
             entry['fields'] = entity.fields
+        if entity.script:
+            entry['script'] = _script_json(entity.script)
         entry.update(_transform_json(entity))
         entities.append(entry)
     # One line per item, so the file stays readable and diffs stay small.
@@ -298,7 +329,8 @@ def _read_mesh(source: Path, item: dict, default_collision: str) -> Mesh:
                 [tuple(map(float, uv)) for uv in geometry['uvs']],
                 [tuple(map(int, t)) for t in geometry['triangles']], textures,
                 str(item.get('collision', default_collision)), bool(item.get('double_sided', False)),
-                [int(i) for i in geometry.get('materials', [])], str(item.get('shape', 'mesh')))
+                [int(i) for i in geometry.get('materials', [])], str(item.get('shape', 'mesh')),
+                dict(item.get('script', {})))
 
 
 def load(source: str | Path) -> World:
@@ -320,13 +352,15 @@ def load(source: str | Path) -> World:
             world.instances.append(Instance(
                 prop=str(item.get('prop', '')), model=str(item.get('model', '')),
                 collision=str(item.get('collision', 'solid')), shape=str(item.get('shape', 'box')),
-                **_transform_args(item)))
+                script=dict(item.get('script', {})), **_transform_args(item)))
         for item in data.get('entities', []):
             world.entities.append(Placement(str(item['source']), group=str(item.get('group', '')),
                                             prop=str(item.get('prop', '')),
+                                            model=str(item.get('model', '')),
                                             piece=str(item.get('piece', '')),
                                             settings=dict(item.get('settings', {})),
                                             fields=dict(item.get('fields', {})),
+                                            script=dict(item.get('script', {})),
                                             **_transform_args(item)))
     except (KeyError, TypeError, ValueError) as exc:
         raise WorldError(f'world.json: {exc}') from exc
@@ -353,6 +387,9 @@ def _check_mesh(mesh: Mesh, label: str, problems: list[str]) -> None:
         problems.append(f'{label}: more than 65535 vertices; split it')
     if any(not -32768 <= c <= 32767 for v in mesh.vertices for c in v):
         problems.append(f'{label}: vertices must stay within ±327 m of its origin')
+    if any(not -8.0 <= c < 8.0 for uv in mesh.uvs for c in uv):
+        problems.append(f'{label}: texture coordinates must stay between -8 and 8 (the texture '
+                        'repeats at most 8 times across it); scale its UVs down')
     if any(i >= len(mesh.vertices) or i < 0 for t in mesh.triangles for i in t):
         problems.append(f'{label}: a triangle uses a vertex that does not exist')
     if not mesh.textures:
@@ -392,8 +429,25 @@ def validate(world: World) -> list[str]:
             if instance.collision not in COLLISION_KINDS or instance.shape not in SHAPES:
                 problems.append(f'instance of {instance.model!r}: bad collision or shape')
     for entity in world.entities:
+        if entity.model:
+            try:
+                Instance((0.0, 0.0, 0.0), model=entity.model).model_ref()
+            except ValueError:
+                problems.append(f'entity {entity.source!r}: model {entity.model!r} is not '
+                                '<group path>#0x<hash>')
         if entity.prop and entity.prop not in props:
             problems.append(f'entity {entity.source!r} draws prop {entity.prop!r}, which does not exist')
+    script_names = []
+    for item in world.meshes + world.instances + world.entities:
+        name = script_of(item).get('name', '')
+        if item.script and not SCRIPT_NAME_RE.fullmatch(name):
+            problems.append(f'script name {name!r}: use letters, digits and _ (at most 48, '
+                            'starting with a letter)')
+        if name:
+            script_names.append(name.lower())
+    for name in set(script_names):
+        if script_names.count(name) > 1:
+            problems.append(f'{name!r}: two objects have this script name')
     if world.inherit:   # the base level brings its floors and spawns
         return sorted(set(problems), key=problems.index)
     if not any(entity.source.startswith('spawn_player_') for entity in world.entities):
@@ -594,6 +648,9 @@ class _GameModels:
         return out
 
 
+TRIGGER_SOURCE = 'boz:trigger_volume'   # bozkit.toolkit's trigger volume piece
+TRIGGER_TEMPLATE = 'levels/callofthedead/callofthedead_statics.group.bin'
+TRIGGER_SIZE = 100.0   # centimetres: the editor's trigger cube at scale 1
 WEAPON_FIELD = 'boz.weapon'   # a wall buy's weapon (Placement.fields)
 CHALK_FIELD = 'boz.chalk'     # a wall buy's chalk (Placement.settings): '' auto, 'none', an image
 
@@ -729,6 +786,11 @@ class _Level:
         self.moved: list[group.Resource] = []   # an inherited level's own entities, moved
         self.wall_buys: list = []                  # (placement, spec) of placed wall buys
         self.dirty: list[tuple[float, float, float, float]] = []   # XZ metres, for the navmesh
+        # Objects scripts change: their own collision, tagged walkable areas, start state.
+        self.script_collision: dict[str, tuple[list, list]] = {}
+        self.blockers: list = []                   # door_footprints entries tagged by script name
+        self.runtime = {'hidden': [], 'no_collision': [], 'blocked': []}
+        self.scripted: set[int] = set()            # id() of scripted entity resources
 
     def add(self, cls: int, key: int, body: bytes) -> None:
         if key in self.present[cls]:
@@ -750,19 +812,45 @@ class _Level:
                   iw_hash('CZombieConfiguration')}
 
     def _index(self) -> dict[int, list[tuple[int, str, group.Resource, group.ResourceType]]]:
-        """Every resource of the game's Zombies level groups and ingame, by name hash (weapon
-        groups are left out: their models share names such as Base and LOD1)."""
+        """Every resource of the game's Zombies level groups and the ingame groups (pickups,
+        props, ...), by name hash. Weapon groups are left out: their models share names such as
+        Base and LOD1. Levels and ingame itself come first, so their resources win a clash."""
         if self._by_hash is None:
             self._by_hash = {}
             names = self.pack.names() if hasattr(self.pack, 'names') else []
-            paths = [path for path in names if path.endswith('.group.bin') and (
-                path.startswith('levels/') or path == INGAME)]
+            groups = [path for path in names if path.endswith('.group.bin')]
+            paths = [path for path in groups if path.startswith('levels/') or path == INGAME]
+            paths += sorted(path for path in groups if path.startswith('ingame/')
+                            and path != INGAME and not path.startswith('ingame/weapons/'))
             for path in paths:
                 for resource_type in self.game.group(path).types():
                     for resource in resource_type.resources:
                         self._by_hash.setdefault(resource.in_group_hash, []).append(
                             (resource_type.class_hash, path, resource, resource_type))
         return self._by_hash
+
+    def _own_groups(self, source: str, index) -> dict:
+        """Resources of a source group the index leaves out (weapon groups), with the weapon
+        group's textures and materials (weapon_projectiles_<level>): what a dropped weapon or
+        projectile model uses comes from its own groups."""
+        if not source or not source.startswith('ingame/weapons/'):
+            return {}
+        paths = [source]
+        folder, _, file_name = source.rpartition('/')
+        for prefix, other in (('weapons_', 'weapon_projectiles_'), ('weapon_projectiles_', 'weapons_')):
+            if file_name.startswith(prefix):
+                paths.append(f'{folder}/{other}{file_name[len(prefix):]}')
+        own: dict = {}
+        for path in paths:
+            try:
+                parsed = self.game.group(path)
+            except (WorldError, KeyError):
+                continue
+            for resource_type in parsed.types():
+                for resource in resource_type.resources:
+                    own.setdefault(resource.in_group_hash, []).append(
+                        (resource_type.class_hash, path, resource, resource_type))
+        return own
 
     def _present(self, cls: int, value: int) -> bool:
         if self._loaded is None:
@@ -811,13 +899,15 @@ class _Level:
         from . import native, reflect as reflection, resources
 
         index = self._index()
+        own = self._own_groups(source, index)
         queue, seen, copied = list(hashes), set(), 0
         while queue:
             value = queue.pop()
             if value in seen or not value:
                 continue
             seen.add(value)
-            candidates = [c for c in index.get(value, []) if c[0] not in self.NOT_COPIED]
+            candidates = [c for c in own.get(value, []) + index.get(value, [])
+                          if c[0] not in self.NOT_COPIED]
             if not candidates:
                 continue
             same_map = library_map(source)
@@ -882,6 +972,9 @@ class _Level:
         from . import blender_scene as scene
         from . import reflect, resources
 
+        if entity.source == TRIGGER_SOURCE:
+            self._trigger_volume(entity)
+            return
         in_base = not entity.group or entity.group == self.base_statics
         existing = self.specs.get(entity.hash) if in_base else None
         rotation, scale = entity.quaternion(), tuple(entity.scale)
@@ -894,6 +987,8 @@ class _Level:
             existing.body = resources.encode_entity_spec(spec)
             self._mark([old, entity.position])
             self.moved.append(existing)
+            if entity.script:
+                self._script_entity(entity, existing, spec)
             return
         if existing is not None:
             body = existing.body
@@ -905,7 +1000,12 @@ class _Level:
                 raise WorldError(f'{entity.group} has no entity {entity.source!r}')
         key = entity.hash
         copy_name = None
-        if key in self.used or (move_existing and in_base and key in self.specs):
+        script = script_of(entity).get('name', '')
+        if script and script.lower() != entity.source.lower():
+            # Placed with a script name: the copy is called that (scripts find it by it).
+            copy_name = script
+            key = iw_hash(script)
+        elif key in self.used or (move_existing and in_base and key in self.specs):
             # A second copy of the same entity gets a name of its own (its entity name and
             # CIsNamed name: doors are told apart by it, in the navmesh too).
             self.copies += 1
@@ -952,6 +1052,72 @@ class _Level:
         self.kept.append(resource)
         self.added.append(resource)
         self._mark([entity.position])
+        if entity.script:
+            self._script_entity(entity, resource, spec)
+
+    def _trigger_volume(self, entity: Placement) -> None:
+        """A trigger volume: an invisible ghost box (from Call of the Dead's snow triggers) that
+        reports who enters and leaves it (boz.objects "enter"/"exit"), sized by its scale."""
+        from . import reflect, resources
+
+        template = None
+        parsed = group.parse(self.pack.read(TRIGGER_TEMPLATE))
+        for resource_type in parsed.types():
+            if resource_type.class_hash != levels.ENTITY_SPEC:
+                continue
+            for item in resource_type.resources:
+                spec = resources.decode_entity_spec(item.body)
+                if levels._component(spec, 'CSnowTrigger') is not None and spec.children:
+                    template = spec.children[0][2]
+                    break
+            if template is not None:
+                break
+        if template is None:
+            raise WorldError('the game has no trigger box to copy (Call of the Dead\'s snow triggers)')
+        spec = copy.deepcopy(template)
+        spec.components = [c for c in spec.components if c.type_hash != iw_hash('CIsHierarchy')]
+        spec.children = []
+        self.copies += 1
+        name = script_of(entity).get('name') or f'{self.name}_trigger_{self.copies}'
+        self._name(spec, name)
+        levels._set_transform(spec, entity.position, entity.quaternion())
+        box = levels._component(spec, 'CIsCollisionBox')
+        half = [TRIGGER_SIZE / 2 * abs(c) for c in entity.scale]
+        reflect.set_typed_value(levels._blob_prop(box.blob, 'm_halfAxis'), half)
+        for prop in box.blob.properties:
+            # m_Offset and an unnamed offset (0x3f9a899b, non-zero in the snow boxes): centred.
+            if prop.name_hash in (iw_hash('m_Offset'), 0x3f9a899b):
+                reflect.set_typed_value(prop, [0.0, 0.0, 0.0])
+        ghost = levels._blob_prop(box.blob, 'm_Ghost')
+        if ghost is None:
+            ghost = reflect.Property(iw_hash('CIsCollisionObject'), iw_hash('bool'),
+                                     iw_hash('m_Ghost'), b'')
+            box.blob.properties.append(ghost)
+        reflect.set_typed_value(ghost, True)
+        resource = group.Resource(None, iw_hash(name), resources.encode_entity_spec(spec))
+        self.kept.append(resource)
+        self.own.add(id(resource))    # no box of its own in the collision or the navmesh
+        self._mark([entity.position])
+        self.script(entity)
+
+    def _script_entity(self, entity: Placement, resource, spec) -> None:
+        """A scripted entity: no baked box (its own collision is switched instead); a blocking
+        one tags the walkable area under it with its name."""
+        from . import blender_scene as scene
+        from . import native
+
+        self.scripted.add(id(resource))
+        corners = []
+        for box in levels.prop_boxes(spec, self.models):
+            corners += box
+        model = scene._model_reference(spec)
+        if not corners and model in self.models:
+            chain = [scene._local_transform(spec)]
+            corners = [scene._native_apply(chain, c)
+                       for c in _box_corners(native.decode_model(self.models[model]).vertices)]
+        if not corners:
+            corners = [tuple(entity.position)]
+        self.script(entity, corners)
 
     def _configure(self, spec, entity: Placement, rotation, scale) -> None:
         """Transform, custom model and field overrides of a placed entity."""
@@ -960,14 +1126,11 @@ class _Level:
         levels._set_transform(spec, entity.position, rotation)
         levels._scale_by(spec, scale)   # relative: weapons and wall buys have their own scale
         if entity.prop:
-            model_hash = iw_hash(f'{self.name}_prop_{entity.prop}')
-            renderable = levels._component(spec, 'CIsRenderableModel')
-            if renderable is None:
-                raise WorldError(f'entity {entity.source!r} draws no model to replace')
-            for element in levels._blob_prop(renderable.blob, 'assets').elements:
-                for prop in element.properties:
-                    if prop.name_hash in (iw_hash('Name'), iw_hash('model')):
-                        reflect.set_typed_value(prop, model_hash)
+            self._draw_model(spec, iw_hash(f'{self.name}_prop_{entity.prop}'))
+        elif entity.model:
+            path, model_hash = Instance((0.0, 0.0, 0.0), model=entity.model).model_ref()
+            self.copy_model(path, model_hash)
+            self._draw_model(spec, model_hash)
         for key, value in entity.fields.items():
             if key == WEAPON_FIELD:
                 self._set_weapon(spec, entity, str(value))
@@ -977,9 +1140,12 @@ class _Level:
             prop = levels._blob_prop(component.blob, field_name) if component and component.blob \
                 else None
             if prop is None and component is not None and component.blob is not None \
-                    and isinstance(value, bool):
-                # Flags the shipped data leaves at their default (Pack-a-Punch m_HasPower).
-                prop = reflect.Property(iw_hash(component_name), iw_hash('bool'),
+                    and isinstance(value, (bool, int, float)):
+                # Fields the shipped data leaves at their default (Pack-a-Punch m_HasPower,
+                # ammo costs, ...): added with the field's type.
+                type_name = 'bool' if isinstance(value, bool) else \
+                    'float' if isinstance(value, float) else 'unsigned int'
+                prop = reflect.Property(iw_hash(component_name), iw_hash(type_name),
                                         iw_hash(field_name), b'')
                 component.blob.properties.append(prop)
             if prop is None:
@@ -988,6 +1154,24 @@ class _Level:
                 # Name fields hold hashes: "0x..." is one already, anything else is a name.
                 value = int(value, 16) if value.startswith('0x') else iw_hash(value)
             reflect.set_typed_value(prop, value)
+
+    def _draw_model(self, spec, model_hash: int) -> None:
+        """Make an entity draw *model_hash*; one that draws nothing (a shootable target, a
+        trigger) gets a renderable of its own (the placed models' one)."""
+        from . import reflect, resources
+
+        renderable = levels._component(spec, 'CIsRenderableModel')
+        if renderable is None:
+            template = levels._component(resources.decode_entity_spec(self.placed_template),
+                                         'CIsRenderableModel')
+            renderable = copy.deepcopy(template)
+            at = next((i + 1 for i, c in enumerate(spec.components)
+                       if c.type_hash == iw_hash('CIsTransform')), 0)
+            spec.components.insert(at, renderable)
+        for element in levels._blob_prop(renderable.blob, 'assets').elements:
+            for prop in element.properties:
+                if prop.name_hash in (iw_hash('Name'), iw_hash('model')):
+                    reflect.set_typed_value(prop, model_hash)
 
     def _set_weapon(self, spec, entity: Placement, weapon: str) -> None:
         """Make a wall buy sell *weapon*: its "model" child shows the weapon (asset name =
@@ -1083,12 +1267,14 @@ class _Level:
                  native.build_model(mesh.vertices, mesh.uvs, triangles, materials, faces))
 
     def place(self, entity_name: str, model_hash: int, position, rotation=(0.0, 0.0, 0.0, 1.0),
-              scale=UNIT) -> None:
+              scale=UNIT, named: bool = False) -> None:
         from . import reflect, resources
 
         spec = resources.decode_entity_spec(self.placed_template)
         levels._set_transform(spec, position, rotation)
         levels._set_scale(spec, scale)
+        if named:
+            self._name(spec, entity_name)
         renderable = levels._component(spec, 'CIsRenderableModel').blob
         for element in levels._blob_prop(renderable, 'assets').elements:
             for prop in element.properties:
@@ -1098,13 +1284,58 @@ class _Level:
         self.kept.append(resource)
         self.own.add(id(resource))
 
+    def _name(self, spec, name: str) -> None:
+        """Give an entity spec the CIsNamed name boz.objects finds it by."""
+        from . import reflect, resources
+
+        named = levels._component(spec, 'CIsNamed')
+        if named is None:
+            template = next(c for r in self.by_class[levels.ENTITY_SPEC].resources
+                            for c in resources.decode_entity_spec(r.body).components
+                            if c.type_hash == iw_hash('CIsNamed') and c.blob is not None)
+            named = copy.deepcopy(template)
+            spec.components.insert(1, named)
+        reflect.set_typed_value(levels._blob_prop(named.blob, 'name'), name)
+
+    def script(self, item, footprint_points=None) -> str:
+        """Record a scripted object's start state; returns its script name ('' for none)."""
+        script = script_of(item)
+        name = script.get('name', '')
+        if not name:
+            return ''
+        if not script['visible']:
+            self.runtime['hidden'].append(name)
+        if not script['collision']:
+            self.runtime['no_collision'].append(name)
+        if script['blocks']:
+            self.runtime['blocked'].append(name)
+            if footprint_points:
+                # A little below it: the floor it stands on is what gets tagged.
+                self.blockers.append(_tag_area(iw_hash(name), footprint_points, below=0.3))
+        return name
+
     def collide(self, vertices, triangles, kind: str, shape: str, position=None,
-                rotation=(0.0, 0.0, 0.0, 1.0), scale=UNIT) -> None:
+                rotation=(0.0, 0.0, 0.0, 1.0), scale=UNIT, script: str = '') -> list:
+        """Add collision; a scripted object's goes into its own collision entity. Returns the
+        world-space points used."""
         from . import blender_scene as scene
 
         if kind == 'none':
-            return
+            return []
         chain = [(tuple(position), tuple(rotation), tuple(scale))] if position else []
+        if script:
+            solid, single = self.script_collision.setdefault(script, ([], []))
+            if shape == 'box':
+                points = [scene._native_apply(chain, c) for c in _box_corners(vertices)]
+                single.extend(levels.box_triangles(len(solid)))
+            else:
+                points = [scene._native_apply(chain, tuple(map(float, v))) if chain
+                          else tuple(map(float, v)) for v in vertices]
+                single.extend((a + len(solid), b + len(solid), c + len(solid))
+                              for a, b, c in triangles)
+            solid.extend(points)
+            self._mark(points)
+            return points
         before = len(self.single)
         if shape == 'box':
             points = [scene._native_apply(chain, c) for c in _box_corners(vertices)]
@@ -1118,6 +1349,7 @@ class _Level:
             self.single.extend((a + offset, b + offset, c + offset) for a, b, c in triangles)
         self.blocking.extend([1 if kind == 'solid' else 0] * (len(self.single) - before))
         self._mark(points)
+        return points
 
     def add_chalks(self) -> None:
         """A chalk decal for each placed wall buy, where the shipped maps put theirs: the
@@ -1216,32 +1448,66 @@ class _Level:
         name = self.name
         for mesh in world.meshes:
             model_name = f'{name}_{mesh.name}'
+            script = script_of(mesh).get('name', '')
             self.build(mesh, model_name)
-            self.place(model_name, iw_hash(model_name), (0, 0, 0))
-            self.collide(mesh.vertices, mesh.triangles, mesh.collision, 'mesh')
+            self.place(script or model_name, iw_hash(model_name), (0, 0, 0), named=bool(script))
+            points = self.collide(mesh.vertices, mesh.triangles, mesh.collision, 'mesh',
+                                  script=script)
+            self.script(mesh, points or [tuple(map(float, v)) for v in mesh.vertices])
         props = {prop.name: prop for prop in world.props}
         for number, instance in enumerate(world.instances):
             rotation, scale = instance.quaternion(), tuple(instance.scale)
+            script = script_of(instance).get('name', '')
             if instance.prop:
                 prop = props[instance.prop]
-                self.place(f'{name}_prop_{prop.name}_{number}',
-                           iw_hash(f'{name}_prop_{prop.name}'), instance.position, rotation, scale)
-                self.collide(prop.vertices, prop.triangles, prop.collision, prop.shape,
-                             instance.position, rotation, scale)
-                continue
-            path, model_hash = instance.model_ref()
-            self.copy_model(path, model_hash)
-            self.place(f'{name}_model_{number}', model_hash, instance.position, rotation, scale)
-            decoded = native.decode_model(self.models[model_hash])
-            self.collide(decoded.vertices, decoded.triangles, instance.collision, instance.shape,
-                         instance.position, rotation, scale)
+                self.place(script or f'{name}_prop_{prop.name}_{number}',
+                           iw_hash(f'{name}_prop_{prop.name}'), instance.position, rotation, scale,
+                           named=bool(script))
+                points = self.collide(prop.vertices, prop.triangles, prop.collision, prop.shape,
+                                      instance.position, rotation, scale, script=script)
+            else:
+                path, model_hash = instance.model_ref()
+                self.copy_model(path, model_hash)
+                self.place(script or f'{name}_model_{number}', model_hash, instance.position,
+                           rotation, scale, named=bool(script))
+                decoded = native.decode_model(self.models[model_hash])
+                points = self.collide(decoded.vertices, decoded.triangles, instance.collision,
+                                      instance.shape, instance.position, rotation, scale,
+                                      script=script)
+            self.script(instance, points)
+
+    def script_collisions(self) -> None:
+        """A collision entity (<name>_collision, a copy of the level's) for each scripted object
+        with collision, so boz.objects can switch it."""
+        from . import collision, resources
+
+        if not self.script_collision:
+            return
+        source = next((r for r in self.kept if any(
+            c.class_hash == resources.COLLISION_MESH_SPEC
+            for c in resources.decode_entity_spec(r.body).components)), None)
+        if source is None:
+            raise WorldError(f'{self.base} has no collision entity to copy')
+        for name, (solid, single) in sorted(self.script_collision.items()):
+            spec = resources.decode_entity_spec(source.body)
+            levels._set_transform(spec, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+            self._name(spec, f'{name}_collision')
+            component = next(c for c in spec.components
+                             if c.class_hash == resources.COLLISION_MESH_SPEC)
+            mesh_data = collision.decode(component.extra)
+            mesh_data.vertices = list(solid)
+            mesh_data.indices = [i for t in single for i in t]
+            mesh_data.materials = bytes(len(single))
+            component.extra = collision.encode(mesh_data)
+            self.kept.append(group.Resource(None, iw_hash(f'{name}_collision'),
+                                            resources.encode_entity_spec(spec)))
 
     def entity_boxes(self, resources_list) -> None:
         """Shipped levels bake props into their collision and navmesh; added entities get a box."""
         from . import resources
 
         for resource in resources_list:
-            if id(resource) in self.own:
+            if id(resource) in self.own or id(resource) in self.scripted:
                 continue
             spec = resources.decode_entity_spec(resource.body)
             if levels._component(spec, 'CDoor') is not None:
@@ -1274,17 +1540,8 @@ class _Level:
                 corners += [scene._native_apply(chain, c) for c in _box_corners(vertices)]
             if not corners:
                 continue
-            points = [(x / 100, z / 100) for x, _y, z in corners]
-            centre = (sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points))
-            # Reach a little past it: the area must catch whole polygons.
-            grown = []
-            for x, z in _hull(points):
-                dx, dz = x - centre[0], z - centre[1]
-                length = (dx * dx + dz * dz) ** 0.5 or 1.0
-                grown.append((x + dx / length * 0.4, z + dz / length * 0.4))
-            ys = [y / 100 for _x, y, _z in corners]
-            doors.append((name_hash, grown, min(ys), max(ys)))
-        return doors
+            doors.append(_tag_area(name_hash, corners))
+        return doors + self.blockers
 
     def set_collision(self, resource: group.Resource) -> None:
         from . import collision, resources
@@ -1301,6 +1558,24 @@ class _Level:
 
     def finish_entities(self) -> None:
         self.by_class[levels.ENTITY_SPEC].resources = self.kept
+
+
+def _tag_area(name_hash: int, corners, below: float = 0.0) -> tuple:
+    """(name hash, XZ hull in metres, min y, max y) of points in centimetres, grown a little: a
+    navmesh area tagged with the name (doors, and objects scripts open and close)."""
+    points = [(x / 100, z / 100) for x, _y, z in corners]
+    centre = (sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points))
+    # Reach a little past it: the area must catch whole polygons.
+    grown = []
+    for x, z in _hull(points) if len(points) >= 3 else [(centre[0] - 0.5, centre[1] - 0.5),
+                                                        (centre[0] + 0.5, centre[1] - 0.5),
+                                                        (centre[0] + 0.5, centre[1] + 0.5),
+                                                        (centre[0] - 0.5, centre[1] + 0.5)]:
+        dx, dz = x - centre[0], z - centre[1]
+        length = (dx * dx + dz * dz) ** 0.5 or 1.0
+        grown.append((x + dx / length * 0.4, z + dz / length * 0.4))
+    ys = [y / 100 for _x, y, _z in corners]
+    return (name_hash, grown, min(ys) - below, max(ys))
 
 
 def compile_world(pack, name: str, world: World,
@@ -1349,6 +1624,7 @@ def compile_world(pack, name: str, world: World,
     level.contents(world)
     level.add_chalks()
     level.entity_boxes(list(level.kept))
+    level.script_collisions()
     collision_key = iw_hash('COLLISION')
     if collision_key not in level.specs:
         raise WorldError(f'{base} has no COLLISION entity')
@@ -1368,6 +1644,7 @@ def compile_world(pack, name: str, world: World,
     without_children = levels.renamed(statics, f'{name}_statics')
     without_children.sections = [x for x in without_children.sections if x.hash != levels.CHILDREN]
     files.groups[f'{name}_statics.group.bin'] = without_children
+    files.runtime = level.runtime
     return files
 
 
@@ -1394,6 +1671,7 @@ def _compile_inherited(pack, name: str, world: World, fixed) -> levels.LevelFile
     level.contents(world)
     level.add_chalks()
     level.entity_boxes(level.added)
+    level.script_collisions()
     level.finish_entities()
     navmesh_input = None
     if level.dirty:
@@ -1432,4 +1710,5 @@ def _compile_inherited(pack, name: str, world: World, fixed) -> levels.LevelFile
         navmesh.body, _report = navbuild.rebuild(navmesh.body, vertices, triangles,
                                                  dirty=level.dirty, blocking=blocking,
                                                  doors=level.door_footprints(level.added + level.moved))
+    files.runtime = level.runtime
     return files
