@@ -30,7 +30,8 @@ class Setting:
     key: str          # "Component.field"
     label: str
     kind: str         # int, float, bool, seconds (a ms field shown in seconds), power (needs
-                      # the power switch), name (a hashed name), weapon, chalk
+                      # the power switch), name (a hashed name), weapon, chalk, weapons (a list
+                      # of weapon names: std::list<unsigned int>, u32 count + hashes)
     description: str = ''
     default: object = None   # when the entity leaves the field at the game's default
 
@@ -86,7 +87,9 @@ PIECES = [
                     Setting('CMysteryBox.m_MinWeapons', 'Uses before it moves: at least', 'int',
                             'The box moves after a random number of uses between these', 4),
                     Setting('CMysteryBox.m_MaxWeapons', 'Uses before it moves: at most', 'int',
-                            '', 10)),
+                            '', 10),
+                    Setting('CMysteryBox.m_Weapons', 'Weapon pool', 'weapons',
+                            'The weapons the box rolls (shipped boxes have 17 or 18)')),
           description='A mystery box location (the game picks the active one)'),
     Piece('power_switch', 'Power switch', 'Game prefabs/Machines', 'power', ('power',),
           settings=(Setting('CPowerSwitch.StartEnabled', 'Usable from the start', 'bool',
@@ -260,6 +263,27 @@ def _value(spec, key: str):
     return reflect.typed_value(prop) if prop is not None else None
 
 
+def hash_list(raw: bytes) -> list[int]:
+    """A std::list<unsigned int> value: u32 count, then the values."""
+    if len(raw) < 4:
+        return []
+    count = struct.unpack_from('<I', raw)[0]
+    if len(raw) != 4 + count * 4:
+        return []
+    return list(struct.unpack_from(f'<{count}I', raw, 4))
+
+
+def encode_hash_list(values) -> bytes:
+    return struct.pack('<I', len(values)) + b''.join(struct.pack('<I', v) for v in values)
+
+
+def _list_value(spec, key: str) -> list[int] | None:
+    component_name, _, field_name = key.partition('.')
+    component = levels._component(spec, component_name)
+    prop = levels._blob_prop(component.blob, field_name) if component and component.blob else None
+    return hash_list(prop.raw) if prop is not None else None
+
+
 def resolve(pack, base: str, key: str, names: dict[int, str] | None = None) -> Resolved | None:
     """The entity a piece places on *base*: the base level's own, else another level's (the
     compiler repacks what it uses), else ingame's template."""
@@ -325,6 +349,9 @@ def field_value(setting: Setting, value):
         return float(value)
     if setting.kind == 'bool':
         return bool(value)
+    if setting.kind == 'weapons':
+        items = value if isinstance(value, (list, tuple)) else str(value).split(',')
+        return [str(item).strip() for item in items if str(item).strip()]
     return str(value)
 
 
@@ -333,6 +360,8 @@ def fields_for(setting: Setting, value) -> dict:
     reads from the settings)."""
     if setting.kind == 'chalk':
         return {}
+    if setting.kind == 'weapons' and not field_value(setting, value):
+        return {}   # no pool chosen: the box keeps the game's
     return _fields_for(setting, value)
 
 
@@ -380,6 +409,11 @@ def _defaults(piece_: Piece, spec, names: dict[int, str]) -> dict:
     values = {}
     for setting in piece_.settings:
         if setting.key == CHALK_FIELD:
+            continue
+        if setting.kind == 'weapons':
+            found = _list_value(spec, setting.key)
+            if found is not None:
+                values[setting.key] = ','.join(names.get(h, f'0x{h:08x}') for h in found)
             continue
         value = _weapon_of(spec, names) if setting.key == WEAPON_FIELD else _value(spec, setting.key)
         if value is None:

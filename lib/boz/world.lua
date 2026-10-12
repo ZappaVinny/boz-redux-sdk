@@ -45,11 +45,35 @@ local function power_unpowered_perks()
     end})
 end
 
+-- The weapon players start with: WeaponManager_GiveStartWeapons gives the PlayerStartWeapon
+-- cvar's weapon with PlayerStartAmmo spare rounds (the game registers both when the first player
+-- spawns; registering them first makes a value stick). Set just before it runs, on this map only:
+-- the mod stays enabled on other maps, which get the game's Colt and 40 rounds back.
+local START_GIVE_OFFSET = 0x220a24 + 1
+local LEVEL_NAME = 0x55   -- CLevelManager: the level's name
+
+local function start_weapon(data)
+    local wanted = data.start_weapon
+    if type(wanted) ~= "table" or not wanted.name then
+        return
+    end
+    local console = require("boz.console")
+    local target = game.symbol("WeaponManager_GiveStartWeapons") or (game.base() + START_GIVE_OFFSET)
+    hook.add(target, {before = function()
+        local level = game.read("ptr", "CLevelManager::s_instance")
+        local name = level ~= 0 and game.read("string", level + LEVEL_NAME, 64) or ""
+        local ours = wanted.level == nil or string.lower(name) == string.lower(wanted.level)
+        console.register("PlayerStartWeapon", ours and wanted.name or "colt45", "string")
+        console.register("PlayerStartAmmo", tostring(ours and (wanted.reserve or 40) or 40), "int")
+    end})
+end
+
 local function start_state()
     local ok, data = pcall(require, "boz.world_data")
     if not ok or type(data) ~= "table" then
         return
     end
+    start_weapon(data)
     local objects = require("boz.objects")
     local prefabs = require("boz.prefabs")
     events.on("frame", function()
@@ -71,7 +95,7 @@ local function start_state()
         for _, name in ipairs(data.blocked or {}) do
             objects.set_navmesh(name, false)
         end
-        prefabs.start(data.objects or {}, data.names)
+        prefabs.start(data.objects or {}, data.names, data.weapons)
     end)
 end
 

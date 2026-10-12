@@ -10,6 +10,7 @@ import bpy
 from bpy.types import Menu, Operator
 
 from . import tabs
+from . import link
 
 _saved: list[tuple[object, str, object]] = []   # (class, attribute, original) to restore
 
@@ -207,7 +208,7 @@ def _text_header(original):
             layout = self.layout
             layout.label(text="Log", icon="CONSOLE")
             layout.separator_spacer()
-            problems = len(context.scene.get("boz_problems", []))
+            problems = len(link.map_scene().get("boz_problems", []))
             layout.label(text=f"{problems} problems" if problems else "No problems",
                          icon="ERROR" if problems else "CHECKMARK")
             layout.operator("boz.clear_log", text="Clear", icon="TRASH")

@@ -20,6 +20,7 @@ except ModuleNotFoundError:
     from ._vendor.bozkit import blender_scene, collision, group, levels, library, world
 
 from . import convert, game
+from . import link
 
 COLLECTIONS = {"navmesh": "Preview: walkable area", "collision": "Preview: collision"}
 SWITCHES = {"navmesh": "boz_show_navmesh", "collision": "boz_show_collision"}
@@ -82,7 +83,7 @@ def build(context) -> str:
     if pack is None:
         raise ValueError("the preview needs the game data: build the asset library in the launcher")
     problems = []
-    source = convert.scene_to_world(context.scene, problems)
+    source = convert.scene_to_world(link.map_scene(), problems)
     try:
         files = world.compile_world(pack, project.map_name, source, None)
     except (world.WorldError, levels.LevelError) as exc:
@@ -94,8 +95,8 @@ def build(context) -> str:
     for kind, name in COLLECTIONS.items():
         clear(kind)
         collection = bpy.data.collections.get(name) or bpy.data.collections.new(name)
-        if collection.name not in context.scene.collection.children:
-            context.scene.collection.children.link(collection)
+        if collection.name not in link.map_scene().collection.children:
+            link.map_scene().collection.children.link(collection)
         meshes, objects = {}, {}
         for item in items:
             if item.kind not in KINDS[kind]:
@@ -133,13 +134,13 @@ class BOZ_OT_preview(Operator):
 
     def execute(self, context):
         switch = SWITCHES[self.kind]
-        if getattr(context.scene, switch) and has_preview(self.kind):
-            setattr(context.scene, switch, False)
+        if getattr(link.map_scene(), switch) and has_preview(self.kind):
+            setattr(link.map_scene(), switch, False)
             return {"FINISHED"}
         if not has_preview(self.kind):
             if not _rebuild(self, context):
                 return {"CANCELLED"}
-        setattr(context.scene, switch, True)
+        setattr(link.map_scene(), switch, True)
         return {"FINISHED"}
 
 
@@ -172,7 +173,7 @@ class BOZ_OT_preview_refresh(Operator):
 
 
 def draw_switches(layout, context, compact=False) -> None:
-    scene = context.scene
+    scene = link.map_scene()
     if not hasattr(scene, "boz_show_markers"):
         return
     row = layout.row(align=True)

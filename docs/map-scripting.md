@@ -80,6 +80,7 @@ Developer console (` or F1) and in `boz-log.txt`. Every handler is optional:
 | `door_opened` | `door`: the door's name (`0x...` for a door the map does not name), `hash` |
 | `zombie_killed` | `position` ({x, y, z}), `entity` (the zombie, the same as `who.entity` in `on_enter`), `by_player`, `headshot` |
 | `player_downed`, `player_revived` | |
+| `weapon_given`, `weapon_equipped`, `weapon_reloaded` | `weapon` (its name); `weapon_fired` reaches `boz.on` only. Weapon scripts: [weapons.md](weapons.md) |
 
 "Killed near something" needs no event of its own: compare `data.position` with an object
 (`self:part("Altar"):near(data.position, 200)`), or put a Trigger volume around the spot and

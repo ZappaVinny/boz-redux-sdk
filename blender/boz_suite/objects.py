@@ -322,7 +322,7 @@ class BOZ_OT_script_reload(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        sync_all(context.scene)
+        sync_all(link.map_scene())
         return {"FINISHED"}
 
 
@@ -365,7 +365,7 @@ class BOZ_OT_make_prefab(Operator):
         prefab.empty_display_size = 20.0
         prefab.show_name = True
         prefab.boz.role = "prefab"
-        collection = convert.map_collection(context.scene)
+        collection = convert.map_collection(link.map_scene())
         collection.objects.link(prefab)
         if convert.is_prefab_group(outer):
             prefab.parent = outer
@@ -382,7 +382,7 @@ class BOZ_OT_make_prefab(Operator):
             convert.move_to(obj, collection)   # parts sit with their prefab in the outliner
             if not obj.boz.part_name:
                 obj.boz.part_name = convert.clean_name(convert._without_suffix(obj.name))
-        convert.sync_part_names(context.scene)
+        convert.sync_part_names(link.map_scene())
         for other in context.selected_objects:
             other.select_set(False)
         prefab.select_set(True)
@@ -495,8 +495,8 @@ class BOZ_OT_place_prefab(Operator):
     name: StringProperty()
 
     def execute(self, context):
-        position = convert.blender_scene.from_blender(tuple(context.scene.cursor.location))
-        obj = place_library_prefab(context.scene, self.name, position)
+        position = convert.blender_scene.from_blender(tuple(link.map_scene().cursor.location))
+        obj = place_library_prefab(link.map_scene(), self.name, position)
         if obj is None:
             self.report({"ERROR"}, f"There is no prefab {self.name} in the library")
             return {"CANCELLED"}
@@ -569,6 +569,13 @@ def _draw_game_settings(layout, obj) -> None:
             row = box.row()
             row.label(text=f"{setting.label}: {obj.get(name, '?')}")
             row.operator(link.BOZ_OT_choose_weapon.bl_idname, text="Choose…")
+        elif setting.kind == "weapons":
+            from . import weapons_tab
+            chosen = [n for n in str(obj.get(name, "")).split(",") if n]
+            row = box.row()
+            row.label(text=f"{setting.label}: {len(chosen)} weapons" if chosen else
+                      f"{setting.label}: the game's")
+            row.operator(weapons_tab.BOZ_OT_box_pool.bl_idname, text="Edit…")
         elif setting.kind == "chalk":
             if obj.boz.original:
                 continue   # shipped chalk is painted on the room's wall

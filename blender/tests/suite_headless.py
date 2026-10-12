@@ -63,6 +63,150 @@ def build_and_compile(label):
     return saved, ""
 
 
+def weapon_checks(label):
+    """The Weapons tab: the list, a changed value, a new weapon, an import, a script, the box pool."""
+    wt = suite.weapons_tab
+    wp = wt.wp
+    context = bpy.context
+    wt.refresh(context)
+    names = [item.name for item in scene.boz_weapons]
+    if scene.boz.inherit:
+        check("mp40" in names and len(names) > 20, f"{label}: an original map lists its guns ({len(names)})")
+    else:
+        # The Colt alone, plus what the test listed for its wall buy.
+        check(names[0] == "colt45" and set(names) <= {"colt45", "commando"},
+              f"{label}: a new map lists the Colt alone ({names})")
+    scene.boz_weapon_index = names.index("colt45")
+    rows = {row.key: row for row in scene.boz_weapon_fields}
+    check(rows["m_clipSize"].value_int == 8 and rows["behaviour"].value_enum == "1",
+          f"{label}: the Colt's values show")
+    rows["m_clipSize"].value_int = 12
+    saved_defs = {d.name: d for d in wp.load_defs(project / "source")}
+    check(saved_defs["colt45"].fields == {"m_clipSize": 12}, f"{label}: a changed value is saved")
+    rows = {row.key: row for row in scene.boz_weapon_fields}
+    rows["m_clipSize"].value_int = 8
+    check("colt45" not in {d.name for d in wp.load_defs(project / "source")},
+          f"{label}: changing it back drops the weapon's file")
+    rows = {row.key: row for row in scene.boz_weapon_fields}
+    rows["m_damage.m_headDamage"].value_int = 250
+    rows = {row.key: row for row in scene.boz_weapon_fields}
+    rows["behaviour"].value_enum = "2"
+    rows = {row.key: row for row in scene.boz_weapon_fields}
+    rows["autoROF"].value_int = 600
+    bpy.ops.boz.weapon_new("EXEC_DEFAULT", name="colt_auto")
+    made = {d.name: d for d in wp.load_defs(project / "source")}["colt_auto"]
+    check(made.source == "colt45" and made.fields.get("behaviour") == 2,
+          f"{label}: New weapon copies the selected one ({made})")
+    check("colt_auto" in wp.load_index(project / "source"), f"{label}: the new weapon is listed")
+    if wt.level_weapons("callofthedead"):
+        bpy.ops.boz.weapon_import("EXEC_DEFAULT", choice="callofthedead:humangun")
+        imported = {d.name: d for d in wp.load_defs(project / "source")}.get("humangun")
+        check(imported is not None and imported.level == "callofthedead",
+              f"{label}: a weapon of another map is imported")
+        # No Pack-a-Punch version: its Upgrade shows None (an empty choice once broke this).
+        bpy.ops.boz.weapon_import("EXEC_DEFAULT", choice="callofthedead:Wunderwaffe")
+        scene.boz_weapon_index = [i.name for i in scene.boz_weapons].index("Wunderwaffe")
+        upgrade = next(r for r in scene.boz_weapon_fields if r.key == "Upgrade")
+        check(upgrade.value_enum == wt.NONE and wt._row_value(upgrade) == "",
+              f"{label}: a weapon without an upgrade shows None")
+    scene.boz_weapon_index = [i.name for i in scene.boz_weapons].index("colt_auto")
+    bpy.ops.boz.weapon_script_new()
+    check((project / "scripts" / "weapons" / "colt_auto.lua").is_file()
+          and {d.name: d for d in wp.load_defs(project / "source")}["colt_auto"].script,
+          f"{label}: Add script makes the weapon's script")
+    # The first-person view of the selected weapon (arms in their idle pose holding it).
+    scene.boz_weapon_index = [i.name for i in scene.boz_weapons].index("colt45")
+    message = wt.show_preview(bpy.context)
+    view = bpy.data.scenes.get(link.VIEW_SCENE)
+    names = sorted(o.name for o in view.objects) if view else []
+    check(names == ["BOZ view arms", "BOZ view camera", "BOZ view gun"],
+          f"{label}: the first-person view is built ({names}, {message})")
+    gun = bpy.data.objects["BOZ view gun"]
+    ys = [v.co.y for v in gun.data.vertices]
+    check(max(ys) < 0, f"{label}: the gun is in front of the camera (Blender -Y; {max(ys):.0f})")
+    check(not any(o.name.startswith("BOZ view") for o in scene.objects),
+          f"{label}: the view has a scene of its own, not the map's")
+    # Free view and the arms switch; the animations, posed in the view.
+    wm = bpy.context.window_manager
+    wm.boz_view_free = True
+    check(bpy.data.objects["BOZ view camera"].hide_viewport, f"{label}: the free view hides the camera")
+    wm.boz_view_arms = False
+    check(bpy.data.objects["BOZ view arms"].hide_viewport, f"{label}: the arms can be hidden")
+    wm.boz_view_arms, wm.boz_view_free = True, False
+    states = {i[1]: i[0] for i in wt._anim_items(None, bpy.context)}
+    check({"idle", "reloading", "shooting"} <= set(states), f"{label}: the animations are listed ({sorted(states)})")
+    arms = bpy.data.objects["BOZ view arms"]
+    idle = [v.co.copy() for v in arms.data.vertices]
+    wm.boz_anim_state = states["reloading"]
+    wm.boz_anim_frame = 30
+    moved = max((a - v.co).length for a, v in zip(idle, arms.data.vertices))
+    check(moved > 1.0, f"{label}: a reload frame moves the arms ({moved:.1f})")
+    wm.boz_anim_frame = 10000
+    check(wm.boz_anim_frame == wt.current_anim()[1].frames - 1, f"{label}: the frame stays in the animation")
+    wm.boz_anim_frame = 0
+    bpy.ops.boz.weapon_anim_play()
+    check(wm.boz_anim_playing, f"{label}: Play starts the animation")
+    wt._play_tick()
+    check(wm.boz_anim_frame == 1, f"{label}: playing steps the frames")
+    bpy.ops.boz.weapon_anim_play()
+    check(not wm.boz_anim_playing, f"{label}: Play again pauses")
+    fake = type("Panel", (), {"layout": FakeLayout()})()
+    wt.BOZ_PT_weapon_animations.draw(fake, FakeContext(None))
+    window = bpy.context.window_manager.windows[0]
+    window.scene = view                 # as when the Weapons tab is on screen
+    check(link.map_scene() == scene, f"{label}: the map is still the map while the view shows")
+    bpy.ops.wm.save_as_mainfile(filepath=str(project / "map.blend"))
+    check(world.load(project / "source").base == scene.boz.base,
+          f"{label}: saving from the Weapons tab writes the map")
+    window.scene = scene
+    scene.boz_weapon_index = [i.name for i in scene.boz_weapons].index("colt_auto")
+    bpy.ops.boz.weapon_start()
+    check(wp.load_start(project / "source")[0] == "colt_auto", f"{label}: the starting weapon is ticked")
+    scene.boz_start_reserve = 120
+    check(wp.load_start(project / "source") == ("colt_auto", 120), f"{label}: its spare rounds are saved")
+    fake = type("Panel", (), {"layout": FakeLayout()})()
+    for panel in (wt.BOZ_PT_weapons, wt.BOZ_PT_weapon_properties, wt.BOZ_PT_weapon_script,
+                  *wt.GROUP_PANELS):
+        try:
+            panel.draw(fake, FakeContext(None))
+        except Exception as exc:   # noqa: BLE001
+            check(False, f"{label}: {panel.__name__} fails: {exc!r}")
+    box = next((o for o in scene.objects if o.get("boz_piece") == "mystery_box"
+                or (o.boz.role == "prefab" and o.get(convert.FIELD_PREFIX + "CMysteryBox.m_Cost") is not None)), None)
+    if box is not None:
+        items = bpy.context.window_manager.boz_pool_items
+        items.clear()
+        for name in ("colt45", "colt_auto"):
+            item = items.add()
+            item.name, item.enabled = name, True
+        with bpy.context.temp_override(object=box):
+            bpy.ops.boz.box_pool("EXEC_DEFAULT")
+        check(box.get(convert.FIELD_PREFIX + "CMysteryBox.m_Weapons") == "colt45,colt_auto",
+              f"{label}: the box pool is set")
+
+
+def weapon_build_checks(label, data):
+    if not LIBRARY:
+        return
+    from importlib import import_module
+    package = suite.convert.world.__name__.rsplit(".", 1)[0]
+    group_mod = import_module(f"{package}.group")
+    wp = suite.weapons_tab.wp
+    built_project = link.sdk_project.load_project(project)
+    path = next((project / "build").glob(f"*/assets/weapons_{built_project.map_name}.group.bin"))
+    listed = {w.name: w for w in wp.read_group(group_mod.parse(path.read_bytes()),
+                                                extra_names=["colt_auto"])}
+    auto = listed.get("colt_auto")
+    check(auto is not None and auto.values["behaviour"] == 2 and auto.values["autoROF"] == 600
+          and auto.values["m_damage.m_headDamage"] == 250,
+          f"{label}: the new weapon is built with its values")
+    if suite.weapons_tab.level_weapons("callofthedead"):
+        check("humangun" in listed, f"{label}: the imported weapon is in the map's weapons")
+    check('script = "weapons.colt_auto"' in data, f"{label}: the weapon script is in the runtime data")
+    check('name = "colt_auto"' in data and "reserve = 120" in data,
+          f"{label}: the starting weapon is in the runtime data")
+
+
 class FakeLayout:
     """Stands in for a panel's layout: accepts every call, and checks that the properties it is
     asked to show exist (catches typos in draw code, which only runs with a window)."""
@@ -263,7 +407,9 @@ if source.inherit:
     check(pickup.type == "MESH", "a pickup model shows")
     prefab_checks((-1100.0, -1300.0, 30.0))
     check(draw_panels("inherited") > 5, "panels draw for every kind")
+    weapon_checks("inherited")
     saved, data = build_and_compile("inherited")
+    weapon_build_checks("inherited", data)
     check(perk["boz_entity_name"] in data, "the hidden perk is in the start state")
     # The scripted wall that blocks: its floor is a tagged area (not a hole) a script opens.
     built_project = link.sdk_project.load_project(project)
@@ -376,7 +522,9 @@ if LIBRARY:
     check(pieces["wall_buy"].type == "MESH" and pieces["wall_buy"].get("boz_f:boz.weapon"),
           "a wall buy shows its weapon")
     select_only(pieces["wall_buy"])
-    bpy.ops.boz.choose_weapon(weapon="Commando")
+    # A wall buy sells the project's weapons: list the Commando first (Weapons tab, Import).
+    bpy.ops.boz.weapon_import("EXEC_DEFAULT", choice=f"{suite.weapons_tab.base_level(bpy.context)}:commando")
+    bpy.ops.boz.choose_weapon(weapon="commando")
     drawn = [c for c in pieces["wall_buy"].children if c.get("boz_chalk")]
     check(drawn and drawn[0].data.name.startswith("BOZ game chalk"), "a drawn chalk for Commando")
     pieces["juggernog"]["boz_f:CPerk.m_perkSinglePCost"] = 1234
@@ -407,7 +555,9 @@ if LIBRARY:
     check(sorted(p.name for p in shrine.parts) == ["Vault", "pack_a_punch"] or
           {p.kind for p in shrine.parts} == {"prefab"}, f"prefabs nest ({[p.name for p in shrine.parts]})")
     check(draw_panels("generated") > 5, "panels draw for every kind")
+    weapon_checks("generated")
     saved, data = build_and_compile("generated")
+    weapon_build_checks("generated", data)
     check("Shrine.Vault" in data, "the nested prefab is in the runtime data")
 if LIBRARY:
     suite.prefab_library.rebuild(None)   # the tests used the real palette folder: clear it

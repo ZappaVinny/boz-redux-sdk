@@ -34,7 +34,13 @@
 --                                "door_opened" {door = name, hash = n},
 --                                "zombie_killed" {position = {x, y, z}, entity = e,
 --                                                 by_player = true, headshot = true},
---                                "player_downed", "player_revived"
+--                                "player_downed", "player_revived",
+--                                "weapon_given", "weapon_equipped", "weapon_reloaded"
+--                                {weapon = "mp40"} ("weapon_fired" only reaches boz.on)
+--
+-- Weapon scripts (Weapons tab → Add script): self is the weapon (self.name, and the boz.weapons
+-- handle's methods on the live weapon: self:clip(), self:set_damage(...), ...). Handlers:
+-- on_given(), on_equip(), on_fire(data), on_reload(), on_event(name, data).
 -- volume is the volume's name inside the prefab (its own name for a volume with a script); only
 -- volumes send these, and only volumes of the object (or its parts) the script is attached to.
 -- Other functions a script defines can be called by other scripts: boz.find("Vault_1"):open().
@@ -68,6 +74,7 @@
 
 local objects = require("boz.objects")
 local hash = require("boz.hash")
+local weapons = require("boz.weapons")
 
 local prefabs = {}
 
@@ -778,6 +785,23 @@ local function bridge_more_events()
             headshot = (how < 0 or how > 2) and game.read("u32", controller + ZOMBIE_HIT_LOCATION) == 0,
         })
     end})
+    local WEAPON_HANDLERS = {given = "on_given", equipped = "on_equip", fired = "on_fire",
+                             reloaded = "on_reload"}
+    weapons.listen(function(event, name, data)
+        local instance = instances[lower(name)]
+        if instance and instance.kind == "weapon" then
+            call(instance, WEAPON_HANDLERS[event], data)
+        end
+        local info = {weapon = name}
+        for k, v in pairs(data or {}) do
+            info[k] = v
+        end
+        if event == "fired" then
+            notify_listeners("weapon_fired", info)
+        else
+            prefabs.send("weapon_" .. event, info)
+        end
+    end)
     local stepped = sym("CPlayerController::FixedStep")
     if stepped then
         hook.add(stepped, {before = function() clock.stepped = true end})
@@ -851,14 +875,32 @@ local function bridge_game_events()
     end)
 end
 
+-- A weapon script's self: the instance, and the live weapon's methods (boz.weapons handles).
+local function weapon_index(t, key)
+    local method = Instance[key]
+    if method ~= nil then
+        return method
+    end
+    local live = weapons.get(rawget(t, "name"))
+    local value = live and live[key]
+    if type(value) == "function" then
+        return function(_, ...) return value(live, ...) end
+    end
+    return value
+end
+
 local function new_instance(entry)
     local parts = {}
     for _, part in ipairs(entry.parts or {}) do
         parts[part.part] = part.name
     end
-    return setmetatable({name = entry.name, kind = entry.kind, properties = entry.properties or {},
-                         _parts = parts, _members = entry.members or {},
-                         object = objects.get(entry.name)}, Instance)
+    local instance = {name = entry.name, kind = entry.kind, properties = entry.properties or {},
+                      _parts = parts, _members = entry.members or {}}
+    if entry.kind == "weapon" then
+        return setmetatable(instance, {__index = weapon_index})
+    end
+    instance.object = objects.get(entry.name)
+    return setmetatable(instance, Instance)
 end
 
 local function bind(instance, env)
@@ -910,8 +952,8 @@ local function load_script(entry)
 end
 
 --- Starts the level's objects (boz.world calls this when a level has started, with the map's
---- world_data objects and the names of all its objects).
-function prefabs.start(list, all_names)
+--- world_data objects, the names of all its objects and its weapons).
+function prefabs.start(list, all_names, weapon_list)
     instances, volumes, names = {}, {}, {}
     power_was_on, downed, loading = false, false, false
     door_states = {}
@@ -922,6 +964,16 @@ function prefabs.start(list, all_names)
     for k in pairs(prefabs.globals) do
         prefabs.globals[k] = nil
     end
+    local weapon_names = {}
+    for _, weapon in ipairs(weapon_list or {}) do
+        table.insert(weapon_names, weapon.name)
+        if weapon.script and weapon.script ~= "" then
+            instances[lower(weapon.name)] = load_script({name = weapon.name, kind = "weapon",
+                                                         script = weapon.script,
+                                                         properties = weapon.properties})
+        end
+    end
+    weapons.know(weapon_names)
     for _, entry in ipairs(list or {}) do
         names[hash.name(entry.name)] = entry.name
         for _, member in ipairs(entry.members or {}) do

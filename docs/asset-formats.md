@@ -403,3 +403,16 @@ cd /home/zappa/Work/boz/boz-redux-sdk
 changes one field and writes a new group. Complete edited game files are valid project inputs and
 may be built into local test mods. Official BOZ repositories must not track those files;
 distribution validation warns when their game-derived provenance is recorded.
+
+## Skeletal animation (CIwAnimSkel, CIwAnimSkin, CIwAnim, CIsAnimStateMachine)
+
+First-person arms and guns are skinned models. A skeleton lists its bones (name, parent, a
+compressed rotation, a position relative to the parent); a skin stores, for each set of up to
+four bones, every vertex's position in each bone's space and its weights (the vertex is the
+weighted sum of the bones' transforms applied to those positions; skeleton units are the model's
+x 4); an animation keeps its keyframes as the game holds them in memory (per bone a position and
+a quaternion, 24 keyframes a second); a state machine names its states (by hash only: the
+names found so far are in `viewmodel.STATE_NAMES`) ("idle", "shooting", "reloading", ...) and the
+animation each plays. The arms hold the gun at their TAG_WEAPON bone. The byte layouts are in
+`bozkit/anim.py`; `bozkit/viewmodel.py` poses a weapon's first-person view from them in any
+state and keyframe (`Rig`).

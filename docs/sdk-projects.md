@@ -94,6 +94,8 @@ source/
   textures/<name>.png    textures (power-of-two sides, 4 to 1024); <name>_1.png, ... for a
                          mesh's further textures
   prefabs/<Name>.json    the prefab library (with <Name>/meshes and <Name>/textures)
+  weapons/index.json     the project's weapon list (Weapons tab; see weapons.md)
+  weapons/<name>.json    a changed, new or imported weapon
 ```
 
 ```json

@@ -12,6 +12,9 @@ Two parts live here:
 
 ## The editor
 
+- **Weapons tab:** the project's weapons: Import from game (this map's or another map's, with
+  models and animations), New weapon (a copy), every field with units and help, Pack-a-Punch
+  result, Add script. See [docs/weapons.md](../docs/weapons.md).
 - **Tabs:** Game, World, Weapons, Characters, Assets, Effects, Animation, Scripts, Audio,
   UI / HUD, drawn in the top bar in that order. **Build & Run** (and its ⚙ settings) is at the
   right of the top bar on every tab. The menus are Project, Edit and Help.

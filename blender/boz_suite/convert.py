@@ -1123,7 +1123,8 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
 
 def prefab_of(obj, problems: list | None = None):
     """(Prefab, meshes it uses) for one prefab object (Save as new prefab)."""
-    whole = scene_to_world(bpy.context.scene, problems)
+    from . import link
+    whole = scene_to_world(link.map_scene(), problems)
     names = [object_name(obj)]
     parent = obj.parent
     while is_prefab_group(parent):

@@ -158,6 +158,7 @@ class Layout:
     instances: list[Instance] = field(default_factory=list)
     inherit: bool = False    # start from the whole base level (its rooms, entities, navmesh)
     removed: list[str] = field(default_factory=list)   # base level entities taken out (0x hashes)
+    weapons: list = field(default_factory=list)   # bozkit.weapons.WeaponDef: the project's weapons
 
 
 # Files
@@ -1159,13 +1160,16 @@ def _module(script: str) -> str:
 
 
 def compile_world(pack, name: str, world: World,
-                  fixed: group.Group | None = None) -> levels.LevelFiles:
+                  fixed: group.Group | None = None, weapons=()) -> levels.LevelFiles:
     """The game's groups for *world* under the level name *name* (format 3: lowered, then
-    compiled). files.runtime carries the start state and the scripted objects for boz.world."""
+    compiled). *weapons*: the project's bozkit.weapons.WeaponDef (edits, new and imported
+    weapons). files.runtime carries the start state and the scripted objects for boz.world."""
     problems = validate(world)
     if problems:
         raise WorldError('; '.join(problems))
-    files = _compile_layout(pack, name, lower(world), fixed)
+    layout = lower(world)
+    layout.weapons = list(weapons)
+    files = _compile_layout(pack, name, layout, fixed)
     files.runtime['objects'] = describe(world)
     files.runtime['names'] = object_names(world)
     return files
@@ -1818,6 +1822,20 @@ class _Level:
             component = levels._component(spec, component_name)
             prop = levels._blob_prop(component.blob, field_name) if component and component.blob \
                 else None
+            if isinstance(value, (list, tuple)):
+                # A list of names (the mystery box's weapon pool): std::list<unsigned int>.
+                from . import toolkit as toolkit_module
+                if component is None or component.blob is None:
+                    raise WorldError(f'entity {entity.source!r} has no field {key}')
+                if prop is None:
+                    prop = reflect.Property(iw_hash(component_name),
+                                            iw_hash('std::list<unsigned int>'), iw_hash(field_name),
+                                            b'')
+                    component.blob.properties.append(prop)
+                prop.raw = toolkit_module.encode_hash_list(
+                    [int(v, 16) if str(v).startswith('0x') else iw_hash(str(v)) for v in value])
+                prop.nested = prop.elements = None
+                continue
             if prop is None and component is not None and component.blob is not None \
                     and isinstance(value, (bool, int, float)):
                 # Fields the shipped data leaves at their default (Pack-a-Punch m_HasPower,
@@ -1880,9 +1898,11 @@ class _Level:
                     reflect.set_typed_value(prop, skin)
 
     def _weapon_display(self, name_hash: int):
-        """(skeleton, model, skin) a wall buy shows for a weapon of the level's weapons group."""
+        """(skeleton, model, skin) a wall buy shows for a weapon of the level's weapons group
+        (with the project's weapons applied: new weapons show their base's model)."""
         from . import reflect, resources
 
+        name_hash = getattr(self, 'weapon_aliases', {}).get(name_hash, name_hash)
         # A shipped wall buy of the same weapon shows exactly what the game expects.
         for resource in self.by_class[levels.ENTITY_SPEC].resources + [
                 r for t in self.game.group(self.base_statics).types()
@@ -1902,10 +1922,12 @@ class _Level:
                         skel = levels._blob_prop(renderable.blob, 'skel')
                         return (reflect.typed_value(skel) if skel is not None else 0), model, skin
         gear = levels.GEAR.get(self.base, self.base)
-        try:
-            weapons = self.game.group(f'ingame/weapons/weapons_{gear}.group.bin')
-        except WorldError:
-            return None
+        weapons = getattr(self, 'weapon_group', None)
+        if weapons is None:
+            try:
+                weapons = self.game.group(f'ingame/weapons/weapons_{gear}.group.bin')
+            except WorldError:
+                return None
         for resource_type in weapons.types():
             if resource_type.class_hash != levels.ENTITY_SPEC:
                 continue
@@ -2057,7 +2079,10 @@ class _Level:
             if mode == 'none':
                 continue
             weapon = chalk._weapon_of(spec)
-            decal = decals.get(weapon) if not entity.chalk_texture else None
+            weapon_key = weapon
+            if isinstance(weapon, int):
+                weapon_key = getattr(self, 'weapon_aliases', {}).get(weapon, weapon)
+            decal = decals.get(weapon_key) if not entity.chalk_texture else None
             position, rotation, scale = chalk.compose(entity.position, entity.quaternion(),
                                                       tuple(entity.scale), decal or template)
             name = f'{self.name}_chalk_{number}'
@@ -2090,6 +2115,10 @@ class _Level:
             return None
         gear = levels.GEAR.get(self.base, self.base)
         body = self.game._find(levels.MODEL, display[1], [f'ingame/weapons/weapons_{gear}.group.bin'])
+        if body is None and getattr(self, 'weapon_group', None) is not None:
+            # An imported weapon's model is in the map's own weapons group.
+            body = next((r.body for t in self.weapon_group.types() if t.class_hash == levels.MODEL
+                         for r in t.resources if r.in_group_hash == display[1]), None)
         if body is None:
             return None
         model = native.decode_model(body)
@@ -2340,6 +2369,7 @@ def _compile_layout(pack, name: str, world: Layout,
     statics = levels._read(pack, f'levels/{base}/{base}_statics')
     levels.rename_level_resource(statics, base, name)
     level = _Level(pack, name, base, statics)
+    _apply_weapons(pack, files, name, base, level, world.weapons)
     by_class = level.by_class
     for resource in by_class[levels.ENTITY_SPEC].resources:  # cameras: intro and main
         if levels._component(resources.decode_entity_spec(resource.body), 'CIsCamera'):
@@ -2388,6 +2418,25 @@ def _compile_layout(pack, name: str, world: Layout,
     return files
 
 
+def _apply_weapons(pack, files, name: str, base: str, level, defs) -> None:
+    """The project's weapon edits, new and imported weapons, in the map's weapons, projectiles
+    and arms groups (before anything is placed, so wall buys can sell them)."""
+    from . import weapons as weapons_module
+
+    if not defs:
+        return
+    groups = {'weapons': files.groups[f'weapons_{name}.group.bin'],
+              'projectiles': files.groups[f'weapon_projectiles_{name}.group.bin'],
+              'arms': files.groups[f'arms_{name}.group.bin']}
+    try:
+        result = weapons_module.apply(pack, groups, base, list(defs))
+    except weapons_module.WeaponError as exc:
+        raise WorldError(str(exc)) from None
+    level.weapon_group = groups['weapons']
+    level.weapon_aliases = result['aliases']
+    level.runtime.setdefault('warnings', []).extend(result['warnings'])
+
+
 def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFiles:
     from . import blender_scene as scene
     from . import blender_scene, navbuild, resources
@@ -2396,6 +2445,7 @@ def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFil
     files = levels.clone_level(pack, name, base, fixed)
     statics = files.groups[f'{name}_statics.group.bin']
     level = _Level(pack, name, base, statics)
+    _apply_weapons(pack, files, name, base, level, world.weapons)
     level.inherited = True
     removed = {int(value, 16) if value.startswith('0x') else iw_hash(value) for value in world.removed}
     level.kept = []

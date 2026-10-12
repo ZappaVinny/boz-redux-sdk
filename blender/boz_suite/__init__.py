@@ -10,7 +10,7 @@ import os
 
 import bpy
 
-from . import link, objects, palette, placeholders, preview, shapes, shell, tabs
+from . import link, objects, palette, placeholders, preview, shapes, shell, tabs, weapons_tab
 
 ADDON = "boz_redux"
 
@@ -53,6 +53,7 @@ def register():
         print(f"boz_suite: the {ADDON} add-on could not be enabled: {exc}")
     link.register()
     objects.register()
+    weapons_tab.register()
     palette.register()
     preview.register()
     shapes.register()
@@ -66,5 +67,6 @@ def unregister():
     shapes.unregister()
     preview.unregister()
     palette.unregister()
+    weapons_tab.unregister()
     objects.unregister()
     link.unregister()

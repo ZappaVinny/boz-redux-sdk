@@ -22,7 +22,7 @@ Functions that need a Zombies match return `nil` (or `false`) outside one instea
 - **Menus and text**: [boz.pause_settings](#bozpausesettings), [boz.text](#boztext)
 - **Game UI building blocks**: [boz.iwui](#boziwui), [boz.frontend](#bozfrontend), [boz.flash](#bozflash)
 - **Low-level helpers**: [boz.components](#bozcomponents), [boz.hash](#bozhash), [boz.swf](#bozswf), [boz.avm1](#bozavm1)
-- **Other**: [boz.levels](#bozlevels), [boz.objects](#bozobjects), [boz.prefabs](#bozprefabs), [boz.world](#bozworld)
+- **Other**: [boz.levels](#bozlevels), [boz.objects](#bozobjects), [boz.prefabs](#bozprefabs), [boz.weapons](#bozweapons), [boz.world](#bozworld)
 
 ## Gameplay
 
@@ -508,10 +508,12 @@ on_event(name, data)         boz.send(name, data) from any script, and game even
                              "door_opened" {door = name, hash = n},
                              "zombie_killed" {position = {x, y, z}, entity = e,
                                               by_player = true, headshot = true},
-                             "player_downed", "player_revived"
+                             "player_downed", "player_revived",
+                             "weapon_given", "weapon_equipped", "weapon_reloaded"
+                             {weapon = "mp40"} ("weapon_fired" only reaches boz.on)
 ```
 
-volume is the volume's name inside the prefab (its own name for a volume with a script); only volumes send these, and only volumes of the object (or its parts) the script is attached to. Other functions a script defines can be called by other scripts: boz.find("Vault_1"):open(). Every volume event also goes to boz.on listeners as "<volume name>.<event>" ("Vault_1.Skull.hit"); on_event does not get it (the script's own handler did). Trigger volumes: on_enter when something comes in, on_exit once it has left (the game's own enter/exit flicker while standing in it is smoothed out).
+Weapon scripts (Weapons tab → Add script): self is the weapon (self.name, and the boz.weapons handle's methods on the live weapon: self:clip(), self:set_damage(...), ...). Handlers: on_given(), on_equip(), on_fire(data), on_reload(), on_event(name, data). volume is the volume's name inside the prefab (its own name for a volume with a script); only volumes send these, and only volumes of the object (or its parts) the script is attached to. Other functions a script defines can be called by other scripts: boz.find("Vault_1"):open(). Every volume event also goes to boz.on listeners as "<volume name>.<event>" ("Vault_1.Skull.hit"); on_event does not get it (the script's own handler did). Trigger volumes: on_enter when something comes in, on_exit once it has left (the game's own enter/exit flicker while standing in it is smoothed out).
 
 print shows in the Developer console as well as the log.
 
@@ -538,7 +540,48 @@ the client's loadscript(name, env) loads the script with a fresh environment for
 | `prefabs.after(seconds, fn)` | Runs fn() once, `seconds` of game time from now (paused time does not count). Returns a timer with :cancel(). |
 | `prefabs.every(seconds, fn)` | Runs fn() every `seconds` of game time until the timer is cancelled. Returns the timer. |
 | `prefabs.save()` | Writes the map's saved globals now (the game's saves call this). |
-| `prefabs.start(list, all_names)` | Starts the level's objects (boz.world calls this when a level has started, with the map's world_data objects and the names of all its objects). |
+| `prefabs.start(list, all_names, weapon_list)` | Starts the level's objects (boz.world calls this when a level has started, with the map's world_data objects, the names of all its objects and its weapons). |
+
+### boz.weapons
+
+The local player's weapons during a match: the one in hand, ammo, live stats,
+
+giving weapons, and events when weapons are equipped, given, fired and reloaded.
+
+```lua
+local weapons = require("boz.weapons")
+local gun = weapons.current()               -- nil outside a match
+if gun then gun:set_ammo(gun:clip_size(), 999) end
+weapons.give("thundergun")
+weapons.listen(function(event, name) print(event .. " " .. name) end)
+```
+
+Weapons are named as in the editor's Weapons tab ("mp40", or "0x..." for an unnamed one). Changes made here last for the match; the Weapons tab changes the weapons for good.
+
+<details><summary>How it works</summary>
+
+the player's CWeaponManager sits on a child of the player entity (+0x48 = the player); its weapons are CPlayerWeapon components found by name hash (WeaponManager_FindWeapon, map at +0x1d4), the one in hand at +0x1e0. CWeaponManager::GiveWeapon(manager, hash, slot, refill) equips one; EquipWeapon sends SUBJECT_WEAPON_EQUIPPED; CPlayerController::FireWeapon fires; CWeaponManager::SetReloading starts a reload. A CPlayerWeapon keeps its rounds at +0x2c (clip) and +0x30 (reserve), its clip size at +0x80, reserve size at +0x84, fire rate at +0x200 (rounds per minute) and CWeaponDamage at +0x20c (head +4, torso +8, limbs +0xc).
+
+</details>
+
+| Function | Description |
+| --- | --- |
+| `weapons.know(list)` | Tell boz.weapons the names of weapons (the map's world data does this for its weapons). |
+| `weapons.manager()` | The local player's weapon manager, or nil outside a match. |
+| `Weapon:clip() return game.read("u32", self.pointer + CLIP)` | Rounds in the clip. |
+| `Weapon:reserve() return game.read("u32", self.pointer + RESERVE)` | Spare rounds. |
+| `Weapon:clip_size() return game.read("u32", self.pointer + CLIP_SIZE)` | Clip size. |
+| `Weapon:reserve_size() return game.read("u32", self.pointer + RESERVE_SIZE)` | Reserve size. |
+| `Weapon:set_ammo(clip, reserve)` | Sets the rounds in the clip and in reserve (nil keeps one). Returns the weapon. |
+| `Weapon:fire_rate() return game.read("u32", self.pointer + FIRE_RATE)` | Fire rate in rounds per minute (automatic fire modes). |
+| `Weapon:set_fire_rate(rounds_per_minute)` | Sets the fire rate for this match. Returns the weapon. |
+| `Weapon:damage()` | Damage per hit: head, torso, limbs. |
+| `Weapon:set_damage(head, torso, limbs)` | Sets the damage per hit for this match (nil keeps one). Returns the weapon. |
+| `Weapon:in_hand()` | True while this is the weapon in hand. |
+| `weapons.current()` | The weapon in the player's hands, or nil. |
+| `weapons.get(name)` | The player's weapon called *name* (every weapon of the map is there, owned or not), or nil. |
+| `weapons.give(name)` | Gives the player *name* and puts it in hand, with full ammo. Returns false outside a match or when the map has no such weapon. |
+| `weapons.listen(fn)` | Calls fn(event, weapon name, data) on "equipped", "given", "fired" and "reloaded" of the local player's weapons. Returns fn. |
 
 ### boz.world
 

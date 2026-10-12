@@ -52,6 +52,17 @@ SHAPE_ITEMS = [("box", "Box", "Collide with its bounds (fast)"),
 LOG_LINES = 3000
 
 
+VIEW_SCENE = "BOZ Weapon View"   # the Weapons tab's own scene (weapons_tab): never the map
+
+
+def map_scene():
+    """The map's scene: the current one, unless that is the Weapons tab's view."""
+    current = getattr(bpy.context, "scene", None)
+    if current is not None and current.name != VIEW_SCENE:
+        return current
+    return next((scene for scene in bpy.data.scenes if scene.name != VIEW_SCENE), current)
+
+
 def project_root() -> Path | None:
     value = os.environ.get("BOZ_PROJECT")
     return Path(value) if value else None
@@ -220,12 +231,12 @@ def on_load(_dummy):
     project = current_project()
     if project is None or project.kind != "map":
         return
-    scene = bpy.context.scene
+    scene = map_scene()
     if hasattr(scene, "boz_links_selected_only") and "boz_links_shown" not in scene:
         scene.boz_links_selected_only = False   # Links shows every link until narrowed
         scene["boz_links_shown"] = True
     if bpy.data.filepath:
-        scene = bpy.context.scene
+        scene = map_scene()
         view = scene.view_settings
         view.view_transform, view.look = "Standard", "None"   # the game's colours
         migrated = convert.migrate_roles(scene)
@@ -243,9 +254,11 @@ def on_load(_dummy):
         from . import palette, prefab_library
         palette.show_palette()
         prefab_library.rebuild(project.root)   # My prefabs: this project's prefabs
+        from . import weapons_tab
+        weapons_tab.on_load()
         return
     blend = project.root / "map.blend"
-    if blend.exists() or bpy.context.scene.objects:  # both startup handlers run; build once
+    if blend.exists() or map_scene().objects:  # both startup handlers run; build once
         return
     # First open: build the scene from the world source, then save it as the project's map.blend.
     try:
@@ -253,7 +266,7 @@ def on_load(_dummy):
     except world.WorldError as exc:
         append_log(f"sdk   {exc}")
         return
-    world_to_scene(source_world, project.root / "source", bpy.context.scene)
+    world_to_scene(source_world, project.root / "source", map_scene())
     bpy.app.timers.register(lambda: _first_save(blend), first_interval=0.2)
 
 
@@ -285,8 +298,8 @@ def on_depsgraph(scene, _depsgraph=None):
 def on_save(_dummy):
     from . import objects
     objects.save_scripts()                 # scripts edited in the Scripts tab go to their files
-    objects.sync_all(bpy.context.scene)   # script properties follow edits to the scripts
-    problems = write_source(bpy.context.scene)
+    objects.sync_all(map_scene())   # script properties follow edits to the scripts
+    problems = write_source(map_scene())
     if problems:
         append_log([f"check {message}" for message, _ in problems])
 
@@ -313,12 +326,12 @@ class BOZ_OT_build_and_run(Operator):
             bpy.ops.wm.save_as_mainfile(filepath=str(project.root / "map.blend"))
         else:
             bpy.ops.wm.save_mainfile()
-        problems = problems_of(context.scene)
+        problems = problems_of(map_scene())
         if problems:
             append_log([f"check {message}" for message, _ in problems])
             self.report({"ERROR"}, f"{len(problems)} problems stop the build (see Problems)")
             return {"CANCELLED"}
-        settings = context.scene.boz
+        settings = map_scene().boz
         start_vars = {}
         if settings.unlimited_health:
             start_vars["UnlimitedHealth"] = "true"
@@ -349,7 +362,7 @@ class BOZ_OT_build_settings(Operator):
 
     def draw(self, context):
         layout = self.layout
-        settings = context.scene.boz
+        settings = map_scene().boz
         layout.label(text="When the game starts:")
         layout.prop(settings, "unlimited_health")
         layout.prop(settings, "unlimited_points")
@@ -373,7 +386,7 @@ class BOZ_OT_select_problem(Operator):
     name: StringProperty()
 
     def execute(self, context):
-        obj = context.scene.objects.get(self.name)
+        obj = map_scene().objects.get(self.name)
         if obj is None:
             return {"CANCELLED"}
         for other in context.selected_objects:
@@ -390,8 +403,8 @@ class BOZ_OT_check(Operator):
 
     def execute(self, context):
         problems = []
-        scene_to_world(context.scene, problems)
-        context.scene["boz_problems"] = [f"{m}\t{n}" for m, n in problems]
+        scene_to_world(map_scene(), problems)
+        map_scene()["boz_problems"] = [f"{m}\t{n}" for m, n in problems]
         self.report({"INFO"} if not problems else {"WARNING"},
                     "No problems" if not problems else f"{len(problems)} problems")
         return {"FINISHED"}
@@ -444,7 +457,7 @@ class BOZ_OT_game_model(Operator):
         from . import game
         obj = context.object
         placement = world.Placement(obj.boz.source, (0.0, 0.0, 0.0), group=obj.boz.group)
-        data = game.entity_mesh(context.scene.boz.base, placement.hash, obj.boz.group)
+        data = game.entity_mesh(map_scene().boz.base, placement.hash, obj.boz.group)
         for key in ("boz_custom_model", "boz_game_model"):
             if key in obj:
                 del obj[key]
@@ -452,7 +465,7 @@ class BOZ_OT_game_model(Operator):
             convert.show_mesh(obj, data)
         else:   # it draws nothing of its own: back to its marker
             convert.colour_marker(obj, convert.entity_category(
-                context.scene.boz.base, placement.hash, obj.boz.group))
+                map_scene().boz.base, placement.hash, obj.boz.group))
         return {"FINISHED"}
 
 
@@ -473,9 +486,12 @@ def _game_textures(self, context):
 
 
 def _weapons(self, context):
-    from . import game
+    from . import game, weapons_tab
+    if project_root() is not None and weapons_tab.level_weapons(weapons_tab.base_level(context)):
+        return weapons_tab.weapon_items(context, include_none=False, listed_only=True) or \
+            [("", "No weapons in the project's list (Weapons tab)", "")]
     cache = _weapons.__dict__.setdefault("by_base", {})
-    base = context.scene.boz.base
+    base = map_scene().boz.base
     if base not in cache:
         cache[base] = [(name, name, "") for name in game.weapon_names(base)] or \
             [("", "No weapons found (build the asset library)", "")]
@@ -556,7 +572,7 @@ class BOZ_OT_texture_game(Operator):
 class BOZ_OT_choose_weapon(Operator):
     bl_idname = "boz.choose_weapon"
     bl_label = "Choose weapon"
-    bl_description = "The weapon this wall buy sells (any weapon of the level)"
+    bl_description = "The weapon this wall buy sells (the project's weapons: Weapons tab)"
     bl_options = {"REGISTER", "UNDO"}
     bl_property = "weapon"
 
@@ -571,15 +587,19 @@ class BOZ_OT_choose_weapon(Operator):
         obj = context.object
         obj[convert.FIELD_PREFIX + toolkit.WEAPON_FIELD] = self.weapon
         if not obj.get("boz_custom_model"):
+            from . import weapons_tab
             placement = world.Placement(obj.boz.source, (0.0, 0.0, 0.0), group=obj.boz.group)
-            data = game.entity_mesh(context.scene.boz.base, placement.hash, obj.boz.group,
-                                    game.weapon_model(context.scene.boz.base, self.weapon))
+            # A new weapon shows its base's model; an imported one its own map's.
+            shown = weapons_tab.weapon_def(context, self.weapon)
+            level = shown.level or map_scene().boz.base
+            data = game.entity_mesh(map_scene().boz.base, placement.hash, obj.boz.group,
+                                    game.weapon_model(level, shown.source))
             if data is not None and obj.type == "MESH":
                 convert.show_mesh(obj, data)
                 for child in obj.children:
                     if child.boz.role == "reference" and child.get("boz_kind") == "placed_model":
                         child.hide_set(True)   # the base level's own weapon model
-        convert.refresh_chalk(obj, context.scene.boz.base)
+        convert.refresh_chalk(obj, map_scene().boz.base)
         return {"FINISHED"}
 
 
@@ -594,7 +614,7 @@ class BOZ_OT_chalk(Operator):
     def execute(self, context):
         obj = context.object
         obj[convert.FIELD_PREFIX + world.CHALK_FIELD] = self.mode
-        convert.refresh_chalk(obj, context.scene.boz.base)
+        convert.refresh_chalk(obj, map_scene().boz.base)
         return {"FINISHED"}
 
 
@@ -626,7 +646,7 @@ class BOZ_OT_chalk_image(Operator):
         bpy.data.meshes.get(f"BOZ game chalk {name}") and bpy.data.meshes.remove(
             bpy.data.meshes[f"BOZ game chalk {name}"])
         obj[convert.FIELD_PREFIX + world.CHALK_FIELD] = name
-        convert.refresh_chalk(obj, context.scene.boz.base)
+        convert.refresh_chalk(obj, map_scene().boz.base)
         return {"FINISHED"}
 
 
@@ -694,7 +714,7 @@ class BOZ_OT_show_game_models(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        changed = convert.show_game_models(context.scene)
+        changed = convert.show_game_models(map_scene())
         self.report({"INFO"}, f"{changed} objects now show their game model")
         return {"FINISHED"}
 
@@ -760,7 +780,7 @@ class BOZ_PT_problems(Panel):
     def draw(self, context):
         layout = self.layout
         layout.operator(BOZ_OT_check.bl_idname, icon="CHECKMARK")
-        problems = problems_of(context.scene)
+        problems = problems_of(map_scene())
         if not problems:
             layout.label(text="Nothing stops the build", icon="CHECKMARK")
         for message, name in problems:
@@ -785,7 +805,7 @@ class BOZ_PT_project(Panel):
             return
         layout.label(text=project.mod.name, icon="FILE_FOLDER")
         layout.label(text=f"Level: {project.map_name or '-'}")
-        layout.prop(context.scene.boz, "base")
+        layout.prop(map_scene().boz, "base")
 
 
 CLASSES = [BOZ_ObjectSettings, BOZ_SceneSettings, BOZ_OT_build_and_run, BOZ_OT_build_settings,

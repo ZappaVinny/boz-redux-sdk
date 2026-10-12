@@ -19,6 +19,7 @@ except ModuleNotFoundError:
     from ._vendor.bozkit import world
 
 from . import convert
+from . import link
 
 TILE = 100.0          # centimetres per texture repeat
 MAX_REPEATS = 7.5     # game UVs stay within -8..8
@@ -151,8 +152,8 @@ class BOZ_OT_add_shape(Operator):
         obj.boz.role = "model"
         obj.boz.collision = collision
         obj.boz.shape = "box" if self.kind in BOX_SHAPES else "mesh"
-        obj.location = context.scene.cursor.location
-        convert.map_collection(context.scene).objects.link(obj)
+        obj.location = link.map_scene().cursor.location
+        convert.map_collection(link.map_scene()).objects.link(obj)
         for other in context.selected_objects:
             other.select_set(False)
         obj.select_set(True)
@@ -207,9 +208,9 @@ class BOZ_OT_import_model(Operator):
         roots = [obj for obj in new if obj.parent not in new]
         for obj in new:
             if obj.parent is None or obj.parent not in new:
-                convert.move_to(obj, convert.map_collection(context.scene))
+                convert.move_to(obj, convert.map_collection(link.map_scene()))
         for obj in roots:
-            obj.location = context.scene.cursor.location
+            obj.location = link.map_scene().cursor.location
             if self.metres:
                 obj.scale = tuple(c * 100.0 for c in obj.scale)
         meshes = [obj for obj in new if obj.type == "MESH"]

@@ -21,6 +21,7 @@ except ModuleNotFoundError:
     from ._vendor.bozkit import levels, library, world
 
 from . import convert, game
+from . import link
 
 LIBRARY_NAME = "BOZ Game"
 PALETTE_VERSION = 6   # 6: My prefabs catalog
@@ -134,7 +135,7 @@ def _pending(scene) -> bool:
 
 def realize() -> None:
     """Turn dropped palette assets into the real entity, model or texture."""
-    scene = bpy.context.scene
+    scene = link.map_scene()
     for obj in [o for o in scene.objects if "boz_asset_kind" in o]:
         kind, source = obj["boz_asset_kind"], obj.get("boz_source", "")
         position, rotation, _scale = convert._transform(obj)
