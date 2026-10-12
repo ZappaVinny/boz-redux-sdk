@@ -28,9 +28,13 @@ from bozkit import library, png, toolkit  # noqa: E402
 from bozkit.hashing import iw_hash  # noqa: E402
 
 NAMESPACE = uuid.UUID("6d1f1c52-7a0e-4d43-9a58-1f2a6b9c0b11")
-ICON_COLOURS = {"Spawns": (200, 60, 60), "Logic": (60, 170, 120), "Wall buys": (210, 170, 60),
+ICON_COLOURS = {"Spawns": (200, 60, 60), "Jump points": (230, 230, 230), "Sound": (50, 170, 170),
                 "Defence": (150, 110, 70), "Buying": (210, 130, 50), "Machines": (120, 90, 200),
-                "Perk machines": (160, 70, 220)}
+                "Doors": (230, 140, 30), "Barricades": (190, 130, 80),
+                "trigger": (50, 215, 190), "hit": (240, 70, 50), "use": (90, 240, 80)}
+VOLUMES = (("trigger", "Trigger volume", "An invisible box: scripts hear \"enter\" and \"exit\""),
+           ("hit", "Hit volume", "An invisible box: scripts hear \"hit\" when it is shot"),
+           ("use", "Use volume", "An invisible box: scripts hear \"use\" when a player presses use"))
 catalogs: dict[str, str] = {}
 
 
@@ -112,6 +116,16 @@ def main() -> None:
         if not (found.model and preview_file(obj, built.thumb_for("model", found.model))):
             icon(obj, ICON_COLOURS.get(group_name, (120, 120, 120)))
         count += 1
+    for kind, label, description in VOLUMES:
+        obj = bpy.data.objects.new(label, None)
+        obj.empty_display_type = "CUBE"
+        obj.empty_display_size = 50.0
+        obj["boz_asset_kind"] = "volume"
+        obj["boz_volume"] = kind
+        collection.objects.link(obj)
+        describe(obj, "Volumes", description)
+        icon(obj, ICON_COLOURS[kind])
+        count += 1
     for kind in ("model", "texture"):
         for asset in built.search(kind=kind, limit=100000):
             if not asset.thumb:
@@ -134,6 +148,7 @@ def main() -> None:
                 describe(obj, f"Models/{level}", asset.label or asset.name, tags)
                 preview_file(obj, built.thumb_path(asset))
             count += 1
+    catalog("My prefabs")   # the open project's prefabs (prefab_library.py writes my_prefabs.blend)
     out_dir.mkdir(parents=True, exist_ok=True)
     lines = ["# Blender asset catalogs, written by the BOZ Redux editor", "VERSION 1", ""]
     for path, identifier in sorted(catalogs.items()):

@@ -61,6 +61,7 @@ class BOZ_MT_project(Menu):
         layout.separator()
         layout.operator("boz.import_model", icon="IMPORT")
         layout.menu("BOZ_MT_shapes", text="Add game shape", icon="MESH_CUBE")
+        layout.menu("BOZ_MT_prefab_library", icon="OUTLINER_OB_EMPTY")
         layout.separator()
         row = layout.row()
         row.enabled = False
@@ -84,6 +85,19 @@ class BOZ_MT_edit(Menu):
         layout.operator("screen.userpref_show", text="Preferences…", icon="PREFERENCES")
 
 
+class BOZ_OT_open_doc(Operator):
+    bl_idname = "boz.open_doc"
+    bl_label = "Open"
+    bl_options = {"INTERNAL"}
+
+    filepath: bpy.props.StringProperty()
+
+    def execute(self, context):
+        from . import link
+        link.sdkhome.open_path(self.filepath)   # without waiting (wm.path_open waits)
+        return {"FINISHED"}
+
+
 class BOZ_MT_help(Menu):
     bl_label = "Help"
 
@@ -94,7 +108,7 @@ class BOZ_MT_help(Menu):
         docs = Path(os.environ.get("BOZ_SDK_ROOT", "")) / "docs"
         for label, name in (("Making mods", "making-mods.md"), ("SDK projects", "sdk-projects.md"),
                             ("Standard library", "standard-library.md")):
-            layout.operator("wm.path_open", text=label, icon="HELP").filepath = str(docs / name)
+            layout.operator("boz.open_doc", text=label, icon="HELP").filepath = str(docs / name)
 
 
 def _draw_left(self, context):
@@ -220,7 +234,7 @@ def disable_render_keys() -> None:
                 item.active = False
 
 
-CLASSES = [BOZ_OT_switch_tab, BOZ_MT_project, BOZ_MT_edit, BOZ_MT_help]
+CLASSES = [BOZ_OT_switch_tab, BOZ_OT_open_doc, BOZ_MT_project, BOZ_MT_edit, BOZ_MT_help]
 
 
 def register():

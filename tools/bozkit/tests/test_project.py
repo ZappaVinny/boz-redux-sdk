@@ -37,9 +37,14 @@ class ProjectTests(unittest.TestCase):
     def test_world_data_lua(self) -> None:
         import shutil
         import subprocess
-        text = project.world_data_lua({'hidden': ['Secret_Wall'], 'blocked': ['Gate "A"']})
+        text = project.world_data_lua({'hidden': ['Secret_Wall'], 'blocked': ['Gate "A"'],
+                                       'objects': [{'name': 'Vault_1', 'script': 'prefabs.Vault',
+                                                    'properties': {'delay': 2.0, 'two words': True},
+                                                    'parts': [{'name': 'Vault_1.Door'}]}]})
         self.assertIn('hidden = {"Secret_Wall"}', text)
         self.assertIn('no_collision = {}', text)
+        self.assertIn('names = {}', text)
+        self.assertIn('["two words"] = true', text)
         luac = shutil.which('luac')
         if luac:
             path = Path(self.temp.name) / 'world_data.lua'

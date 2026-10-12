@@ -55,9 +55,14 @@ local function next_node(node)
     return node
 end
 
---- Iterates the components in a table: for component, id in components.each(name) do ... end
+--- Iterates the components in a table (its gamedef name, or its address):
+--- for component, id in components.each(name) do ... end
 function components.each(table_name)
-    local header = game.read("ptr", game.symbol(table_name) + 4)
+    local address = type(table_name) == "number" and table_name or game.symbol(table_name)
+    if not address then
+        return function() return nil end
+    end
+    local header = game.read("ptr", address + 4)
     local node = header ~= 0 and game.read("ptr", header + 8) or 0
     local steps = 0
     return function()

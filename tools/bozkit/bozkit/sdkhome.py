@@ -408,6 +408,25 @@ def start_detached(command: list[str], cwd: Path, log: Path | None = None,
                             stdin=subprocess.DEVNULL, env=env, **options)
 
 
+def open_path(path: str | Path, editor: bool = False) -> None:
+    """Open a file or folder the way the desktop does, without waiting for the program that
+    opens it (Blender's own opener waits for xdg-open, which freezes the editor when a terminal
+    editor opens the file). *editor*: a text file to edit: VS Code when it is installed."""
+    import shutil
+    path = Path(path)
+    if editor:
+        code = shutil.which('code') or shutil.which('codium')
+        if code:
+            start_detached([code, '--goto', str(path)], path.parent)
+            return
+    if sys.platform == 'win32':
+        os.startfile(str(path))   # returns at once
+    elif sys.platform == 'darwin':
+        start_detached(['open', str(path)], path.parent if path.is_file() else path)
+    else:
+        start_detached(['xdg-open', str(path)], path.parent if path.is_file() else path)
+
+
 def game_running() -> bool:
     if sys.platform == 'win32':
         result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq codboz_s3e_loader.exe'],

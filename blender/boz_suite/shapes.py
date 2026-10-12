@@ -24,6 +24,7 @@ TILE = 100.0          # centimetres per texture repeat
 MAX_REPEATS = 7.5     # game UVs stay within -8..8
 DEFAULT_TEXTURE = "BOZ Default"
 
+BOX_SHAPES = ("block", "wall", "floor", "pillar")   # collide as their box; ramps and stairs as their mesh
 # kind: (label, icon, collision, description)
 SHAPES = {
     "block": ("Block", "MESH_CUBE", "solid", "A 1 m cube"),
@@ -147,10 +148,11 @@ class BOZ_OT_add_shape(Operator):
     def execute(self, context):
         label, _icon, collision, _description = SHAPES[self.kind]
         obj = bpy.data.objects.new(label.lower(), shape_mesh(self.kind, label.lower()))
-        obj.boz.role = "mesh"
+        obj.boz.role = "model"
         obj.boz.collision = collision
+        obj.boz.shape = "box" if self.kind in BOX_SHAPES else "mesh"
         obj.location = context.scene.cursor.location
-        context.collection.objects.link(obj)
+        convert.map_collection(context.scene).objects.link(obj)
         for other in context.selected_objects:
             other.select_set(False)
         obj.select_set(True)
@@ -203,13 +205,16 @@ class BOZ_OT_import_model(Operator):
             return {"CANCELLED"}
         new = [obj for obj in bpy.data.objects if obj not in before]
         roots = [obj for obj in new if obj.parent not in new]
+        for obj in new:
+            if obj.parent is None or obj.parent not in new:
+                convert.move_to(obj, convert.map_collection(context.scene))
         for obj in roots:
             obj.location = context.scene.cursor.location
             if self.metres:
                 obj.scale = tuple(c * 100.0 for c in obj.scale)
         meshes = [obj for obj in new if obj.type == "MESH"]
         for obj in meshes:
-            obj.boz.role = "mesh"
+            obj.boz.role = "model"
             obj.boz.collision = "solid"
         untextured = [obj.name for obj in meshes
                       if not any(convert.image_of(slot.material) for slot in obj.material_slots)]

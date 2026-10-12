@@ -109,9 +109,7 @@ def setup_area(area, workspace_name: str, screen=None) -> None:
         setup_properties(space, workspace_name in FORMS_TABS and area == largest)
     elif area.type == "TEXT_EDITOR":
         # Text areas show the log, except the tallest one in Scripts: the script editor.
-        texts = [a for a in (screen.areas if screen else []) if a.type == "TEXT_EDITOR"]
-        tallest = max(texts, key=lambda a: a.height) if texts else None
-        if workspace_name != "Scripts" or area != tallest:
+        if workspace_name != "Scripts" or screen is None or area != script_area(screen):
             space.text = log_text()
             space.show_word_wrap = True
             space.show_line_numbers = False
@@ -175,8 +173,103 @@ def add_palette_area(window) -> None:
     window.workspace[PALETTE_KEY] = "done"
 
 
+SCRIPTS_KEY = "boz_scripts_layout3"  # Scripts: the next layout step, "done" or "failed"
+
+
+def script_area(screen):
+    """The Scripts tab's script editor: its tallest text area (the others show the log)."""
+    texts = [a for a in screen.areas if a.type == "TEXT_EDITOR"]
+    return max(texts, key=lambda a: a.height) if texts else None
+
+
+def _override(window, screen, area):
+    return bpy.context.temp_override(window=window, screen=screen, area=area)
+
+
+def _split(window, screen, area, direction: str, factor: float) -> None:
+    with _override(window, screen, area):
+        if bpy.ops.screen.area_split(direction=direction, factor=factor) != {"FINISHED"}:
+            raise RuntimeError("could not split an area")
+
+
+def _top(screen):
+    """The areas above the log (the one area touching the bottom)."""
+    bottom = min(a.y for a in screen.areas)
+    return [a for a in screen.areas if a.y > bottom]
+
+
+def _scripts_step(window, step: int) -> None:
+    """One step of the Scripts layout. A split area's new size is known only after the screen
+    refreshes, so each step runs on its own tick and finds its areas by where they are now."""
+    screen = window.screen
+    if step == 0:       # everything but the script editor closes; it fills the screen
+        keep = script_area(screen) or screen.areas[0]
+        for other in [a for a in screen.areas if a != keep]:
+            with _override(window, screen, other):
+                bpy.ops.screen.area_close()
+        if len(screen.areas) != 1:
+            raise RuntimeError("could not close the areas")
+    elif step == 1:     # the log along the whole bottom
+        _split(window, screen, screen.areas[0], "HORIZONTAL", 0.2)
+    elif step == 2:     # the files on the left
+        _split(window, screen, _top(screen)[0], "VERTICAL", 0.2)
+    elif step == 3:     # the right column
+        _split(window, screen, max(_top(screen), key=lambda a: a.x), "VERTICAL", 0.77)
+    elif step == 4:     # properties under the outliner
+        _split(window, screen, max(_top(screen), key=lambda a: a.x), "HORIZONTAL", 0.6)
+    elif step == LAST_STEP:
+        _scripts_editors(window, screen)
+
+
+LAST_STEP = 5
+
+
+def _scripts_editors(window, screen) -> None:
+    top = _top(screen)
+    log = next(a for a in screen.areas if a not in top)
+    left, right = min(a.x for a in top), max(a.x for a in top)
+    files = next(a for a in top if a.x == left)
+    properties, outliner = sorted((a for a in top if a.x == right), key=lambda a: a.y)
+    middle = next(a for a in top if left < a.x < right)
+    text = space_of(middle).text
+    for area, editor in ((log, "TEXT_EDITOR"), (middle, "TEXT_EDITOR"), (files, "FILES"),
+                         (properties, "PROPERTIES"), (outliner, "OUTLINER")):
+        with _override(window, screen, area):
+            area.ui_type = editor
+    space = space_of(log)
+    space.text = log_text()
+    space.show_word_wrap = True
+    space.show_line_numbers = False
+    space = space_of(middle)
+    space.text = text if text is not None and text.name != LOG_TEXT else None
+    space.show_line_numbers = True
+    space.show_syntax_highlight = True
+
+
+def layout_scripts(window) -> bool:
+    """Lay the Scripts tab out, one step per call: the log along the whole bottom; above it the
+    files on the left, the script editor in the middle, and the outliner over the properties on
+    the right. Background Blender cannot split areas, so this
+    runs while the tab is on screen. Returns whether it is still going."""
+    workspace = window.workspace
+    step = workspace.get(SCRIPTS_KEY, 0)
+    if not isinstance(step, int):
+        return False
+    if any(a.width <= 1 or a.height <= 1 for a in window.screen.areas):
+        return True     # the last split is not on screen yet
+    try:
+        _scripts_step(window, step)
+    except (RuntimeError, StopIteration, ValueError, TypeError) as exc:
+        print(f"boz_suite: could not lay out Scripts: {exc}")
+        workspace[SCRIPTS_KEY] = "failed"
+        return False
+    workspace[SCRIPTS_KEY] = step + 1 if step < LAST_STEP else "done"
+    return step < LAST_STEP
+
+
 def refresh_windows() -> float:
     """Timer: lay out and set up the tabs on screen (cheap when nothing is new)."""
+    busy = False
     for window in bpy.context.window_manager.windows:
         workspace = window.workspace
         try:
@@ -184,11 +277,14 @@ def refresh_windows() -> float:
                 apply_layout(window, workspace)
             if workspace.name == "World" and workspace.get(PALETTE_KEY) != "done":
                 add_palette_area(window)
+            if workspace.name == "Scripts" and layout_scripts(window):
+                busy = True
+                continue    # areas mid-layout are set up once it is done
             setup_screen(window.screen, workspace.name)
         except (AttributeError, TypeError, RuntimeError) as exc:
             print(f"boz_suite: could not lay out {workspace.name}: {exc}")
             workspace[LAYOUT_KEY] = "failed"
-    return 1.0
+    return 0.1 if busy else 1.0
 
 
 def generate() -> None:

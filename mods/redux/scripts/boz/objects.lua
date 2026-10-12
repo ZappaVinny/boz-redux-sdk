@@ -25,7 +25,13 @@
 --   when two collision objects start or stop touching; ghost volumes (triggers) get them too.
 -- - "use": Poi_SendUse runs when the player presses use at the point of interest in reach
 --   (entity at CLevelManager +0x214).
--- - "damage": CHealth::Damage(health, amount, attacker) on objects with health (shootables).
+-- - "damage": CHealth::Damage(health, amount, attacker) on objects with health.
+-- - "hit": CEasterEgg::OnEvent runs when a weapon hits a skull (Hit volumes are made from the
+--   musical easter egg's skulls); for objects with "hit" handlers the game's handling is skipped,
+--   so they stay out of the level's own easter egg.
+-- - Positions: the entity's CIsTransform keeps its world matrix at +0x38, the position at
+--   +0x5c/+0x60/+0x64 (game centimetres, y up); CIsTransform::UpdateWorld refreshes it when the
+--   transform moved.
 
 local hash = require("boz.hash")
 local components = require("boz.components")
@@ -43,6 +49,7 @@ local FALLBACK = {
     ["NavMesh_SetTagOpen"] = 0x0a3a0c + 1,
     ["Poi_SendUse"] = 0x19fd48 + 1,
     ["CHealth::Damage"] = 0x199754 + 1,
+    ["CEasterEgg::OnEvent"] = 0x17cdb8 + 1,
     ["CIsRenderableModel::s_table"] = 0x4712e4,
     ["CIsCollisionBox::s_table"] = 0x4519ac,
     ["CIsCollisionSphere::s_table"] = 0x451da4,
@@ -51,6 +58,8 @@ local FALLBACK = {
     ["CIsHierarchy::s_table"] = 0x457a5c,
     ["CEntityFlags::s_table"] = 0x4669cc,
     ["CAIControllerZombie::s_table"] = 0x460d24,
+    ["CIsTransform::s_table"] = 0x45c2e8,
+    ["CIsTransform::UpdateWorld"] = 0x0c2488 + 1,
 }
 local COLLISION_TABLES = {"CIsCollisionBox::s_table", "CIsCollisionSphere::s_table",
                           "CIsCollisionCapsule::s_table", "CIsCollisionMesh::s_table"}
@@ -60,6 +69,7 @@ local LEVEL_NAVMESH = 0x290     -- CLevelManager: the level's NavMesh resource
 local COMPONENT_ENTITY = 0xc
 local ENTITY_ID = 4
 local HIERARCHY_CHILDREN = 0x24
+local TRANSFORM_POSITION = 0x5c
 
 local function sym(name)
     return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
@@ -233,6 +243,59 @@ function Object:close_navmesh()
     return self:set_navmesh(false)
 end
 
+-- Positions
+
+--- The world position of a CIsTransform component: {x, y, z} in game centimetres (y is up).
+function objects.transform_position(transform)
+    if transform == 0 then
+        return nil
+    end
+    game.call(sym("CIsTransform::UpdateWorld"), transform)
+    return {x = game.read("f32", transform + TRANSFORM_POSITION),
+            y = game.read("f32", transform + TRANSFORM_POSITION + 4),
+            z = game.read("f32", transform + TRANSFORM_POSITION + 8)}
+end
+
+--- The world position of an entity (pointer), or nil when it has no transform.
+function objects.position_of(entity)
+    local transform = find_component("CIsTransform::s_table", entity or 0)
+    return transform and objects.transform_position(transform)
+end
+
+local function point_of(target)
+    if type(target) == "table" and target.x then
+        return target
+    end
+    if type(target) == "table" and type(target.position) == "function" then
+        return target:position()
+    end
+    return nil
+end
+
+--- The distance in centimetres between two positions or objects (anything with :position()),
+--- or nil when either has no position.
+function objects.distance(a, b)
+    local p, q = point_of(a), point_of(b)
+    if not p or not q then
+        return nil
+    end
+    local dx, dy, dz = p.x - q.x, p.y - q.y, p.z - q.z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+--- The object's world position {x, y, z} (game centimetres, y is up), or nil when it is not in
+--- the running level.
+function Object:position()
+    return objects.position_of(self:entity_pointer())
+end
+
+--- True when the object is within `distance` centimetres of `target` (a position such as
+--- zombie_killed's data.position, or another object).
+function Object:near(target, distance)
+    local d = objects.distance(self, target)
+    return d ~= nil and d <= distance
+end
+
 -- Event plumbing: one hook per event type, installed when the first handler is added.
 
 local function object_of(entity)
@@ -317,6 +380,17 @@ local INSTALL = {
             end
         end})
     end,
+    hit = function()
+        hook.add(sym("CEasterEgg::OnEvent"), {before = function(call)
+            local egg = call:arg(1)
+            local object = egg ~= 0 and object_of(game.read("ptr", egg + COMPONENT_ENTITY))
+            if object and handlers.hit and handlers.hit[object] then
+                local level = level_manager()
+                fire("hit", object, who_is(level and game.read("ptr", level + LEVEL_PLAYER) or 0))
+                call:skip()
+            end
+        end})
+    end,
     damage = function()
         hook.add(sym("CHealth::Damage"), {before = function(call)
             local health = call:arg(1)
@@ -331,8 +405,8 @@ local INSTALL = {
 
 --- Calls `fn(object, info)` on the object's `event`:
 --- "enter" / "exit" (something starts or stops touching it; info.player, info.zombie,
---- info.entity), "use" (the player pressed use at it), "damage" (it was hurt; info.amount,
---- info.attacker). Returns the object.
+--- info.entity), "use" (the player pressed use at it), "hit" (a weapon hit it: Hit volumes),
+--- "damage" (it was hurt; info.amount, info.attacker). Returns the object.
 function Object:on(event, fn)
     assert(INSTALL[event], "boz.objects: unknown event " .. tostring(event))
     if not hooked[event] then

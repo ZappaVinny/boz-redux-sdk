@@ -26,6 +26,10 @@ Every mod has its own globals. The API below is shared, and `mod` describes the 
 
 `require("name")` loads `scripts/name.lua` from the same mod (dots become folders:
 `require("ui.tabs")` loads `scripts/ui/tabs.lua`), runs it once and returns what it returns.
+`loadscript("name", env)` loads `scripts/name.lua` the same way but does not run it or remember
+it: it returns the script as a function whose globals are the table `env`. The standard
+library's `boz.prefabs` uses it to run a prefab's script once per object, each with its own
+`self` (clients from before October 2026 do not have it).
 
 Available standard libraries: `string`, `table`, `math`, `utf8`, `coroutine`, and `os` limited to
 `os.time`, `os.clock`, `os.date` and `os.difftime`. There is no `io`, `dofile` or `loadfile`.

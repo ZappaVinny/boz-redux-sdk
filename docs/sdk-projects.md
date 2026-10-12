@@ -88,31 +88,34 @@ save; it can also be edited by hand.
 
 ```text
 source/
-  world.json             base level, meshes, props, instances, entities
-  meshes/<name>.json     level geometry: vertices (centimetres, Y up, world space), UVs,
-                         triangles, and per triangle which texture it uses
-  props/<name>.json      a prop's geometry, in its own space
+  world.json             base level, models, volumes, prefabs
+  meshes/<name>.json     a mesh of the world's own: vertices (centimetres, Y up, the model's
+                         own space), UVs, triangles, and per triangle which texture it uses
   textures/<name>.png    textures (power-of-two sides, 4 to 1024); <name>_1.png, ... for a
                          mesh's further textures
+  prefabs/<Name>.json    the prefab library (with <Name>/meshes and <Name>/textures)
 ```
 
 ```json
 {
-  "format": 2,
+  "format": 3,
   "base": "kino",
   "meshes": [
-    {"name": "floor", "file": "meshes/floor.json", "textures": ["textures/floor.png"], "collision": "floor", "double_sided": true}
+    {"name": "wall", "file": "meshes/wall.json", "textures": ["textures/wall.png"], "double_sided": false}
   ],
-  "props": [
-    {"name": "crate", "file": "props/crate.json", "textures": ["textures/crate.png"], "collision": "solid", "shape": "box", "double_sided": false}
+  "models": [
+    {"name": "Wall_1", "mesh": "wall", "collision": "solid", "shape": "mesh", "position": [0.0, 0.0, 300.0], "rotation": [0.0, 0.0, 0.0, 1.0]},
+    {"name": "Rock", "game": "levels/kino/alley_shared.group.bin#0x1a2b3c4d", "collision": "solid", "shape": "box", "position": [0.0, 0.0, 600.0], "rotation": [0.0, 0.0, 0.0, 1.0], "start": {"visible": false}}
   ],
-  "instances": [
-    {"prop": "crate", "position": [300.0, 0.0, 300.0], "yaw": 45.0},
-    {"model": "levels/kino/alley_shared.group.bin#0x1a2b3c4d", "collision": "solid", "shape": "box", "position": [0.0, 0.0, 600.0], "yaw": 90.0}
+  "volumes": [
+    {"name": "Room", "volume": "trigger", "position": [0.0, 100.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "size": [400.0, 200.0, 400.0], "who": "players"}
   ],
-  "entities": [
-    {"source": "spawn_player_1", "position": [-100.0, 5.0, -100.0], "yaw": 0.0},
-    {"source": "0x9f1e2d3c", "group": "ingame/ingame.group.bin", "position": [600.0, 0.0, -600.0], "yaw": 180.0}
+  "prefabs": [
+    {"name": "Vault_1", "script": "prefabs/Vault.lua", "properties": {"delay": 2.0}, "position": [500.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0],
+     "parts": [{"name": "Door", "mesh": "wall", "collision": "solid", "shape": "mesh", "position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "start": {"blocks": true}},
+               {"name": "Skull", "volume": "hit", "position": [0.0, 150.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "size": [40.0, 40.0, 40.0], "who": "players", "once": true}]},
+    {"name": "Juggernog", "source": "Juggernog", "piece": "juggernog", "settings": {"CPerk.m_perkSinglePCost": 2000}, "position": [-100.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0]},
+    {"name": "spawn_player_1", "source": "spawn_player_1", "piece": "player_spawn", "position": [-100.0, 5.0, -100.0], "rotation": [0.0, 0.0, 0.0, 1.0]}
   ]
 }
 ```
@@ -120,27 +123,37 @@ source/
 - `base` is the shipped level that provides the rounds, zombie types, sounds, cameras, weapons
   and arms. With `"inherit": true` the map is the **whole base level** (rooms, entities,
   navmesh) plus the world's contents: the original-map templates.
-- **Meshes** are level geometry, each a model with its textures and materials. Triangles use the
-  game's winding; `double_sided` also draws their backs. `collision` is `floor` (walkable:
-  players stand on it and the navmesh is built on its top), `solid` (blocking: nobody passes
-  through or walks on it; it cuts the navmesh) or `none` (decoration). The editor calls these
-  Walkable, Blocking and None.
-- **Props** are models of the project's own, in their own space, placed any number of times by
-  **instances**. An instance can also place a **game model** (`<group path>#0x<hash>`); the
-  compiler copies the model, its materials and its textures into the level. A prop or model's
-  `shape` is `box` (its bounds) or `mesh` (its triangles) for collision.
-- **Entities** are copies of the game's entities (perks, spawns, the power switch, ...), by name
-  or `0x` hash, from the base level or from any `group`. Templates without a transform (in
-  `ingame`) get one. Placing the same entity again makes a renamed copy; in an inherited map the
-  first placement of a base-level entity (by its `0x` hash, without `piece` or `group`) moves and
-  edits the original, and later ones are copies. `removed` lists base-level entities (`0x`
-  hashes) taken out of an inherited map; the navmesh around them is rebuilt. `piece` names the toolkit piece it
-  came from, `fields` sets its settings (`"CPerk.m_perkSinglePCost": 2000`; names and the power
-  link as names, `0` for none) and `prop` draws a project prop instead of its own model, keeping
-  its behaviour. Zombie spawn points become the starting area's spawns in a generated map.
-- Instances and entities have a `position`, a `rotation` (x, y, z, w quaternion in the game's
-  axes; older files have a `yaw` in degrees) and an optional `scale`. An entity's scale
-  multiplies its own (wall buys and weapons are drawn at 1/64).
+- Every object has a `name` (letters, digits and `_`): its name in the game (`CIsNamed`) and in
+  scripts. A prefab's parts are named `<Prefab>.<Part>` in the game. Positions are centimetres;
+  `rotation` is an x, y, z, w quaternion in the game's axes, `scale` optional.
+- **Models** draw one mesh: one of the world's `meshes` (`mesh`) or a game model (`game`:
+  `<group path>#0x<hash>`, copied into the level with its materials and textures). Triangles use
+  the game's winding; a mesh's `double_sided` also draws their backs. `collision` is `floor`
+  (walkable: players stand on it and the navmesh is built on its top), `solid` (blocking: it cuts
+  the navmesh) or `none`; `shape` is `box` (its bounds) or `mesh` (its triangles). The editor
+  calls these Walkable, Blocking and None. Models sharing a mesh share one game model.
+- **Volumes** are invisible boxes that send events to scripts: `trigger` (a ghost box made from
+  Call of the Dead's snow trigger: enter / exit), `hit` (a musical easter egg skull with a song
+  of its own, a sphere of the box's largest side: shot) and `use` (a point of interest without a
+  game prompt: the player pressed use; `prompt` and `cost`). `who` is `players`, `zombies` or
+  `anyone`; `once` fires the first time only. `size` is in centimetres.
+- **Prefabs** are either yours (`parts`, in the prefab's space: models, volumes and prefabs) or
+  **game prefabs**: one of the game's entities (`source`: name or `0x` hash, from the base level
+  or from any `group`), with the toolkit `piece` it came from, its `settings` as the editor shows
+  them and the `fields` they write (`"CPerk.m_perkSinglePCost": 2000`; names and the power link
+  as names, `0` for none). A game prefab can draw one of the world's meshes (`mesh`) or a game
+  model (`game`) instead of its own model, keeping its behaviour. Templates without a transform
+  (in `ingame`) get one; zombie spawn points become the starting area's spawns in a generated map.
+- In an inherited map, a game prefab with `"base": true` is one of the base level's own entities
+  (by its `0x` hash), moved and edited; further copies of it are ordinary game prefabs.
+  `removed` lists base-level entities taken out; the navmesh around them is rebuilt.
+- `start` sets how an object starts: `visible`, `collision`, `blocks` (the navmesh under it is
+  tagged with its name and shut until a script opens it). An object a script may change (it has
+  a script, a start state, or is part of a prefab with a script) gets its own collision entity
+  (`<name>_collision`) so `boz.objects` can switch it.
+- `script` is a Lua file in the project's `scripts/` folder, `properties` the values of the
+  `---@property` lines it declares ([map-scripting.md](map-scripting.md)).
+- Format 1 and 2 files (meshes, props, instances, entities) still load and are converted.
 - **Repacking:** an entity or model from another map brings what it uses (models, materials,
   textures, animation skins, skeletons, animations, state machines, sounds), found by name hash in
   that map's groups and `ingame` and copied into the level unless the level already loads it.
@@ -157,10 +170,13 @@ source/
   and zombies pass only once the door is bought. Copies get names of their own; doors in
   generated maps unlock no areas.
 - Map projects get `require("boz.world").start()` in `main.lua` at build time, with the SDK's
-  `boz/world.lua`: it powers perk machines whose power switch is `boz_no_power` (the editor's
-  "Needs power" off), as the game powers Quick Revive in solo. Pack-a-Punch gets
-  `m_HasPower`; doors and trap switches without a power switch need none.
-- The compiler (`bozkit.world.compile_world`) writes the level's groups into the mod's assets.
+  `boz/world.lua`, `boz/prefabs.lua`, `boz/objects.lua` and the map's generated
+  `boz/world_data.lua` (start state, scripted objects, volumes). `boz.world` powers perk machines
+  whose power switch is `boz_no_power` (the editor's "Needs power" off), as the game powers Quick
+  Revive in solo (Pack-a-Punch gets `m_HasPower`; doors and trap switches without a power switch
+  need none), applies the start state when each level starts, and starts the scripts.
+- The compiler (`bozkit.world.compile_world`) lowers the world into a flat layout (prefabs
+  flattened into their parts) and writes the level's groups into the mod's assets.
   A generated map gets a collision mesh and a navmesh built from its floor and solid geometry
   (entities with a model get a box). An inherited map adds its own collision entity and rebuilds
   only the navmesh tiles near what changed.

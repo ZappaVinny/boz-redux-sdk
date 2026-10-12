@@ -22,7 +22,7 @@ Functions that need a Zombies match return `nil` (or `false`) outside one instea
 - **Menus and text**: [boz.pause_settings](#bozpausesettings), [boz.text](#boztext)
 - **Game UI building blocks**: [boz.iwui](#boziwui), [boz.frontend](#bozfrontend), [boz.flash](#bozflash)
 - **Low-level helpers**: [boz.components](#bozcomponents), [boz.hash](#bozhash), [boz.swf](#bozswf), [boz.avm1](#bozavm1)
-- **Other**: [boz.levels](#bozlevels), [boz.objects](#bozobjects), [boz.world](#bozworld)
+- **Other**: [boz.levels](#bozlevels), [boz.objects](#bozobjects), [boz.prefabs](#bozprefabs), [boz.world](#bozworld)
 
 ## Gameplay
 
@@ -297,7 +297,7 @@ component tables (T::s_table) keep components in a red-black tree keyed by entit
 | `components.local_player()` | The local player's entity (CLevelManager +0x1a0) and its id, or nil outside a Zombies match. |
 | `components.find(table_name, id)` | The component of an entity id in a table (by gamedef name, e.g. "CPerkManager::s_table"). |
 | `components.on_player(table_name)` | The component on the local player's entity, or nil. |
-| `components.each(table_name)` | Iterates the components in a table: for component, id in components.each(name) do ... end |
+| `components.each(table_name)` | Iterates the components in a table (its gamedef name, or its address): for component, id in components.each(name) do ... end |
 
 ### boz.hash
 
@@ -437,7 +437,19 @@ when two collision objects start or stop touching; ghost volumes (triggers) get 
 (entity at CLevelManager +0x214).
 ```
 
-- "damage": CHealth::Damage(health, amount, attacker) on objects with health (shootables).
+- "damage": CHealth::Damage(health, amount, attacker) on objects with health. - "hit": CEasterEgg::OnEvent runs when a weapon hits a skull (Hit volumes are made from the
+
+```lua
+musical easter egg's skulls); for objects with "hit" handlers the game's handling is skipped,
+so they stay out of the level's own easter egg.
+```
+
+- Positions: the entity's CIsTransform keeps its world matrix at +0x38, the position at
+
+```lua
++0x5c/+0x60/+0x64 (game centimetres, y up); CIsTransform::UpdateWorld refreshes it when the
+transform moved.
+```
 
 | Function | Description |
 | --- | --- |
@@ -454,8 +466,79 @@ when two collision objects start or stop touching; ghost volumes (triggers) get 
 | `Object:set_navmesh(open)` | Opens or closes the walkable area under the object (it must be set to block the walkable area in the editor). Returns the object. |
 | `Object:open_navmesh()` | Lets zombies and players walk where the object blocked them. Returns the object. |
 | `Object:close_navmesh()` | Blocks the walkable area under the object again. Returns the object. |
-| `Object:on(event, fn)` | Calls `fn(object, info)` on the object's `event`: "enter" / "exit" (something starts or stops touching it; info.player, info.zombie, info.entity), "use" (the player pressed use at it), "damage" (it was hurt; info.amount, info.attacker). Returns the object. |
+| `objects.transform_position(transform)` | The world position of a CIsTransform component: {x, y, z} in game centimetres (y is up). |
+| `objects.position_of(entity)` | The world position of an entity (pointer), or nil when it has no transform. |
+| `objects.distance(a, b)` | The distance in centimetres between two positions or objects (anything with :position()), or nil when either has no position. |
+| `Object:position()` | The object's world position {x, y, z} (game centimetres, y is up), or nil when it is not in the running level. |
+| `Object:near(target, distance)` | True when the object is within `distance` centimetres of `target` (a position such as zombie_killed's data.position, or another object). |
+| `Object:on(event, fn)` | Calls `fn(object, info)` on the object's `event`: "enter" / "exit" (something starts or stops touching it; info.player, info.zombie, info.entity), "use" (the player pressed use at it), "hit" (a weapon hit it: Hit volumes), "damage" (it was hurt; info.amount, info.attacker). Returns the object. |
 | `objects.on(name, event, fn)` | objects.on(name, event, fn): the same as objects.get(name):on(event, fn). |
+
+### boz.prefabs
+
+Scripts for the map's prefabs, models and volumes, and the event bus between them.
+
+A script is attached to an object in the editor (Properties → Object → Game → Script). It is just the handlers; `self` is the object it is attached to:
+
+```lua
+function on_hit(volume, info)              -- a Hit volume of this prefab was shot
+    self:part("Door"):hide():set_collision(false):open_navmesh()
+    boz.send("vault_open", {by = self.name})
+end
+```
+
+The script runs once per object using it, each with its own `self` and its own top-level variables (a `local hits = 0` at the top counts per object). `boz` is this module.
+
+Saved with the game: a script's global variables (`hits = 0`, not `local hits = 0`) and boz.globals (one table every script of the map shares) are written when the game saves and come back when the player continues that save, before start() runs. Numbers, strings, booleans and tables of those are saved; functions and handles are not.
+
+Timers: boz.after(seconds, fn) and boz.every(seconds, fn) run on game time (they wait while the game is paused) and return a timer with :cancel().
+
+On `self`: self.name, self.properties (the values set in the editor for the script's ---@property lines), self:part(name) and self:parts() for a prefab's parts, and show/hide, set_collision, open_navmesh/close_navmesh for the whole object.
+
+Handlers a script may define (all optional):
+
+```lua
+start()                      the level started
+on_enter(volume, who), on_exit(volume, who)   a Trigger volume (who.player, who.zombie)
+on_hit(volume, info)         a Hit volume was shot
+on_use(volume, who)          the player pressed use at a Use volume (its cost already paid)
+on_event(name, data)         boz.send(name, data) from any script, and game events:
+                             "round_started" {round = n}, "power_on",
+                             "perk_bought" {perk = "Juggernog", player = true},
+                             "door_opened" {door = name, hash = n},
+                             "zombie_killed" {position = {x, y, z}, entity = e,
+                                              by_player = true, headshot = true},
+                             "player_downed", "player_revived"
+```
+
+volume is the volume's name inside the prefab (its own name for a volume with a script); only volumes send these, and only volumes of the object (or its parts) the script is attached to. Other functions a script defines can be called by other scripts: boz.find("Vault_1"):open(). Every volume event also goes to boz.on listeners as "<volume name>.<event>" ("Vault_1.Skull.hit"); on_event does not get it (the script's own handler did). Trigger volumes: on_enter when something comes in, on_exit once it has left (the game's own enter/exit flicker while standing in it is smoothed out).
+
+print shows in the Developer console as well as the log.
+
+<details><summary>How it works</summary>
+
+the client's loadscript(name, env) loads the script with a fresh environment for each object (self and boz in it, the mod's globals behind it; print also goes through the game's Console_Print, which boz.console passes to the Developer console). Volumes are boz.objects events (enter/exit on ghost boxes, hit on easter egg skulls, use at points of interest). Use prompts: when a Use volume becomes the point of interest in reach (SUBJECT_POI_TRIGGER, handled by CIngameStatePlaying::UpdatePoiPrompt), its prompt is shown with Poi_ShowPrompt; its cost is paid with CScoreManager::AddScore. Rounds: CWaveManager::StartWave (round number at +0x78). Power: a power switch's on flag (CPowerSwitch +0x88). Perks: CPerkManager::GainPerk(manager, perk, apply) for a perk not yet owned (bits at +0x58). Doors: a CDoor whose m_DoorState (+0x9c) became 2 (open), checked each frame. Hooks here are before hooks where they can be: an after hook swaps the return address for the client's trap, and on a busy function that crashed the game. Zombies: CAIControllerZombie::State_Dead entering (state event 1): its transform at +0xc4, killer entity at +0x138, hit location at +0x124 (0 head), kill kind at +0x22c (0/1 knife, 2 grenade). Downed: the local CPlayerController's stance (+0x1f4) is 8 (last stand) while its state machine (state at +0x1d4) is not 0x14/0x15 (dead). Game time: frames in which CPlayerController::FixedStep ran. Saving: CSaveManager::SaveGame (autosave at each round start, pause); continuing a save: CLevelManager +0x298 set at level start, then CSaveManager::NotifyLoad sends SUBJECT_LOAD from the resume-loading state. The values go in the map mod's settings (globals.<level>.<n>, Lua table text in chunks).
+
+</details>
+
+| Function | Description |
+| --- | --- |
+| `Instance:part(name)` | The boz.objects handle of a part of this prefab (by its name in the prefab). |
+| `Instance:parts()` | {name, object} of every part of this prefab. |
+| `Instance:set_visible(visible)` | Shows or hides the object (every part of a prefab). Returns self. |
+| `Instance:set_collision(enabled)` | Switches the collision of the object (every part of a prefab). Returns self. |
+| `Instance:set_navmesh(open)` | Opens or closes the walkable area under the object (and its parts that block it). Returns self. |
+| `Instance:position()` | The object's world position {x, y, z} (game centimetres, y is up): a prefab's is the middle of its parts. nil when it is not in the running level. |
+| `Instance:near(target, distance)` | True when the object (any part of a prefab) is within `distance` centimetres of `target` (a position such as zombie_killed's data.position, or another object). |
+| `Instance:send(name, data)` | boz.send from this object. |
+| `prefabs.find(name)` | The scripted object called *name* (its script instance), else its boz.objects handle when it exists in the level, else nil. |
+| `prefabs.send(name, data)` | Sends an event on the bus: every boz.on(name) listener and every script's on_event. |
+| `prefabs.on(name, fn)` | Calls fn(data, name) on every boz.send(name, ...). Returns fn. |
+| `Timer:cancel()` | Stops the timer. |
+| `prefabs.after(seconds, fn)` | Runs fn() once, `seconds` of game time from now (paused time does not count). Returns a timer with :cancel(). |
+| `prefabs.every(seconds, fn)` | Runs fn() every `seconds` of game time until the timer is cancelled. Returns the timer. |
+| `prefabs.save()` | Writes the map's saved globals now (the game's saves call this). |
+| `prefabs.start(list, all_names)` | Starts the level's objects (boz.world calls this when a level has started, with the map's world_data objects and the names of all its objects). |
 
 ### boz.world
 
@@ -465,7 +548,7 @@ Game behaviour a map project's world asks for that the game's data cannot expres
 require("boz.world").start()   (map projects call this from main.lua; the SDK adds it)
 ```
 
-Objects scripts change: the editor writes each map's start state into boz/world_data.lua (hidden objects, objects without collision, walkable areas that start blocked); this applies it with boz.objects as soon as each level has started.
+The map's objects: the editor writes each map's start state and scripted objects into boz/world_data.lua (hidden objects, objects without collision, walkable areas that start blocked, scripts and their property values); as soon as each level has started this applies the start state with boz.objects and starts the scripts with boz.prefabs.
 
 Perk machines that work without power: the editor's "Needs power" off writes the power switch name "boz_no_power". The game only powers a machine when its power switch is turned on (Quick Revive in solo is the exception), so when such a machine starts this powers it the same way (CPerk +0x7c powered, +0x7d lit, and the machine's own "power_switch_on" event for its lights and jingle).
 

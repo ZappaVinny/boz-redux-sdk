@@ -221,16 +221,82 @@ class BOZ_PT_show(Panel):
         layout.label(text="Walkable: blue floor, orange behind doors (Refresh after edits)")
 
 
+BOX_EDGES = [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7),
+             (0, 4), (1, 5), (2, 6), (3, 7)]
+BOX_COLOUR = (1.0, 0.35, 0.2, 1.0)
+_box_handle = None
+
+
+def collision_box(obj):
+    """World corners of a model's collision box (its mesh bounds grown by its padding, the way
+    the compiler builds it), or None when it does not collide as a box."""
+    from mathutils import Vector
+
+    settings = obj.boz
+    if obj.type != "MESH" or settings.role != "model" or settings.collision == "none" \
+            or settings.shape != "box" or not obj.data.vertices:
+        return None
+    matrix = convert.world_matrix(obj)
+    scale = matrix.to_scale()
+    pad = [settings.padding / abs(c) if c else 0.0 for c in scale]
+    points = [v.co for v in obj.data.vertices]
+    low = [min(p[i] for p in points) - pad[i] for i in range(3)]
+    high = [max(p[i] for p in points) + pad[i] for i in range(3)]
+    return [matrix @ Vector(tuple(high[i] if corner >> i & 1 else low[i] for i in range(3)))
+            for corner in range(8)]
+
+
+def draw_collision_boxes():
+    """Outline the collision box of each selected model (what players bump into). The area a
+    blocking model shuts shows in the Walkable preview (Refresh), built by the compiler."""
+    try:
+        import gpu
+        from gpu_extras.batch import batch_for_shader
+    except ImportError:
+        return
+    context = bpy.context
+    lines = []
+    for obj in context.selected_objects:
+        corners = collision_box(obj)
+        if corners:
+            for a, b in BOX_EDGES:
+                lines += [tuple(corners[a]), tuple(corners[b])]
+    if not lines:
+        return
+    try:
+        shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
+        wide = True
+    except (ValueError, SystemError):
+        shader, wide = gpu.shader.from_builtin("UNIFORM_COLOR"), False
+    gpu.state.blend_set("ALPHA")
+    batch = batch_for_shader(shader, "LINES", {"pos": lines})
+    shader.bind()
+    if wide and context.region is not None:
+        shader.uniform_float("viewportSize", (context.region.width, context.region.height))
+        shader.uniform_float("lineWidth", 2.0)
+    shader.uniform_float("color", BOX_COLOUR)
+    batch.draw(shader)
+    gpu.state.blend_set("NONE")
+
+
 CLASSES = (BOZ_OT_preview, BOZ_OT_preview_refresh, BOZ_PT_show)
 
 
 def register():
+    global _box_handle
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.VIEW3D_HT_header.append(draw_header)
+    if not bpy.app.background:
+        _box_handle = bpy.types.SpaceView3D.draw_handler_add(draw_collision_boxes, (), "WINDOW",
+                                                             "POST_VIEW")
 
 
 def unregister():
+    global _box_handle
+    if _box_handle is not None:
+        bpy.types.SpaceView3D.draw_handler_remove(_box_handle, "WINDOW")
+        _box_handle = None
     bpy.types.VIEW3D_HT_header.remove(draw_header)
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)

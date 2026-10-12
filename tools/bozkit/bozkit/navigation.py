@@ -191,6 +191,69 @@ class TileData:
                 yield poly, tuple(corners)
 
 
+def encode_tile(tile: TileData, user_id: int = 0, bv_nodes=None, bv_quant: float = 0.0) -> bytes:
+    """A BOZ Detour v7 tile from *tile* (the inverse of decode_tile). Off-mesh polygons must come
+    after the ground polygons. *bv_nodes* are (bmin3, bmax3, index) BV tree nodes (16 bytes each);
+    links are left empty for Detour to fill when the tile is added."""
+    bv_nodes = list(bv_nodes or [])
+    ground = sum(1 for poly in tile.polys if poly.kind == 0)
+    out = bytearray(_TILE_HEADER.pack(
+        struct.unpack('<i', NAVMESH_MAGIC)[0], 7, tile.x, tile.y, tile.layer, user_id,
+        len(tile.polys), len(tile.vertices), tile.max_link_count, len(tile.detail_meshes),
+        len(tile.detail_vertices), len(tile.detail_triangles), len(bv_nodes), len(tile.off_mesh),
+        ground, tile.walkable_height, tile.walkable_radius, tile.walkable_climb,
+        *tile.bmin, *tile.bmax, bv_quant))
+
+    def pad():
+        out.extend(bytes((-len(out)) & 3))
+
+    for vertex in tile.vertices:
+        out += struct.pack('<3f', *vertex)
+    pad()
+    for poly in tile.polys:
+        count = len(poly.vertices)
+        if count > 6:
+            raise ValueError('a Detour polygon has at most 6 vertices')
+        verts = list(poly.vertices) + [0] * (6 - count)
+        neis = list(poly.neighbours) + [0] * (6 - count)
+        out += _POLY.pack(0xffffffff, *verts, *neis, poly.flags, poly.extra, count,
+                          (poly.area & 0x3f) | (poly.kind << 6))
+    pad()
+    out += bytes(tile.max_link_count * 12)
+    pad()
+    for mesh in tile.detail_meshes:
+        out += struct.pack('<IIBBxx', *mesh)
+    pad()
+    for vertex in tile.detail_vertices:
+        out += struct.pack('<3f', *vertex)
+    pad()
+    for triangle in tile.detail_triangles:
+        out += struct.pack('<4B', *triangle)
+    pad()
+    for bmin, bmax, index in bv_nodes:
+        out += struct.pack('<3H3Hi', *bmin, *bmax, index)
+    pad()
+    for start, end, radius, extra, poly, flags, side, user in tile.off_mesh:
+        out += _OFF_MESH.pack(*start, *end, radius, extra, poly, flags, side, user)
+    return bytes(out)
+
+
+def decode_bv_nodes(data: bytes) -> list[tuple]:
+    """The tile's BV tree nodes: (bmin3, bmax3, index), and its quantisation factor."""
+    fields = _TILE_HEADER.unpack_from(data)
+    poly_count, vert_count, max_links = fields[6], fields[7], fields[8]
+    detail_count, detail_verts, detail_tris, bv_count = fields[9], fields[10], fields[11], fields[12]
+    p = _TILE_HEADER.size
+    for size in (vert_count * 12, poly_count * POLY_SIZE, max_links * 12, detail_count * 12,
+                 detail_verts * 12, detail_tris * 4):
+        p += (size + 3) & ~3
+    nodes = []
+    for index in range(bv_count):
+        values = struct.unpack_from('<3H3Hi', data, p + index * 16)
+        nodes.append((values[0:3], values[3:6], values[6]))
+    return nodes, fields[-1]
+
+
 def decode_tile(data: bytes) -> TileData:
     if not data.startswith(NAVMESH_MAGIC):
         raise ValueError('Detour tile is missing its DNAV header')

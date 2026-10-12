@@ -12,7 +12,8 @@ from pathlib import Path
 
 import bpy
 from bpy.app.handlers import persistent
-from bpy.props import BoolProperty, EnumProperty, IntProperty, PointerProperty, StringProperty
+from bpy.props import (BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty,
+                       StringProperty)
 from bpy.types import Operator, Panel, PropertyGroup
 
 try:
@@ -29,14 +30,23 @@ COLLISION_ITEMS = [
      "and nobody walks on it (it cuts a hole in the navmesh)"),
     ("none", "None", "Decoration: no collision, and the navmesh ignores it"),
 ]
-ROLE_ITEMS = [("mesh", "Level mesh", "Geometry the level is built from, in place"),
-              ("prop", "Prop", "A project prop: objects sharing its mesh (Alt+D) are copies of it"),
-              ("model", "Game model", "A model from the game, copied into the level"),
-              ("entity", "Game entity", "A copy of one of the game's entities (perks, spawns, ...)"),
-              ("reference", "Base level", "Part of the inherited base level, shown read only"),
-              # New items go last: saved files store the item's position.
-              ("base", "Base level entity", "One of the base level's own entities: move, "
-               "rotate, scale, duplicate or delete it and change its settings")]
+# Saved files store an item's number, so every item keeps its number for good. mesh, prop,
+# entity and base are older roles: convert.migrate_roles turns them into the three kinds.
+ROLE_ITEMS = [("mesh", "Level mesh (old)", "", 0),
+              ("prop", "Prop (old)", "", 1),
+              ("model", "Model", "A mesh you see and bump into: a game model or your own", 2),
+              ("entity", "Game entity (old)", "", 3),
+              ("reference", "Base level", "Part of the inherited base level, shown read only", 4),
+              ("base", "Base level entity (old)", "", 5),
+              ("volume", "Volume", "An invisible box that sends script events", 6),
+              ("prefab", "Prefab", "One object made of parts, or one of the game's own "
+               "(perk machine, wall buy, door, spawn, ...)", 7)]
+VOLUME_ITEMS = [("trigger", "Trigger", "Sends \"enter\" and \"exit\" when players or zombies walk "
+                 "in and out", 0),
+                ("hit", "Hit", "Sends \"hit\" when it is shot", 1),
+                ("use", "Use", "Sends \"use\" when a player presses use at it", 2)]
+WHO_ITEMS = [("players", "Players", ""), ("zombies", "Zombies", ""),
+             ("anyone", "Anyone", "Players and zombies")]
 SHAPE_ITEMS = [("box", "Box", "Collide with its bounds (fast)"),
                ("mesh", "Mesh", "Collide with its triangles (exact)")]
 LOG_LINES = 3000
@@ -60,8 +70,21 @@ def current_project():
 # Properties
 
 
+def _part_name_changed(self, context):
+    obj = self.id_data
+    if convert.is_part(obj) and self.part_name:
+        wanted = obj.parent.name + convert.PART_SEPARATOR + self.part_name
+        if obj.name != wanted:
+            obj.name = wanted
+
+
+def _volume_changed(self, context):
+    if self.role == "volume":
+        convert.colour_volume(self.id_data)
+
+
 class BOZ_ObjectSettings(PropertyGroup):
-    role: EnumProperty(name="Role", items=ROLE_ITEMS, default="mesh")
+    role: EnumProperty(name="Kind", items=ROLE_ITEMS, default="model")
     collision: EnumProperty(name="Collision", items=COLLISION_ITEMS, default="floor",
                             description="How players and zombies treat this mesh in the game")
     double_sided: BoolProperty(name="Double-sided", default=False,
@@ -70,7 +93,38 @@ class BOZ_ObjectSettings(PropertyGroup):
                            "game model (group#0xhash) this places")
     group: StringProperty(name="Group", description="The game group holding the entity (empty: "
                           "the base level)")
-    shape: EnumProperty(name="Shape", items=SHAPE_ITEMS, default="box")
+    shape: EnumProperty(name="Shape", items=SHAPE_ITEMS, default="mesh")
+    padding: FloatProperty(name="Box padding (cm)", default=0.0, min=0.0, max=500.0, step=100,
+                           precision=1, description="How far the collision box (and the area it "
+                           "blocks) reaches past the model on every side")
+    block_margin: FloatProperty(name="Blocking margin (cm)", default=10.0, min=0.0, max=500.0,
+                                step=100, precision=1,
+                                description="The gap between it and a player who walks up to it: "
+                                "0 lets their body touch its collision; more keeps them further "
+                                "away (the player's own radius is added for you)")
+    original: BoolProperty(name="From the original map", default=False,
+                           description="One of the inherited base level's own entities")
+    part_name: StringProperty(name="Part name", description="Its name inside its prefab "
+                              "(scripts: self:part(\"<name>\")); copies keep it",
+                              update=_part_name_changed)
+    start_visible: BoolProperty(name="Visible", default=True,
+                                description="Off: the level starts with it hidden")
+    start_collision: BoolProperty(name="Collision", default=True,
+                                  description="Off: players, zombies and bullets pass through it "
+                                  "until a script switches it on")
+    blocks: BoolProperty(name="Blocks the walkable area", default=False,
+                         description="Zombies and players cannot walk through its spot until a "
+                         "script opens it (open_navmesh())")
+    script: StringProperty(name="Script", description="Its Lua script, in the project's scripts "
+                           "folder (prefabs/<Name>.lua)")
+    volume: EnumProperty(name="Volume", items=VOLUME_ITEMS, default="trigger",
+                         update=_volume_changed)
+    who: EnumProperty(name="Set off by", items=WHO_ITEMS, default="players")
+    once: BoolProperty(name="Only once", default=False,
+                       description="Sends its event the first time only")
+    prompt: StringProperty(name="Prompt", description="What players see when they can use it")
+    cost: IntProperty(name="Cost", default=0, min=0, max=100000,
+                      description="Points it takes to use (0: free)")
 
 
 class BOZ_SceneSettings(PropertyGroup):
@@ -174,14 +228,21 @@ def on_load(_dummy):
         scene = bpy.context.scene
         view = scene.view_settings
         view.view_transform, view.look = "Standard", "None"   # the game's colours
+        migrated = convert.migrate_roles(scene)
+        if migrated:
+            append_log(f"sdk   {migrated} objects now use models, volumes and prefabs")
+        convert.migrate_volumes(scene)
+        convert.unwrap_single_prefabs(scene)
+        convert.tidy_collections(scene)
         convert.show_game_models(scene)
         if scene.boz.inherit and "boz_base_entities" not in scene:
             # Maps made before the base level's entities could be edited.
             count = convert.make_base_editable(scene, scene.boz.base)
             scene.boz_show_markers = True
             append_log(f"sdk   {count} of {scene.boz.base}'s entities can be edited now")
-        from . import palette
+        from . import palette, prefab_library
         palette.show_palette()
+        prefab_library.rebuild(project.root)   # My prefabs: this project's prefabs
         return
     blend = project.root / "map.blend"
     if blend.exists() or bpy.context.scene.objects:  # both startup handlers run; build once
@@ -205,8 +266,26 @@ def _first_save(blend: Path):
     return None
 
 
+_syncing = {"busy": False}
+
+
+@persistent
+def on_depsgraph(scene, _depsgraph=None):
+    """Keep prefab parts named '<Prefab> › <Part>' as prefabs and parts are renamed."""
+    if _syncing["busy"]:
+        return
+    _syncing["busy"] = True
+    try:
+        convert.sync_part_names(scene)
+    finally:
+        _syncing["busy"] = False
+
+
 @persistent
 def on_save(_dummy):
+    from . import objects
+    objects.save_scripts()                 # scripts edited in the Scripts tab go to their files
+    objects.sync_all(bpy.context.scene)   # script properties follow edits to the scripts
     problems = write_source(bpy.context.scene)
     if problems:
         append_log([f"check {message}" for message, _ in problems])
@@ -318,21 +397,21 @@ class BOZ_OT_check(Operator):
         return {"FINISHED"}
 
 
-class BOZ_OT_make_prop(Operator):
-    bl_idname = "boz.make_prop"
-    bl_label = "Make prop"
-    bl_description = ("Give the selected object its own editable mesh and textures: a level mesh "
-                      "or game model becomes a project prop; a game entity keeps working as "
-                      "before and draws your mesh")
+class BOZ_OT_make_editable(Operator):
+    bl_idname = "boz.make_editable"
+    bl_label = "Make editable"
+    bl_description = ("Give it its own editable mesh and textures: a game model becomes a model of "
+                      "your own; a game prefab keeps working as before and draws your mesh")
     bl_options = {"REGISTER", "UNDO"}
 
-    name: StringProperty(name="Prop name")
+    name: StringProperty(name="Mesh name")
 
     @classmethod
     def poll(cls, context):
         obj = context.object
-        return obj is not None and obj.type == "MESH" and obj.boz.role not in ("prop", "reference") \
-            and not convert.is_marker(obj)
+        return obj is not None and obj.type == "MESH" and not convert.is_marker(obj) and (
+            obj.boz.role == "model" and obj.boz.source or obj.boz.role == "prefab" and obj.boz.source
+            and not obj.get("boz_custom_model"))
 
     def invoke(self, context, event):
         self.name = convert.game_name(context.object.name)
@@ -340,35 +419,35 @@ class BOZ_OT_make_prop(Operator):
 
     def execute(self, context):
         obj = context.object
-        entity = obj.boz.role in ("entity", "base")
         try:
-            convert.make_prop(obj, self.name or obj.name)
+            convert.make_editable(obj, self.name or obj.name)
         except ValueError as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
-        self.report({"INFO"}, f"{obj.name} draws your mesh now; edit it freely" if entity
-                    else f"{obj.name} is a prop; Alt+D places more copies")
+        self.report({"INFO"}, f"{obj.name} has its own mesh now; edit it freely (Alt+D makes "
+                              "copies that share it)")
         return {"FINISHED"}
 
 
 class BOZ_OT_game_model(Operator):
     bl_idname = "boz.use_game_model"
     bl_label = "Use the game's model"
-    bl_description = "Draw this entity with the game's own model again (drops your edited mesh)"
+    bl_description = "Draw it with the game's own model again (drops your mesh or chosen model)"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
         obj = context.object
-        return obj is not None and obj.get("boz_custom_model")
+        return obj is not None and (obj.get("boz_custom_model") or obj.get("boz_game_model"))
 
     def execute(self, context):
         from . import game
         obj = context.object
         placement = world.Placement(obj.boz.source, (0.0, 0.0, 0.0), group=obj.boz.group)
         data = game.entity_mesh(context.scene.boz.base, placement.hash, obj.boz.group)
-        if "boz_custom_model" in obj:
-            del obj["boz_custom_model"]
+        for key in ("boz_custom_model", "boz_game_model"):
+            if key in obj:
+                del obj[key]
         if data is not None:
             convert.show_mesh(obj, data)
         else:   # it draws nothing of its own: back to its marker
@@ -551,6 +630,22 @@ class BOZ_OT_chalk_image(Operator):
         return {"FINISHED"}
 
 
+class BOZ_OT_texture_remove(Operator):
+    bl_idname = "boz.texture_remove"
+    bl_label = "Remove texture"
+    bl_description = "Take this texture off: the slot shows the default grid texture"
+    bl_options = {"REGISTER", "UNDO"}
+
+    slot: IntProperty()
+
+    def execute(self, context):
+        from . import shapes
+        obj = context.object
+        if self.slot < len(obj.material_slots):
+            obj.material_slots[self.slot].material = shapes.default_material()
+        return {"FINISHED"}
+
+
 class BOZ_PT_textures(Panel):
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
@@ -565,9 +660,10 @@ class BOZ_PT_textures(Panel):
     def draw(self, context):
         layout = self.layout
         obj = context.object
-        if obj.boz.role in ("entity", "base", "model", "reference") and not obj.get("boz_custom_model"):
-            layout.label(text="The game's own textures; Edit its model or Make prop to change",
-                         icon="INFO")
+        editable = (obj.boz.role == "model" and not obj.boz.source) or obj.get("boz_custom_model")
+        if not editable:
+            layout.label(text="The game's own textures: Make editable to change them", icon="INFO")
+            layout.operator(BOZ_OT_make_editable.bl_idname, icon="MESH_DATA")
         if not obj.material_slots:
             layout.operator(BOZ_OT_texture_game.bl_idname, text="Texture from the game",
                             icon="TEXTURE").slot = 0
@@ -582,13 +678,13 @@ class BOZ_PT_textures(Panel):
             column.label(text=image.name if image else "(no texture)")
             if image is not None:
                 column.label(text=f"{image.size[0]} x {image.size[1]}")
-            editable = obj.boz.role in ("mesh", "prop") or obj.get("boz_custom_model")
             buttons = column.row(align=True)
             buttons.enabled = bool(editable)
             buttons.operator(BOZ_OT_texture_file.bl_idname, text="Replace…",
                              icon="FILEBROWSER").slot = index
             buttons.operator(BOZ_OT_texture_game.bl_idname, text="From game…",
                              icon="TEXTURE").slot = index
+            buttons.operator(BOZ_OT_texture_remove.bl_idname, text="", icon="X").slot = index
 
 
 class BOZ_OT_show_game_models(Operator):
@@ -621,7 +717,7 @@ class BOZ_OT_open_project_folder(Operator):
         root = project_root()
         if root is None:
             return {"CANCELLED"}
-        bpy.ops.wm.path_open(filepath=str(root))
+        sdkhome.open_path(root)
         return {"FINISHED"}
 
 
@@ -645,7 +741,7 @@ class BOZ_OT_reset_base(Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.object is not None and context.object.boz.role == "base"
+        return context.object is not None and context.object.boz.original
 
     def execute(self, context):
         convert.reset_base(context.object)
@@ -653,90 +749,6 @@ class BOZ_OT_reset_base(Operator):
 
 
 # Panels
-
-
-class BOZ_PT_object(Panel):
-    bl_space_type = "PROPERTIES"
-    bl_region_type = "WINDOW"
-    bl_context = "object"
-    bl_label = "Game"
-    bl_order = 0
-
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-        if obj is None:
-            return
-        settings = obj.boz
-        layout.prop(settings, "role")
-        if settings.role in ("mesh", "prop", "model"):
-            layout.prop(settings, "collision", expand=True)
-        if settings.role in ("prop", "model") and settings.collision != "none":
-            layout.prop(settings, "shape", expand=True)
-        if settings.role in ("mesh", "prop"):
-            layout.prop(settings, "double_sided")
-        if settings.role == "mesh" and obj.type == "MESH":
-            layout.label(text=f"In the game: {mesh_name(obj)}")
-        elif settings.role == "prop" and obj.type == "MESH":
-            users = obj.data.users
-            layout.label(text=f"Prop {mesh_name(obj)}: {users} placed" if users > 1
-                         else f"Prop {mesh_name(obj)} (Alt+D places copies)")
-        elif settings.role == "reference":
-            layout.label(text="Part of the base level (read only)", icon="LOCKED")
-        if settings.role == "base":
-            box = layout.box()
-            box.label(text=obj.get("boz_description") or "One of the base level's entities",
-                      icon="WORLD")
-            changed, moved = convert._base_changes(obj)
-            box.label(text="Changed in this map" if changed or moved or obj.get("boz_custom_model")
-                      else "As the level has it")
-            box.label(text="Delete (X) takes it out of the map; Shift+D adds a copy")
-            box.operator(BOZ_OT_reset_base.bl_idname, icon="LOOP_BACK")
-        if settings.role in ("entity", "base") and obj.get("boz_piece"):
-            try:
-                piece = toolkit.piece(obj["boz_piece"])
-            except KeyError:
-                piece = None
-            if piece is not None:
-                layout.label(text=piece.label, icon="TOOL_SETTINGS")
-                for setting in piece.settings:
-                    name = convert.FIELD_PREFIX + setting.key
-                    if setting.kind == "weapon":
-                        row = layout.row()
-                        row.label(text=f"{setting.label}: {obj.get(name, '?')}")
-                        row.operator(BOZ_OT_choose_weapon.bl_idname, text="Choose…")
-                    elif setting.kind == "chalk" and settings.role == "base":
-                        continue   # shipped chalk is painted on the room's wall
-                    elif setting.kind == "chalk":
-                        mode = str(obj.get(name, ""))
-                        shown = {"": "Automatic", "none": "None"}.get(mode, mode)
-                        layout.label(text=f"Chalk: {shown}")
-                        row = layout.row(align=True)
-                        row.operator(BOZ_OT_chalk.bl_idname, text="Automatic",
-                                     depress=mode == "").mode = ""
-                        row.operator(BOZ_OT_chalk.bl_idname, text="None",
-                                     depress=mode == "none").mode = "none"
-                        row.operator(BOZ_OT_chalk_image.bl_idname, text="Image…",
-                                     depress=mode not in ("", "none"))
-                    elif name in obj:
-                        layout.prop(obj, f'["{name}"]', text=setting.label)
-        if settings.role == "base" and obj.get(convert.FIELD_PREFIX + toolkit.WEAPON_FIELD):
-            layout.label(text="Its chalk drawing is painted on the wall and stays", icon="INFO")
-        if settings.role in ("model", "entity"):
-            layout.prop(settings, "source")
-            if settings.role == "entity":
-                layout.prop(settings, "group")
-        if settings.role in ("entity", "base") and obj.get("boz_custom_model"):
-            box = layout.box()
-            box.label(text="Draws your edited mesh; works as before", icon="MESH_DATA")
-            box.label(text=f"Its mesh: {mesh_name(obj)}")
-            box.operator(BOZ_OT_game_model.bl_idname, icon="LOOP_BACK")
-        elif convert.is_marker(obj):
-            pass
-        elif obj.type == "MESH" and settings.role in ("entity", "base"):
-            layout.operator(BOZ_OT_make_prop.bl_idname, text="Edit its model", icon="MESH_CUBE")
-        elif obj.type == "MESH" and settings.role not in ("prop", "reference"):
-            layout.operator(BOZ_OT_make_prop.bl_idname, icon="MESH_CUBE")
 
 
 class BOZ_PT_problems(Panel):
@@ -777,12 +789,12 @@ class BOZ_PT_project(Panel):
 
 
 CLASSES = [BOZ_ObjectSettings, BOZ_SceneSettings, BOZ_OT_build_and_run, BOZ_OT_build_settings,
-           BOZ_OT_select_problem, BOZ_OT_check, BOZ_OT_make_prop, BOZ_OT_game_model,
+           BOZ_OT_select_problem, BOZ_OT_check, BOZ_OT_make_editable, BOZ_OT_game_model,
            BOZ_OT_texture_file, BOZ_OT_texture_game, BOZ_OT_choose_weapon, BOZ_OT_chalk,
            BOZ_OT_chalk_image, BOZ_PT_textures,
            BOZ_OT_show_game_models,
            BOZ_OT_clear_log, BOZ_OT_open_project_folder,
-           BOZ_OT_back_to_launcher, BOZ_OT_reset_base, BOZ_PT_object, BOZ_PT_problems, BOZ_PT_project]
+           BOZ_OT_back_to_launcher, BOZ_OT_reset_base, BOZ_OT_texture_remove, BOZ_PT_problems, BOZ_PT_project]
 
 
 def register():
@@ -793,6 +805,7 @@ def register():
     bpy.app.handlers.load_post.append(on_load)
     bpy.app.handlers.load_factory_startup_post.append(on_load)
     bpy.app.handlers.save_post.append(on_save)
+    bpy.app.handlers.depsgraph_update_post.append(on_depsgraph)
     if not bpy.app.background:
         bpy.app.timers.register(poll_game_log, first_interval=1.0, persistent=True)
         bpy.app.timers.register(tabs.refresh_windows, first_interval=0.5, persistent=True)
@@ -804,7 +817,8 @@ def unregister():
             bpy.app.timers.unregister(timer)
     for handlers, function in ((bpy.app.handlers.load_post, on_load),
                                (bpy.app.handlers.load_factory_startup_post, on_load),
-                               (bpy.app.handlers.save_post, on_save)):
+                               (bpy.app.handlers.save_post, on_save),
+                               (bpy.app.handlers.depsgraph_update_post, on_depsgraph)):
         if function in handlers:
             handlers.remove(function)
     del bpy.types.Scene.boz

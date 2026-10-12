@@ -70,16 +70,16 @@ PERKS = (('juggernog', 'Juggernog', 'jugg'), ('quick_revive', 'Quick Revive', 'r
          ('deadshot', 'Deadshot', 'deadshot'))
 
 PIECES = [
-    *(Piece(key, label, 'Toolkit/Perk machines', 'perk', (word,),
+    *(Piece(key, label, 'Game prefabs/Machines', 'perk', (word,),
             settings=(_cost('CPerk', 'm_perkSinglePCost'),
                       Setting('CPerk.m_perkMultiPCost', 'Co-op cost', 'int',
                               'Points it costs in a co-op game', 1500),
                       _power('CPerk'), _reach(300.0)),
             description=f'{label} perk machine') for key, label, word in PERKS),
-    Piece('pack_a_punch', 'Pack-a-Punch', 'Toolkit/Machines', 'pack_a_punch',
+    Piece('pack_a_punch', 'Pack-a-Punch', 'Game prefabs/Machines', 'pack_a_punch',
           settings=(_cost('CPackAPunch'), _power('CPackAPunch'), _reach(300.0)),
           description='Upgrades the weapon a player puts in'),
-    Piece('mystery_box', 'Mystery box', 'Toolkit/Machines', 'mystery_box',
+    Piece('mystery_box', 'Mystery box', 'Game prefabs/Machines', 'mystery_box',
           settings=(_cost('CMysteryBox'),
                     Setting('CMysteryBox.m_FireSaleCost', 'Fire sale cost', 'int',
                             'Points it costs during a Fire Sale', 10),
@@ -88,12 +88,12 @@ PIECES = [
                     Setting('CMysteryBox.m_MaxWeapons', 'Uses before it moves: at most', 'int',
                             '', 10)),
           description='A mystery box location (the game picks the active one)'),
-    Piece('power_switch', 'Power switch', 'Toolkit/Machines', 'power', ('power',),
+    Piece('power_switch', 'Power switch', 'Game prefabs/Machines', 'power', ('power',),
           settings=(Setting('CPowerSwitch.StartEnabled', 'Usable from the start', 'bool',
                             'Off: players cannot pull it until a script or the game enables it '
                             '(Ascension\'s launch switch)', True),),
           description='Turns on everything that needs power'),
-    Piece('wall_buy', 'Wall buy', 'Toolkit/Buying', 'wall_buy',
+    Piece('wall_buy', 'Wall buy', 'Game prefabs/Buying', 'wall_buy',
           settings=(Setting(WEAPON_FIELD, 'Weapon', 'weapon', 'The weapon players buy here'),
                     _cost('CWeaponChalkOutline'),
                     Setting('CWeaponChalkOutline.m_ammoCost', 'Ammo cost', 'int',
@@ -104,7 +104,7 @@ PIECES = [
                             'The chalk drawing on the wall: the weapon\'s own, one drawn from its '
                             'model, your image, or none')),
           description='Where players buy a weapon (any weapon of the level)'),
-    Piece('trap', 'Trap', 'Toolkit/Defence', 'trap', exclude=('CTrapSwitch',),
+    Piece('trap', 'Trap', 'Game prefabs/Defence', 'trap', exclude=('CTrapSwitch',),
           settings=(Setting('CTrap.m_ActivePeriodMS', 'Runs for (s)', 'seconds',
                             'How long it stays on once bought'),
                     Setting('CTrap.m_CoolDownPeriodMS', 'Cool-down (s)', 'seconds',
@@ -112,12 +112,12 @@ PIECES = [
                     Setting('CTrap.m_PlayerDamage', 'Player damage', 'int',
                             'Damage to players who walk into it')),
           description='A trap a trap switch turns on'),
-    Piece('trap_switch', 'Trap switch', 'Toolkit/Defence', 'trap', require=('CTrapSwitch',),
+    Piece('trap_switch', 'Trap switch', 'Game prefabs/Defence', 'trap', require=('CTrapSwitch',),
           settings=(_cost('CTrapSwitch'), _power('CTrapSwitch'), _reach(260.0)),
           description='The switch players pay to run a trap'),
-    Piece('player_spawn', 'Player spawn', 'Toolkit/Spawns', 'spawn', ('spawn_player',),
+    Piece('player_spawn', 'Player spawn', 'Level markers/Spawns', 'spawn', ('spawn_player',),
           description='Where a player starts (up to four)'),
-    *(Piece(key, label, 'Toolkit/Spawns', 'spawn', spawn_type=kind,
+    *(Piece(key, label, 'Level markers/Spawns', 'spawn', spawn_type=kind,
             settings=(Setting('CSpawnPoint.m_StartActive', 'Active from the start', 'bool',
                               'On: used from the first round wherever players are. Off: used '
                               'once players reach its area', False),),
@@ -128,12 +128,9 @@ PIECES = [
           ('zombie_crawler', 'Zombie spawn: from above', 'hole',
            'Zombies drop in from a hole here'),
           ('dog_spawn', 'Dog spawn', 'LIGHTNING', 'Hellhounds appear here in dog rounds'))),
-    Piece('jump_point', 'Jump point', 'Toolkit/Logic', 'jump',
+    Piece('jump_point', 'Jump point', 'Level markers/Jump points', 'jump',
           description='Where zombies jump across a gap'),
-    Piece('interact_point', 'Interact point', 'Toolkit/Logic', 'interact', model=False,
-          settings=(_reach(),),
-          description='A point players use with the action button'),
-    Piece('sound_emitter', 'Sound emitter', 'Toolkit/Logic', 'sound', model=False,
+    Piece('sound_emitter', 'Sound emitter', 'Level markers/Sound', 'sound', model=False,
           settings=(Setting('CSoundEmitter.soundName', 'Sound', 'name',
                             'The name of the sound it plays'),
                     Setting('CSoundEmitter.StartEnabled', 'Plays from the start', 'bool',
@@ -143,13 +140,13 @@ PIECES = [
 BY_KEY = {piece.key: piece for piece in PIECES}
 WALL_BUY_PREFIX = 'wall_'   # older maps: one piece per shipped wall buy
 VARIANTS = {   # pieces with one design per distinct model in the game's levels
-    'door': ('Door', 'Toolkit/Doors',
+    'door': ('Door', 'Game prefabs/Doors',
              (_cost('CDoor'), _power('CDoor'),
               Setting('CDoor.m_HideAfterActivate', 'Disappears when opened', 'bool',
                       'On: the model vanishes once bought (debris). Off: it plays its opening '
                       'animation and stays', False)),
              'A door or debris players pay to open'),
-    'barricade': ('Window barricade', 'Toolkit/Barricades',
+    'barricade': ('Window barricade', 'Game prefabs/Barricades',
                   (Setting('CBarricade.m_StartBroken', 'Starts broken', 'bool',
                            'On: the boards start torn down', False),),
                   'Boards zombies tear down and players rebuild'),
@@ -163,7 +160,7 @@ WALL_BUYS = ('Olympia', 'M14', 'M16', 'MP40', 'MP5K', 'PM63', 'MPL', 'AK74u', 'A
 def wall_buy_piece(key: str) -> Piece:
     weapon = key[len(WALL_BUY_PREFIX):]
     label = next((name for name in WALL_BUYS if name.lower() == weapon), weapon)
-    return Piece(key, f'Wall buy: {label}', 'Toolkit/Wall buys', 'wall_buy',
+    return Piece(key, f'Wall buy: {label}', 'Game prefabs/Buying', 'wall_buy',
                  (f'{weapon}_wallweapon',), settings=(_cost('CWeaponChalkOutline'),),
                  description=f'A chalk outline where players buy the {label}')
 

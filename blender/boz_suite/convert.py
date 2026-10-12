@@ -1,18 +1,20 @@
-"""The project's world (bozkit.world) and the Blender scene, both ways.
+"""The project's world (bozkit.world format 3) and the Blender scene, both ways.
 
-Every object has a role (object.boz.role):
+Every object is one of three kinds (object.boz.role):
 
-- **mesh**: level geometry; written in world space with its collision setting.
-- **prop**: a project prop instance. Objects that share mesh data (Alt+D) are instances of one
-  prop; the mesh is written in its own space, and each object places it.
-- **model**: an instance of a game model from the asset library (``group#0xhash``).
-- **entity**: a copy of a game entity (perks, spawns, the power switch, ...), shown with the
-  model the game draws for it when it has one.
-- **base**: one of the base level's own entities in a map that inherits it (perks, doors, wall
-  buys, spawns, ...). Moved, edited or duplicated ones are written as placements of the base
-  entity; deleted ones go in the world's ``removed`` list.
-- **reference**: the rest of the base level (rooms, their models, decals), shown read only; the
-  game gets the level itself, so these are never written.
+- **model**: a mesh you see and bump into. A game model (boz.source = '<group>#0x<hash>') or
+  your own mesh (boz.source empty; objects sharing mesh data, made with Alt+D, share one mesh).
+- **volume**: an invisible box that sends script events (boz.volume: trigger, hit, use). Its
+  size is 100 cm times its scale. It is an Empty showing its kind's coloured box (a collection
+  instance), so the outliner gives volumes their own icon.
+- **prefab**: either yours, an Empty whose children are its parts (models, volumes, prefabs), or
+  a game prefab: one of the game's entities (boz.source: entity name or 0x hash), shown with the
+  model the game draws for it or a coloured marker cube. boz.original marks the inherited base
+  level's own entities: edited ones are written as changes, deleted ones go in ``removed``.
+
+**reference** objects are the rest of the base level (rooms, their models, decals), read only.
+An object's name is its name in the game and in scripts; a prefab part's is
+'<Prefab>.<Part>' (boz.part_name, kept when copies are made).
 
 One Blender unit is one game centimetre; Blender's Z is the game's Y.
 """
@@ -43,8 +45,67 @@ def game_name(text: str) -> str:
 
 
 def mesh_name(obj) -> str:
-    uses_data = obj.boz.role == "prop" or obj.get("boz_custom_model")
-    return game_name(obj.data.name if uses_data and obj.data else obj.name)
+    """The world's name for an object's own mesh (from the mesh data: copies share it)."""
+    return game_name(obj.data.name if obj.data else obj.name)
+
+
+def object_name(obj) -> str:
+    """The name scripts and the game know an object by (letters, digits and _)."""
+    if obj.boz.role == "prefab" and obj.boz.original and obj.get("boz_entity_name"):
+        return str(obj["boz_entity_name"])
+    text = obj.boz.part_name if is_part(obj) and obj.boz.part_name else obj.name
+    return clean_name(text)
+
+
+def clean_name(text: str) -> str:
+    text = "".join(c if c.isalnum() and c.isascii() else "_" for c in text).strip("_")
+    text = "_".join(part for part in text.split("_") if part) or "object"
+    return ("obj_" + text if not text[0].isalpha() else text)[:48]
+
+
+def is_prefab_group(obj) -> bool:
+    """One of your prefabs (an Empty holding parts), not a game prefab."""
+    return obj is not None and obj.boz.role == "prefab" and not obj.boz.source and obj.type == "EMPTY"
+
+
+def is_part(obj) -> bool:
+    return is_prefab_group(obj.parent)
+
+
+PART_SEPARATOR = " › "   # a part's object is "<Prefab> › <Part>": outliner searches find it
+
+
+def _without_suffix(text: str) -> str:
+    """'Door.001' -> 'Door' (Blender's suffix for a name already taken)."""
+    head, dot, tail = text.rpartition(".")
+    return head if dot and tail.isdigit() and len(tail) == 3 else text
+
+
+def sync_part_names(scene) -> int:
+    """Name each prefab part's object '<Prefab> › <Part>', following the prefab's name and the
+    part name; an object renamed in the outliner (keeping the prefix) sets its part name.
+    Returns how many objects were renamed."""
+    renamed = 0
+    for obj in list(scene.objects):
+        if not is_part(obj):
+            continue
+        prefix = obj.parent.name + PART_SEPARATOR
+        if obj.name.startswith(prefix):
+            part = clean_name(_without_suffix(obj.name[len(prefix):]))
+            if obj.boz.part_name != part:
+                obj.boz.part_name = part
+            continue
+        part = obj.boz.part_name or clean_name(_without_suffix(obj.name.split(PART_SEPARATOR)[-1]))
+        obj.boz.part_name = part
+        obj.name = prefix + part
+        renamed += 1
+    return renamed
+
+
+def strip_part_name(obj) -> None:
+    """A part leaving its prefab goes back to its own name."""
+    if PART_SEPARATOR in obj.name:
+        obj.name = obj.boz.part_name or _without_suffix(obj.name.split(PART_SEPARATOR)[-1])
 
 
 # Images and materials
@@ -139,16 +200,95 @@ def _mesh_data(mesh: "world.Mesh", source: Path, data_name: str):
 FIELD_PREFIX = "boz_f:"   # object custom properties holding a piece's settings
 
 
-def _place(obj, item, scene) -> None:
-    """Position, rotation and scale of a world instance or entity, in Blender's axes."""
-    from mathutils import Quaternion
+MAP_COLLECTION = "Map"
 
-    x, y, z, w = blender_scene.rotation_to_blender(item.quaternion())
+
+def map_collection(scene):
+    """The collection every object of the map lives in (the base level has its own)."""
+    collection = bpy.data.collections.get(MAP_COLLECTION)
+    if collection is None:
+        collection = bpy.data.collections.new(MAP_COLLECTION)
+    if collection.name not in scene.collection.children:
+        scene.collection.children.link(collection)
+    return collection
+
+
+def move_to(obj, collection) -> None:
+    """Make *collection* obj's only collection (and its parts', for a prefab)."""
+    if collection not in obj.users_collection:
+        collection.objects.link(obj)
+    for other in list(obj.users_collection):
+        if other is not collection:
+            other.objects.unlink(obj)
+    for child in obj.children:
+        if child.boz.role in ("model", "volume", "prefab") or child.get("boz_chalk"):
+            move_to(child, collection)
+
+
+def tidy_collections(scene) -> int:
+    """Put map objects lying loose (in the scene itself or Blender's default "Collection") into
+    the Map collection, so prefabs and their parts sit together in the outliner."""
+    loose = {scene.collection}
+    default = bpy.data.collections.get("Collection")
+    if default is not None:
+        loose.add(default)
+    moved = 0
+    for obj in list(scene.objects):
+        if obj.parent is not None or obj.boz.role not in ("model", "volume", "prefab") \
+                or obj.boz.original:
+            continue
+        if any(c in loose for c in obj.users_collection):
+            move_to(obj, map_collection(scene))
+            moved += 1
+    if default is not None and not default.objects and not default.children:
+        bpy.data.collections.remove(default)
+    return moved
+
+
+def unwrap_single_prefabs(scene) -> int:
+    """Remove prefabs that only hold one other prefab and add nothing (no script, no properties):
+    left behind when Make prefab was pressed twice."""
+    from mathutils import Matrix
+
+    removed = 0
+    for obj in list(scene.objects):
+        if not is_prefab_group(obj) or obj.boz.script:
+            continue
+        children = [c for c in obj.children if c.boz.role in ("model", "volume", "prefab")]
+        if len(children) != 1 or not is_prefab_group(children[0]) or len(obj.children) != 1:
+            continue
+        inner, outer = children[0], obj.parent
+        matrix = world_matrix(inner)
+        inner.parent = outer
+        inner.matrix_parent_inverse = Matrix.Identity(4)
+        inner.matrix_basis = (world_matrix(outer).inverted() @ matrix) if outer else matrix
+        if not is_prefab_group(outer):
+            inner.boz.part_name = ""
+        bpy.data.objects.remove(obj)
+        removed += 1
+    return removed
+
+
+def _place(obj, item, scene, parent=None) -> None:
+    """Position, rotation and scale of a world object (in its prefab's space when *parent*),
+    in Blender's axes; links it to the scene."""
+    from mathutils import Matrix, Quaternion
+
+    rotation = item.quaternion() if hasattr(item, "quaternion") else tuple(item.rotation)
+    x, y, z, w = blender_scene.rotation_to_blender(rotation)
     obj.location = blender_scene.to_blender(item.position)
     obj.rotation_mode = "QUATERNION"
     obj.rotation_quaternion = Quaternion((w, x, y, z))
-    obj.scale = blender_scene.scale_to_blender(item.scale)
-    scene.collection.objects.link(obj)
+    scale = getattr(item, "scale", None)
+    if isinstance(item, world.Volume):
+        scale = tuple(c / world.TRIGGER_SIZE for c in item.size)
+    obj.scale = blender_scene.scale_to_blender(scale or world.UNIT)
+    collection = parent.users_collection[0] if parent is not None and parent.users_collection \
+        else map_collection(scene)
+    collection.objects.link(obj)
+    if parent is not None:
+        obj.parent = parent
+        obj.matrix_parent_inverse = Matrix.Identity(4)
 
 
 def world_matrix(obj):
@@ -161,9 +301,13 @@ def world_matrix(obj):
     return matrix
 
 
-def _transform(obj):
-    """(position, x/y/z/w rotation, scale) of an object in the game's axes."""
-    location, rotation, scale = world_matrix(obj).decompose()
+def _transform(obj, relative_to=None):
+    """(position, x/y/z/w rotation, scale) of an object in the game's axes: in the world, or in
+    *relative_to*'s space (a prefab part)."""
+    matrix = world_matrix(obj)
+    if relative_to is not None:
+        matrix = world_matrix(relative_to).inverted() @ matrix
+    location, rotation, scale = matrix.decompose()
     native = blender_scene.rotation_from_blender((rotation.x, rotation.y, rotation.z, rotation.w))
     return (tuple(blender_scene.from_blender(tuple(location))),
             tuple(round(c, 6) for c in native),
@@ -182,7 +326,7 @@ def refresh_chalk(obj, base: str) -> None:
         if child.get("boz_chalk"):
             bpy.data.objects.remove(child)
     weapon = obj.get(FIELD_PREFIX + toolkit.WEAPON_FIELD)
-    if obj.boz.role != "entity" or not weapon:
+    if obj.boz.role != "prefab" or obj.boz.original or not weapon:
         return
     from . import link
     root = link.project_root()
@@ -264,25 +408,30 @@ def show_mesh(obj, data) -> None:
         del obj["boz_kind"]   # a model now: not hidden with the markers
 
 
-def entity_object(entity: "world.Placement", base: str, scene, custom=None):
-    """An object for a game entity: its game model (or *custom*, a project prop's mesh), or a
-    coloured marker cube when it draws nothing."""
-    weapon = (entity.settings or entity.fields).get(toolkit.WEAPON_FIELD)
+def game_prefab_object(prefab: "world.Prefab", base: str, scene, parent=None, custom=None):
+    """An object for a game prefab: the model the game draws for it (or *custom*, mesh data of
+    your own, or the game model it was given), or a coloured marker cube when it draws nothing."""
+    weapon = (prefab.settings or prefab.fields).get(toolkit.WEAPON_FIELD)
     override = game.weapon_model(base, str(weapon)) if weapon else None
-    data = custom or game.entity_mesh(base, entity.hash, entity.group, override)
-    obj = bpy.data.objects.new(entity.source, data or marker_mesh())
+    drawn = game.model_mesh(*world.Instance((0, 0, 0), model=prefab.game).model_ref()) \
+        if prefab.game and custom is None else None
+    data = custom or drawn or game.entity_mesh(base, prefab.hash, prefab.group, override)
+    obj = bpy.data.objects.new(prefab.name or prefab.source, data or marker_mesh())
     if data is None:
-        colour_marker(obj, entity_category(base, entity.hash, entity.group))
-    obj.boz.role = "entity"
-    set_links(obj, base, entity.hash, entity.group)
-    obj.boz.source = entity.source
-    obj.boz.group = entity.group
+        colour_marker(obj, entity_category(base, prefab.hash, prefab.group))
+    obj.boz.role = "prefab"
+    set_links(obj, base, prefab.hash, prefab.group)
+    obj.boz.source = prefab.source
+    obj.boz.group = prefab.group
     if custom is not None:
         obj["boz_custom_model"] = True
-    if entity.piece:
-        obj["boz_piece"] = entity.piece
-    _field_props(obj, entity.settings or entity.fields)
-    _place(obj, entity, scene)
+    if drawn is not None:
+        obj["boz_game_model"] = prefab.game
+    if prefab.piece:
+        obj["boz_piece"] = prefab.piece
+    _field_props(obj, prefab.settings or prefab.fields)
+    _place(obj, prefab, scene, parent)
+    set_common(obj, prefab)
     if weapon:
         refresh_chalk(obj, base)
     return obj
@@ -304,19 +453,173 @@ def set_links(obj, base: str, source_hash: int, group_path: str = "") -> None:
         obj["boz_kind"] = obj.get("boz_kind") or ("entity" if is_marker(obj) else "placed_model")
 
 
-def model_object(instance: "world.Instance", scene):
-    path, model_hash = instance.model_ref()
-    data = game.model_mesh(path, model_hash)
-    obj = bpy.data.objects.new(f"model {model_hash:08x}", data)
+def model_object(model: "world.Model", scene, parent=None, data=None):
+    """An object for a model: a game model, or *data* (mesh data of your own)."""
+    if data is None and model.game:
+        path, model_hash = world.Instance((0, 0, 0), model=model.game).model_ref()
+        data = game.model_mesh(path, model_hash)
+    obj = bpy.data.objects.new(model.name, data)
     if data is None:
         obj.empty_display_type = "CUBE"
         obj.empty_display_size = 50.0
     obj.boz.role = "model"
-    obj.boz.source = instance.model
-    obj.boz.collision = instance.collision
-    obj.boz.shape = instance.shape
-    _place(obj, instance, scene)
+    obj.boz.source = model.game
+    obj.boz.collision = model.collision
+    obj.boz.shape = model.shape
+    obj.boz.padding = model.padding
+    obj.boz.block_margin = model.block_margin
+    _place(obj, model, scene, parent)
+    set_common(obj, model)
     return obj
+
+
+VOLUME_MESH = "BOZ Volume"
+VOLUME_COLOURS = {"trigger": (0.2, 0.85, 0.75), "hit": (1.0, 0.25, 0.15), "use": (0.35, 1.0, 0.3)}
+
+
+def volume_mesh():
+    """A 100 cm cube, centred: a volume's size is its scale."""
+    mesh = bpy.data.meshes.get(VOLUME_MESH)
+    if mesh is None:
+        h = world.TRIGGER_SIZE / 2
+        vertices = [(x, y, z) for x in (-h, h) for y in (-h, h) for z in (-h, h)]
+        faces = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
+        mesh = bpy.data.meshes.new(VOLUME_MESH)
+        mesh.from_pydata(vertices, [], faces)
+        mesh.update()
+        mesh.materials.append(None)
+    return mesh
+
+
+def volume_box(kind: str):
+    """The collection a volume of *kind* instances: one coloured, see-through box. It is not in
+    the scene, so it is drawn only where volumes show it."""
+    name = f"BOZ Volume: {kind}"
+    collection = bpy.data.collections.get(name)
+    if collection is not None and collection.objects:
+        return collection
+    collection = collection or bpy.data.collections.new(name)
+    colour = VOLUME_COLOURS.get(kind, VOLUME_COLOURS["trigger"])
+    box = bpy.data.objects.new(name, volume_mesh())
+    box.material_slots[0].link = "OBJECT"
+    box.material_slots[0].material = game._tools()._colour_material(name, colour, 0.25)
+    box.color = (*colour, 0.25)
+    box.show_wire = True
+    box.show_transparent = True
+    box.hide_render = True
+    box.hide_select = True
+    collection.objects.link(box)
+    return collection
+
+
+def colour_volume(obj) -> None:
+    if obj.type != "EMPTY":
+        return
+    obj.instance_type = "COLLECTION"
+    obj.instance_collection = volume_box(obj.boz.volume)
+    obj.empty_display_type = "CUBE"
+    obj.empty_display_size = world.TRIGGER_SIZE / 2
+    obj.hide_render = True
+
+
+def migrate_volumes(scene) -> int:
+    """Volumes saved as meshes become Empties showing their box (the outliner's volume icon)."""
+    changed = 0
+    for obj in list(scene.objects):
+        if obj.boz.role != "volume" or obj.type == "EMPTY":
+            continue
+        replacement = bpy.data.objects.new(obj.name, None)
+        for prop in obj.boz.bl_rna.properties:
+            key = prop.identifier
+            if key not in ("rna_type", "part_name") and not prop.is_readonly:
+                setattr(replacement.boz, key, getattr(obj.boz, key))
+        for key, value in obj.items():
+            replacement[key] = value
+        for collection in obj.users_collection:
+            collection.objects.link(replacement)
+        replacement.parent = obj.parent
+        replacement.matrix_parent_inverse = obj.matrix_parent_inverse.copy()
+        replacement.matrix_basis = obj.matrix_basis.copy()
+        part_name, name = obj.boz.part_name, obj.name
+        bpy.data.objects.remove(obj)
+        replacement.name = name
+        replacement.boz.part_name = part_name
+        colour_volume(replacement)
+        changed += 1
+    return changed
+
+
+def volume_object(volume: "world.Volume", scene, parent=None):
+    obj = bpy.data.objects.new(volume.name, None)
+    obj.boz.role = "volume"
+    obj.boz.volume = volume.kind_of
+    obj.boz.who = volume.who
+    obj.boz.once = volume.once
+    obj.boz.prompt = volume.prompt
+    obj.boz.cost = volume.cost
+    colour_volume(obj)
+    _place(obj, volume, scene, parent)
+    set_common(obj, volume)
+    return obj
+
+
+def prefab_object(prefab: "world.Prefab", base: str, scene, meshes: dict, parent=None):
+    """An object for a prefab: a game prefab, or an Empty holding its parts."""
+    if prefab.is_game:
+        return game_prefab_object(prefab, base, scene, parent,
+                                  meshes.get(prefab.mesh) if prefab.mesh else None)
+    obj = bpy.data.objects.new(prefab.name, None)
+    obj.empty_display_type = "CUBE"
+    obj.empty_display_size = 20.0
+    obj.show_name = True
+    obj.boz.role = "prefab"
+    if prefab.library:
+        obj["boz_library"] = prefab.library
+    _place(obj, prefab, scene, parent)
+    set_common(obj, prefab)
+    for part in prefab.parts:
+        child = object_for(part, base, scene, meshes, obj)
+        child.boz.part_name = part.name
+        child.name = obj.name + PART_SEPARATOR + part.name
+    return obj
+
+
+def object_for(item, base: str, scene, meshes: dict, parent=None):
+    if isinstance(item, world.Model):
+        data = meshes.get(item.mesh) if item.mesh else None
+        obj = model_object(item, scene, parent, data)
+        if data is not None:
+            obj.boz.double_sided = bool(data.get("boz_double_sided", False))
+        return obj
+    if isinstance(item, world.Volume):
+        return volume_object(item, scene, parent)
+    return prefab_object(item, base, scene, meshes, parent)
+
+
+PROPERTY_PREFIX = "boz_p:"   # object custom properties holding script property values
+
+
+def set_common(obj, item) -> None:
+    """Start state, script and script property values."""
+    start = {**world.START_DEFAULTS, **getattr(item, "start", {})}
+    obj.boz.start_visible = bool(start["visible"])
+    obj.boz.start_collision = bool(start["collision"])
+    obj.boz.blocks = bool(start["blocks"])
+    obj.boz.script = item.script
+    for key, value in item.properties.items():
+        obj[PROPERTY_PREFIX + key] = value
+
+
+def start_of(obj) -> dict:
+    start = {"visible": obj.boz.start_visible, "collision": obj.boz.start_collision,
+             "blocks": obj.boz.blocks and not obj.boz.original}
+    return {key: value for key, value in start.items() if world.START_DEFAULTS[key] != value}
+
+
+def properties_of(obj) -> dict:
+    return {name[len(PROPERTY_PREFIX):]: (value if isinstance(value, (bool, int, float, str))
+                                          else str(value))
+            for name, value in obj.items() if name.startswith(PROPERTY_PREFIX)}
 
 
 BASE_COLLECTION = "Base level (read only)"
@@ -398,9 +701,9 @@ def _base_specs(base: str) -> dict:
 
 
 def make_base_editable(scene, base: str) -> int:
-    """Give the base level's own entities (perks, doors, wall buys, spawns, triggers, ...) the
-    base role: selectable, with their settings, written when they change. Room geometry stays
-    read only. Entities without a model show as coloured cubes."""
+    """Make the base level's own entities (perks, doors, wall buys, spawns, triggers, ...) game
+    prefabs marked original: selectable, with their settings, written when they change. Room
+    geometry stays read only. Entities without a model show as coloured cubes."""
     specs = _base_specs(base)
     collection = bpy.data.collections.get(BASE_ENTITIES) or bpy.data.collections.new(BASE_ENTITIES)
     if collection.name not in scene.collection.children:
@@ -422,7 +725,8 @@ def make_base_editable(scene, base: str) -> int:
             continue
         if obj.get("boz_kind") == "entity":
             colour_marker(obj, category)
-        obj.boz.role = "base"
+        obj.boz.role = "prefab"
+        obj.boz.original = True
         obj.boz.source = source
         obj.boz.group = ""
         obj.hide_select = False
@@ -517,76 +821,64 @@ def _apply_base_edit(obj, entity: "world.Placement", custom=None) -> None:
 
 
 def world_to_scene(source_world: "world.World", source: Path, scene) -> None:
+    """Build the scene from a world: the base level (inherited maps), then every object."""
     scene.boz.base = source_world.base
     scene.boz.inherit = source_world.inherit
     if source_world.inherit:
         show_base_level(scene, source_world.base)
+    meshes = {mesh.name: _mesh_data(mesh, source, mesh.name) for mesh in source_world.meshes}
     for mesh in source_world.meshes:
-        obj = bpy.data.objects.new(mesh.name, _mesh_data(mesh, source, mesh.name))
-        obj.boz.role = "mesh"
-        obj.boz.collision = mesh.collision
-        obj.boz.double_sided = mesh.double_sided
-        scene.collection.objects.link(obj)
-    props = {prop.name: _mesh_data(prop, source, prop.name) for prop in source_world.props}
-    settings = {prop.name: prop for prop in source_world.props}
-    for instance in source_world.instances:
-        if instance.prop:
-            prop = settings[instance.prop]
-            obj = bpy.data.objects.new(prop.name, props[prop.name])
-            obj.boz.role = "prop"
-            obj.boz.collision = prop.collision
-            obj.boz.shape = prop.shape
-            obj.boz.double_sided = prop.double_sided
-            _place(obj, instance, scene)
-        else:
-            model_object(instance, scene)
+        meshes[mesh.name]["boz_double_sided"] = mesh.double_sided
     base_objects = defaultdict(list)
     for obj in scene.objects:
-        if obj.boz.role == "base":
+        if obj.boz.role == "prefab" and obj.boz.original:
             base_objects[obj.boz.source].append(obj)
-    for source in source_world.removed:
-        for obj in base_objects.pop(source, []):
+    for source_hash in source_world.removed:
+        for obj in base_objects.pop(source_hash, []):
             bpy.data.objects.remove(obj)
     edited = set()
-    for entity in source_world.entities:
-        custom = props.get(entity.prop) if entity.prop else None
-        source = f"0x{entity.hash:08x}"
-        if not entity.piece and not entity.group and base_objects.get(source):
-            obj = base_objects[source][0]
-            if source in edited:
-                # A second placement of the same base entity: a copy of it.
+    for item in source_world.objects():
+        if isinstance(item, world.Prefab) and item.source.startswith("0x") and not item.group \
+                and not item.piece and base_objects.get(item.source):
+            obj = base_objects[item.source][0]
+            if item.source in edited or not item.base:
+                # A copy of a base entity.
                 obj = obj.copy()
-                for collection in base_objects[source][0].users_collection:
+                obj.boz.original = False
+                for collection in base_objects[item.source][0].users_collection:
                     collection.objects.link(obj)
-            edited.add(source)
-            _apply_base_edit(obj, entity, custom)
+            edited.add(item.source)
+            _apply_base_edit(obj, item, meshes.get(item.mesh) if item.mesh else None)
+            set_common(obj, item)
+            if not obj.boz.original:
+                obj.name = item.name
             continue
-        entity_object(entity, source_world.base, scene, custom)
+        object_for(item, source_world.base, scene, meshes)
 
 
 def show_game_models(scene) -> int:
-    """Give entities and game models that are still empties their game mesh, or a coloured
+    """Give game prefabs and game models that are still empties their game mesh, or a coloured
     marker cube when they draw nothing (maps made before the editor could show them, or before
     the asset library was built)."""
     changed = 0
     if game.game_models() is None:
         return 0
     for obj in list(scene.objects):
-        if obj.type != "EMPTY" or obj.boz.role not in ("entity", "model") or not obj.boz.source:
+        if obj.type != "EMPTY" or obj.boz.role not in ("prefab", "model") or not obj.boz.source:
             continue
-        if obj.boz.role == "entity":
-            entity = world.Placement(obj.boz.source, (0.0, 0.0, 0.0), 0.0, obj.boz.group)
-            data = game.entity_mesh(scene.boz.base, entity.hash, obj.boz.group)
+        if obj.boz.role == "prefab":
+            item = world.Prefab(obj.name, source=obj.boz.source, group=obj.boz.group)
+            data = game.entity_mesh(scene.boz.base, item.hash, obj.boz.group)
         else:
             data = game.model_mesh(*world.Instance((0, 0, 0), model=obj.boz.source).model_ref())
             if data is None:
                 continue
         replacement = bpy.data.objects.new(obj.name, data or marker_mesh())
         if data is None:
-            colour_marker(replacement, entity_category(scene.boz.base, entity.hash, obj.boz.group)
-                          if obj.boz.role == "entity" else "entity")
+            colour_marker(replacement, entity_category(scene.boz.base, item.hash, obj.boz.group))
         replacement.matrix_world = world_matrix(obj)
-        for key in ("role", "source", "group", "collision", "shape", "double_sided"):
+        for key in ("role", "source", "group", "collision", "shape", "double_sided", "original",
+                    "start_visible", "start_collision", "blocks", "script", "part_name"):
             setattr(replacement.boz, key, getattr(obj.boz, key))
         for key, value in obj.items():
             replacement[key] = value
@@ -594,6 +886,26 @@ def show_game_models(scene) -> int:
             collection.objects.link(replacement)
         bpy.data.objects.remove(obj)
         replacement.name = replacement.name.split(".")[0]
+        changed += 1
+    return changed
+
+
+LEGACY_ROLES = {"mesh": "model", "prop": "model", "entity": "prefab", "base": "prefab"}
+
+
+def migrate_roles(scene) -> int:
+    """Scenes made before models, volumes and prefabs: level meshes and props become models of
+    your own, entities become game prefabs, base entities original game prefabs."""
+    changed = 0
+    for obj in scene.objects:
+        old = obj.boz.role
+        if old not in LEGACY_ROLES:
+            continue
+        if old in ("mesh", "prop"):
+            obj.boz.source = ""
+        if old == "base":
+            obj.boz.original = True
+        obj.boz.role = LEGACY_ROLES[old]
         changed += 1
     return changed
 
@@ -690,84 +1002,102 @@ def _field_props(obj, values: dict) -> None:
         obj[FIELD_PREFIX + key] = value
 
 
+TINY = 5.0   # centimetres: smaller is Blender's 2 cm default cube, not a game object
+
+
 def scene_to_world(scene, problems: list | None = None) -> "world.World":
     """The world the scene's objects describe. *problems* collects (message, object name)."""
     from mathutils import Matrix
 
     problems = problems if problems is not None else []
     result = world.World(scene.boz.base, inherit=scene.boz.inherit)
-    base_objects = defaultdict(list)
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    names: dict[str, str] = {}
-    props: dict[str, str] = {}   # mesh data name -> prop name
+    meshes: dict[str, str] = {}    # mesh data name -> world mesh name
+    taken: dict[str, str] = {}     # world mesh name -> mesh data name
+    base_objects = defaultdict(list)
 
-    def claim(name: str, owner: str, obj) -> bool:
-        if name in names and names[name] != owner:
-            problems.append((f"{obj.name}: its game name {name} is taken by {names[name]}",
-                             obj.name))
-            return False
-        names[name] = owner
-        return True
-
-    def prop_of(obj):
-        """The prop an object's mesh is (written once per mesh data)."""
-        name = props.get(obj.data.name)
+    def own_mesh(obj) -> str | None:
+        name = meshes.get(obj.data.name)
         if name is None:
             name = mesh_name(obj)
-            if not claim(name, f"mesh:{obj.data.name}", obj):
+            if name in taken and taken[name] != obj.data.name:
+                problems.append((f"{obj.name}: its mesh name {name} is taken by another mesh "
+                                 "(rename the mesh data)", obj.name))
                 return None
             mesh = _mesh_of(obj, depsgraph, Matrix.Identity(4), name, problems)
             if mesh is None:
                 return None
-            props[obj.data.name] = name
-            result.props.append(mesh)
+            mesh.double_sided = obj.boz.double_sided
+            taken[name] = obj.data.name
+            meshes[obj.data.name] = name
+            result.meshes.append(mesh)
         return name
 
-    for obj in scene.objects:
+    def build(obj, parent=None):
+        """The world object for a scene object (None for what is not written)."""
         role = obj.boz.role
-        if role in ("mesh", "prop") and obj.type == "MESH" and max(obj.dimensions) < 5.0:
-            problems.append((f"{obj.name} is only {max(obj.dimensions):.1f} cm across (one "
-                             "Blender unit is a centimetre): scale it up, or use Add → Game shapes",
-                             obj.name))
-            continue
-        if role == "mesh" and obj.type == "MESH":
-            name = mesh_name(obj)
-            if claim(name, obj.name, obj):
-                mesh = _mesh_of(obj, depsgraph, world_matrix(obj), name, problems)
-                if mesh is not None:
-                    result.meshes.append(mesh)
-        elif role == "prop" and obj.type == "MESH":
-            name = prop_of(obj)
-            if name is None:
-                continue
-            position, rotation, scale = _transform(obj)
-            result.instances.append(world.Instance(position, prop=name, rotation=rotation,
-                                                   scale=scale))
-        elif role == "model" and obj.boz.source:
-            position, rotation, scale = _transform(obj)
-            result.instances.append(world.Instance(position, model=obj.boz.source,
-                                                   collision=obj.boz.collision,
-                                                   shape=obj.boz.shape, rotation=rotation,
-                                                   scale=scale))
-        elif role == "entity" and obj.boz.source:
-            position, rotation, scale = _transform(obj)
-            custom = prop_of(obj) if obj.get("boz_custom_model") and obj.type == "MESH" else ""
-            result.entities.append(world.Placement(obj.boz.source, position, group=obj.boz.group,
-                                                   rotation=rotation, scale=scale,
-                                                   prop=custom or "", fields=_fields(obj),
-                                                   piece=obj.get("boz_piece", ""),
-                                                   settings=_panel_values(obj)))
-        elif role == "base" and obj.boz.source:
+        name = object_name(obj)
+        position, rotation, scale = _transform(obj, parent)
+        common = {"script": obj.boz.script, "properties": properties_of(obj)}
+        if role == "model" and obj.type == "MESH":
+            if max(obj.dimensions) < TINY:
+                problems.append((f"{obj.name} is only {max(obj.dimensions):.1f} cm across (one "
+                                 "Blender unit is a centimetre): scale it up, or use Add → Game "
+                                 "shapes", obj.name))
+                return None
+            mesh = "" if obj.boz.source else own_mesh(obj)
+            if mesh is None:
+                return None
+            return world.Model(name, position, rotation, scale, mesh=mesh, game=obj.boz.source,
+                               collision=obj.boz.collision, shape=obj.boz.shape,
+                               padding=round(obj.boz.padding, 2) if obj.boz.shape == "box" else 0.0,
+                               block_margin=round(obj.boz.block_margin, 2),
+                               start=start_of(obj), **common)
+        if role == "volume":
+            return world.Volume(name, obj.boz.volume, position, rotation,
+                                size=tuple(round(c * world.TRIGGER_SIZE, 3) for c in scale),
+                                who=obj.boz.who, once=obj.boz.once, prompt=obj.boz.prompt,
+                                cost=obj.boz.cost, **common)
+        if role != "prefab":
+            return None
+        if obj.boz.source:
+            custom = own_mesh(obj) if obj.get("boz_custom_model") and obj.type == "MESH" else ""
+            return world.Prefab(name, position, rotation, scale, source=obj.boz.source,
+                                group=obj.boz.group, piece=obj.get("boz_piece", ""),
+                                settings=_panel_values(obj), fields=_fields(obj),
+                                mesh=custom or "",
+                                game="" if custom else obj.get("boz_game_model", ""),
+                                start=start_of(obj), **common)
+        children = sorted(obj.children, key=object_name)   # stable files, small diffs
+        parts = [part for part in (build(child, obj) for child in children
+                                   if child.boz.role in ("model", "volume", "prefab")
+                                   and not child.boz.original) if part is not None]
+        return world.Prefab(name, position, rotation, scale, parts=parts, start=start_of(obj),
+                            library=obj.get("boz_library", ""), **common)
+
+    for obj in scene.objects:
+        if obj.boz.role == "prefab" and obj.boz.original and obj.boz.source:
             base_objects[obj.boz.source].append(obj)
+            continue
+        if is_part(obj):
+            continue   # written with its prefab
+        item = build(obj)
+        if isinstance(item, world.Model):
+            result.models.append(item)
+        elif isinstance(item, world.Volume):
+            result.volumes.append(item)
+        elif isinstance(item, world.Prefab):
+            result.prefabs.append(item)
     if scene.boz.inherit:
         present = set(base_objects)
         result.removed = [source for source in scene.get("boz_base_entities", [])
                           if source not in present]
     for source, objects in base_objects.items():
-        for obj in objects:
+        for number, obj in enumerate(objects):
             changed, moved = _base_changes(obj)
-            custom = prop_of(obj) if obj.get("boz_custom_model") and obj.type == "MESH" else ""
-            if len(objects) == 1 and not (changed or moved or custom):
+            custom = own_mesh(obj) if obj.get("boz_custom_model") and obj.type == "MESH" else ""
+            start = start_of(obj)
+            if len(objects) == 1 and not (changed or moved or custom or start or obj.boz.script):
                 continue   # as the level has it
             settings = _settings_of(obj)
             fields = {}
@@ -778,52 +1108,58 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
             origin = list(obj.get("boz_base_origin", []))
             own = origin[7:10] if len(origin) == 10 else (1.0, 1.0, 1.0)
             relative = tuple(round(scale[i] / own[i], 5) if own[i] else 1.0 for i in range(3))
-            result.entities.append(world.Placement(source, position, rotation=rotation,
-                                                   scale=relative, prop=custom or "",
-                                                   fields=fields, settings=changed))
+            original = number == 0
+            # The first is the base entity itself (moved, edited); others are copies of it.
+            name = object_name(obj) if original else clean_name(obj.name)
+            result.prefabs.append(world.Prefab(
+                name, position, rotation, relative, source=source, base=original,
+                settings=changed, fields=fields, mesh=custom or "",
+                start=start if original else {}, script=obj.boz.script if original else "",
+                properties=properties_of(obj) if original else {}))
     for message in world.validate(result):
         problems.append((message, ""))
     return result
 
 
-# Make prop
+def prefab_of(obj, problems: list | None = None):
+    """(Prefab, meshes it uses) for one prefab object (Save as new prefab)."""
+    whole = scene_to_world(bpy.context.scene, problems)
+    names = [object_name(obj)]
+    parent = obj.parent
+    while is_prefab_group(parent):
+        names.insert(0, object_name(parent))
+        parent = parent.parent
+    full = ".".join(names)
+    found = next((item for name, item in world.walk(whole.prefabs) if name == full), None)
+    if found is None:
+        raise ValueError(f"{obj.name} is not a prefab of this map")
+    used = world._meshes_used([found])
+    return found, [mesh for mesh in whole.meshes if mesh.name in used]
 
 
-def make_prop(obj, name: str) -> None:
-    """Give an object its own editable mesh (with copies of its textures). A level mesh or game
-    model becomes a project prop placed by the object (origin at the bottom centre); a game
-    entity keeps its behaviour and draws the new mesh instead of the game's model."""
-    from mathutils import Matrix, Vector
+# Make editable
 
+
+def make_editable(obj, name: str) -> None:
+    """Give an object its own editable mesh (with copies of its textures). A game model becomes
+    a model of your own (origin kept); a game prefab keeps its behaviour and draws the new mesh
+    instead of the game's model."""
     if obj.type != "MESH":
-        raise ValueError(f"{obj.name} has no mesh to make a prop from")
+        raise ValueError(f"{obj.name} has no mesh to edit")
     data = obj.data.copy()
     data.name = game_name(name)
     for key in list(data.keys()):
         del data[key]
-    if obj.boz.role == "mesh":
-        # Level meshes are in world space: move the geometry to its own origin.
-        data.transform(world_matrix(obj))
-        corners = [v.co for v in data.vertices]
-        low = Vector(tuple(min(c[i] for c in corners) for i in range(3)))
-        high = Vector(tuple(max(c[i] for c in corners) for i in range(3)))
-        origin = Vector(((low.x + high.x) / 2, (low.y + high.y) / 2, low.z))
-        data.transform(Matrix.Translation(-origin))
-        obj.matrix_world = Matrix.Translation(origin)
     for index, material in enumerate(data.materials):
         if material is not None and material.name.startswith((game.PREFIX, game.MATERIAL_PREFIX)):
             copy = material.copy()
             copy.name = f"{data.name}_{index}" if index else data.name
             data.materials[index] = copy
     obj.data = data
-    if obj.boz.role in ("entity", "base"):
-        # The entity keeps its game behaviour (buying, power, ...) and draws this mesh instead.
+    if obj.boz.role == "prefab":
+        # It keeps its game behaviour (buying, power, ...) and draws this mesh instead.
         obj["boz_custom_model"] = True
+        if "boz_game_model" in obj:
+            del obj["boz_game_model"]
         return
-    obj.name = data.name
-    if obj.boz.role == "model":
-        obj.boz.collision = "solid"
-        obj.boz.shape = "box"
-    obj.boz.role = "prop"
     obj.boz.source = ""
-    obj.boz.group = ""

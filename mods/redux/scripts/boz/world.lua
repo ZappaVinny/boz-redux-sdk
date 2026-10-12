@@ -2,9 +2,10 @@
 --
 --   require("boz.world").start()   (map projects call this from main.lua; the SDK adds it)
 --
--- Objects scripts change: the editor writes each map's start state into boz/world_data.lua
--- (hidden objects, objects without collision, walkable areas that start blocked); this applies
--- it with boz.objects as soon as each level has started.
+-- The map's objects: the editor writes each map's start state and scripted objects into
+-- boz/world_data.lua (hidden objects, objects without collision, walkable areas that start
+-- blocked, scripts and their property values); as soon as each level has started this applies
+-- the start state with boz.objects and starts the scripts with boz.prefabs.
 --
 -- Perk machines that work without power: the editor's "Needs power" off writes the power switch
 -- name "boz_no_power". The game only powers a machine when its power switch is turned on (Quick
@@ -50,6 +51,7 @@ local function start_state()
         return
     end
     local objects = require("boz.objects")
+    local prefabs = require("boz.prefabs")
     events.on("frame", function()
         local level = objects.level()
         if level == 0 then
@@ -69,6 +71,7 @@ local function start_state()
         for _, name in ipairs(data.blocked or {}) do
             objects.set_navmesh(name, false)
         end
+        prefabs.start(data.objects or {}, data.names)
     end)
 end
 

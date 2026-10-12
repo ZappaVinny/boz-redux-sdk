@@ -20,7 +20,8 @@ local value_buffer = game.alloc(2048)
 local VAR_TO_STRING = 0x10   -- CIwConsoleVar vtable: ToString(var, buffer, size)
 
 hook.add("Console_Print", {before = function(call)
-    local text = game.read("string", call:arg(2), 2048)
+    -- The text is a printf format; "%%" (an escaped "%", as print from map scripts sends) is "%".
+    local text = game.read("string", call:arg(2), 2048):gsub("%%%%", "%%")
     if capture then
         capture[#capture + 1] = text
     end

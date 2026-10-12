@@ -1,15 +1,20 @@
-# Toolkit fields
+# Game prefab fields
 
-What each toolkit piece is in the game, which of its fields the editor lets you change, and why
-the others stay as they are. The survey covers every entity in the four shipped levels' statics
+What each game prefab (the palette's Game prefabs and Level markers, `bozkit.toolkit`) is in the
+game, which of its fields the editor lets you change, and why the others stay as they are. The survey covers every entity in the four shipped levels' statics
 groups, and every field the game's reflection registers for their components
 (`gamedef/reflection`). Shipped data only stores fields that differ from the class default, so
 **Default** is the constructor's value where the data leaves a field out.
 
-Fields marked *editor* appear in Properties → Object → Game when the piece is selected. Units:
-points, centimetres (cm), seconds (s; the game stores milliseconds).
+Fields marked *editor* appear in Properties → Object → Game (Settings) when the game prefab is
+selected. Units: points, centimetres (cm), seconds (s; the game stores milliseconds).
 
-## Pieces
+Every object (models and prefabs) also has **When the level starts**: Visible, Collision and
+Blocks the walkable area, and a **Script** whose `---@property` lines add fields of their own
+([map-scripting.md](map-scripting.md)). The original map's own entities can start hidden or
+without collision; their walkable area stays as shipped.
+
+## Game prefabs
 
 ### Perk machines (`CPerk`)
 
@@ -101,19 +106,29 @@ The navmesh under a door is tagged with its name and closed until it opens (`CDo
 
 | Field | Default | Meaning | Editor |
 | --- | --- | --- | --- |
-| `spawnType` | — | windows, ground, Lightning (dogs), Hole, Monkey | the piece you pick |
+| `spawnType` | — | windows, ground, Lightning (dogs), Hole, Monkey | the level marker you pick |
 | `m_StartActive` | false | Used from the first round, not only once players reach its area | editor: Active from the start |
 
 Player spawns are the entities named `spawn_player_1` to `_4`.
 
-### Interact point, jump point, sound emitter
+### Level markers: jump point, sound emitter
 
 | Piece | Field | Meaning | Editor |
 | --- | --- | --- | --- |
-| Interact point | `CPOI.m_MaxDistance` | Use distance (cm); scripts get "use" | editor |
 | Jump point | `m_jumpAreaHash` | The jump area zombies cross to | no: linked by the level |
 | Sound emitter | `soundName` | The sound it plays | editor: Sound |
 | Sound emitter | `StartEnabled` | Plays from the start | editor: Plays from the start |
+
+## Volumes
+
+Volumes are not game prefabs: they have no behaviour of their own and only send events to
+scripts. Each compiles to an entity made from a shipped template:
+
+| Volume | Made from | In the game | Script event |
+| --- | --- | --- | --- |
+| Trigger | Call of the Dead's snow trigger box (`CIsCollisionBox`, `m_Ghost` on, `CCollisionFilter`, `CEntityFlags`) | A ghost box sized by the volume | `enter` / `exit` (`CIsCollisionObject::OnCollisionEnter` / `OnCollisionExit`) |
+| Hit | Kino's musical easter egg skull (`CEasterEgg`, `CHealth`, `CIsCollisionSphere`) | A sphere of the volume's largest side, with a song of its own so it stays out of the level's easter egg | `hit` (`CEasterEgg::OnEvent`, skipped for the game) |
+| Use | A barricade's `CPOI` and `CIsBroadcaster`, without the barricade | A point of interest the game draws no prompt for; reach: half the size plus 75 cm | `use` (`Poi_SendUse`); the prompt and cost come from `boz.prefabs` |
 
 ## Points of interest (`CPOI`)
 
@@ -125,9 +140,9 @@ buy, 3 box, 4 perk, 5 Pack-a-Punch, 6 trap switch, 7 power, 8 turret, 9 teleport
 `m_MaxYDistance`, `m_BiDirection` (either side), `m_Moveable`, `m_IsReverseViewAngle`. Pressing
 use runs `Poi_SendUse`, which broadcasts the interact event to the entity in reach.
 
-## Not pieces yet
+## Not game prefabs yet
 
-These are in the shipped levels; each needs its own piece or links before it is useful:
+These are in the shipped levels; each needs its own game prefab or links before it is useful:
 
 - Turret (`CTurret`: cost, duration, damage, range, rate of fire, cool-down, power).
 - Teleporter, mainframe and Gersch points (`CTeleporter`, `CTeleportMainframe`, `CTeleportPointGersch`).

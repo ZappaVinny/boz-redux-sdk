@@ -10,7 +10,7 @@ import os
 
 import bpy
 
-from . import link, palette, placeholders, preview, shapes, shell, tabs
+from . import link, objects, palette, placeholders, preview, shapes, shell, tabs
 
 ADDON = "boz_redux"
 
@@ -52,6 +52,7 @@ def register():
     except Exception as exc:  # the editor still works without the shipped-map tools
         print(f"boz_suite: the {ADDON} add-on could not be enabled: {exc}")
     link.register()
+    objects.register()
     palette.register()
     preview.register()
     shapes.register()
@@ -65,4 +66,5 @@ def unregister():
     shapes.unregister()
     preview.unregister()
     palette.unregister()
+    objects.unregister()
     link.unregister()

@@ -23,7 +23,7 @@ except ModuleNotFoundError:
 from . import convert, game
 
 LIBRARY_NAME = "BOZ Game"
-PALETTE_VERSION = 3   # 3: one wall buy, door and barricade designs
+PALETTE_VERSION = 6   # 6: My prefabs catalog
 _build = {"process": None}
 
 
@@ -108,6 +108,8 @@ def poll_build():
     if "BOZ_PALETTE_OK" in output:
         (palette_dir() / "stamp.json").write_text(json.dumps(_stamp(), indent=2) + "\n")
         register_library()
+        from . import link, prefab_library
+        prefab_library.rebuild(link.project_root())
         count = output.split("BOZ_PALETTE_OK", 1)[1].split()[0]
         _log("palette", f"palettes ready: {count} game assets in the World tab's asset browser")
         return None
@@ -141,17 +143,27 @@ def realize() -> None:
         if kind == "piece":
             made = _place_piece(scene, obj["boz_piece"], label, position, rotation)
         elif kind == "entity":
-            made = convert.entity_object(world.Placement(source, position, rotation=rotation,
-                                                         group=obj.get("boz_group", "")),
-                                         scene.boz.base, scene)
+            made = convert.game_prefab_object(world.Prefab(label, position, rotation,
+                                                           source=source,
+                                                           group=obj.get("boz_group", "")),
+                                              scene.boz.base, scene)
+        elif kind == "prefab":
+            from . import objects
+            made = objects.place_library_prefab(scene, obj.get("boz_prefab", ""), position, rotation)
+            if made is not None:
+                label = made.name
+        elif kind == "volume":
+            made = convert.volume_object(world.Volume(label, obj.get("boz_volume", "trigger"),
+                                                      position, rotation), scene)
         else:
-            made = convert.model_object(world.Instance(position, model=source, rotation=rotation),
-                                        scene)
+            made = convert.model_object(world.Model(label, position, rotation, game=source,
+                                                    collision="solid", shape="box"), scene)
             _land_at(made, convert.world_matrix(obj).translation)
         bpy.data.objects.remove(obj)
         if made is None:
             continue
-        made.name = label
+        if kind != "prefab":
+            made.name = convert.clean_name(label)
         for other in bpy.context.selected_objects:
             other.select_set(False)
         made.select_set(True)
@@ -205,17 +217,17 @@ def _place_piece(scene, key: str, label: str, position, rotation):
     source = found.name
     if key == "player_spawn":
         taken = {world.Placement(o.boz.source, (0, 0, 0)).hash for o in scene.objects
-                 if o.boz.role in ("entity", "base") and o.boz.source}
+                 if o.boz.role == "prefab" and o.boz.source}
         free = [f"spawn_player_{n}" for n in range(1, 5)
                 if world.Placement(f"spawn_player_{n}", (0, 0, 0)).hash not in taken]
         if not free:
             _log("check", "the map already has all four player spawns")
             return None
         source = free[0]
-    return convert.entity_object(world.Placement(source, position, rotation=rotation,
-                                                 group=found.group, piece=key,
-                                                 settings=dict(found.defaults)),
-                                 scene.boz.base, scene)
+    return convert.game_prefab_object(world.Prefab(label, position, rotation, source=source,
+                                                   group=found.group, piece=key,
+                                                   settings=dict(found.defaults)),
+                                      scene.boz.base, scene)
 
 
 def _realize_timer():

@@ -16,49 +16,64 @@ Two parts live here:
   UI / HUD, drawn in the top bar in that order. **Build & Run** (and its ⚙ settings) is at the
   right of the top bar on every tab. The menus are Project, Edit and Help.
 - **Properties** shows only Object, Modifiers, Data and Material; stock panels that cannot reach
-  the game are hidden. The object tab's **Game** panel sets a mesh's **Collision** (floor, solid,
-  none) and double-sidedness, or the base level entity an empty places.
+  the game are hidden. The object tab's **Game** panel shows what the object is and its settings.
 - **Log** areas show build output and the game's `boz-log.txt`; the sidebar's **Problems** tab
   lists what would stop a build, with a button that selects the object.
-- **Objects** have a role (Properties → Object → Game): **level mesh** (in place), **prop**
-  (objects sharing a mesh, made with Alt+D, are copies of one prop), **game model** (a model
-  from the game), **game entity** (perks, spawns, ...), **base level entity** or **base level**
-  (rooms of an inherited original map, read only). Entities and game models show the model the game draws (`boz_suite/game.py`,
-  from the asset library). **Make prop** turns a level mesh, game model or entity into a prop with
-  its own editable mesh and textures.
+- **Three kinds of object** (`boz_suite/convert.py`; the world format in `docs/sdk-projects.md`).
+  Every object's name is its name in the game and in scripts.
+  - **Model**: a mesh you see and bump into. A **game model** (from the palette) or **your own
+    mesh** (built in Blender, Add → Game shapes, Project → Import model, or **Make editable** on
+    a game model). Collision **Walkable / Blocking / None** with **Box / Mesh**; copies made with
+    Alt+D share one mesh.
+  - **Volume**: an invisible box that sends script events: **Trigger** (enter / exit), **Hit**
+    (shot), **Use** (the player presses use; prompt text and cost). Drawn as a see-through box
+    (teal, red, green); its size is its scale (100 cm at 1).
+  - **Prefab**: one object made of parts. **Make prefab** (Ctrl+G, or Object menu) groups the
+    selected models, volumes and prefabs under an Empty; **Ungroup** (Ctrl+Alt+G) takes it apart.
+    A part keeps its **part name** inside the prefab (in the game: `<Prefab>.<Part>`); its
+    object is named `<Prefab> › <Part>`, so searching the outliner for a prefab shows all of it.
+    **Game prefabs** are the game's own: perk machines, Pack-a-Punch, the box, the power switch,
+    wall buys, doors, barricades, traps, and the **level markers** (spawns, jump points, sound
+    emitters), with their settings (cost, needs power, ...). They can be parts of your prefabs.
+- **When the level starts** (models and prefabs): Visible, Collision, and **Blocks the walkable
+  area** (the navmesh under it stays shut until a script opens it).
+- **Script** (any object): **New** makes `scripts/prefabs/<Name>.lua` from a template and opens
+  it in the **Scripts** tab's text editor (saving the map saves edited scripts; the small link
+  button opens your own editor instead); **Pick…** uses an existing one. The script's `---@property` lines become fields in the
+  panel, with values for each object ([docs/map-scripting.md](../docs/map-scripting.md)).
+- **Prefab library:** **Save as new prefab** stores a prefab in `source/prefabs`; it appears in
+  the asset browser under **My prefabs** (`boz_suite/prefab_library.py` writes the open project's
+  prefabs into the palette folder), and dropping it places a copy. Each copy is independent.
+  Project → Prefab library deletes library prefabs.
 - **Original maps:** the base level's own entities (perks, doors, wall buys, spawns, triggers,
-  traps, ...) are base level entities: move, rotate, scale, delete (X) or copy (Shift+D) them,
-  and change their settings like a toolkit piece's. Only what changed is written; **Put back as
-  the level has it** undoes the edits. Rooms stay read only.
+  traps, ...) are game prefabs from the original map: move, rotate, scale, delete (X) or copy
+  (Shift+D) them, change their settings, start them hidden. Only what changed is written; **Put
+  back as the level has it** undoes the edits. Rooms stay read only.
 - **Building:** Add → **Game shapes** (also the World header's **Shapes** button) adds blocks,
   walls, floors, ramps, stairs and pillars at game size with a tiling default texture and the
   right Collision. Blender's own Add → Mesh shapes are 2 cm big here (one unit is a centimetre);
   the Problems panel flags anything that small. Project → **Import model…** brings in FBX, glTF
   and OBJ files, scaled from metres.
-- **Markers:** entities that draw no model (triggers, effects, spawns, sounds, ...) are small
-  cubes coloured by type, in the add-on's colours.
+- **Markers:** game prefabs that draw no model are small cubes coloured by type.
 - **Show** (World viewport header, and the sidebar's BOZ tab): Markers, Triggers (entity volumes),
   Links, and **Walkable** / **Collision**, which compile the map and show its navmesh (blue, orange
   where a door blocks it) and collision mesh. **Refresh** compiles again after edits.
-- **Palettes:** the World tab's asset browser shows the "BOZ Game" library:
-  - **Toolkit**: one curated piece for each thing a map needs (perk machines, Pack-a-Punch, the
-    box, the power switch, wall buys, doors, barricades, traps, player, zombie and dog spawns,
-    jump and interact points, sound emitters; `bozkit.toolkit`). A dropped piece resolves to a
-    working entity of the map's base level (else the shared `ingame` template) and shows its
-    settings (cost, needs power, ...) in Properties → Object → Game.
-  - **Models** and **Textures**: everything in the game, for use anywhere.
-
-  `palette_build.py` builds it in a background Blender from the SDK's asset library (about 30 s,
-  the first time and after the library changes); `palette.py` turns a dropped stand-in into the
-  real thing.
-- **Edit its model** on a game entity gives it an editable copy of its mesh: it keeps its
+- **Palettes:** the World tab's asset browser shows the "BOZ Game" library: **Game prefabs**
+  (Machines, Buying, Doors, Barricades, Defence), **Level markers** (Spawns, Jump points, Sound),
+  **Volumes** (Trigger, Hit, Use), and **Models** and **Textures** from every map. A dropped game
+  prefab resolves to a working entity of the map's base level (else another map's, repacked,
+  else the shared `ingame` template). `palette_build.py` builds it in a background Blender from
+  the SDK's asset library (about 30 s, the first time and after the library changes);
+  `palette.py` turns a dropped stand-in into the real thing, where it was dropped.
+- **Edit its model** on a game prefab gives it an editable copy of its mesh: it keeps its
   behaviour (a Pack-a-Punch still upgrades weapons) and the game draws your mesh. **Use the
   game's model** goes back.
-- **Wall buy** is one piece: **Choose…** picks any weapon of the level; the editor shows the
-  weapon and its chalk (the weapon's own, one drawn from its model, your image, or none). **Doors** and **barricades** come in every design the game's maps have. Pieces from
-  another map work in any level (the compiler repacks what they use).
+- **Wall buy** is one game prefab: **Choose…** picks any weapon of the level; the editor shows the
+  weapon and its chalk (the weapon's own, one drawn from its model, your image, or none). **Doors**
+  and **barricades** come in every design the game's maps have.
 - **Textures** (Properties → Material): every slot's texture with its preview, **Replace…** from
-  an image file and **From game…** (any game texture, with game shading). Dropping a texture from
+  an image file, **From game…** (any game texture, with game shading) and **✕** (back to the
+  default grid texture). Game models' textures need **Make editable** first. Dropping a texture from
   the palette gives the same game-shaded material.
 - **Shading** matches the game: game models use the shipped-map tools' materials (vertex colours,
   lightmaps, blend modes), project materials are unlit, and the viewport is in material preview
@@ -66,7 +81,8 @@ Two parts live here:
 - **Placeholders:** every planned feature is a panel in its tab (`boz_suite/placeholders.py`).
 - **Project link:** the launcher passes the project in `BOZ_PROJECT`. The first open builds the
   scene from `source/world.json` and saves `map.blend`; every save writes `source/` back (one
-  Blender unit is one game centimetre).
+  Blender unit is one game centimetre). Scenes from older editors are converted when they open
+  (level meshes and props become models, entities game prefabs).
 - Background Blender cannot split areas or create editors in screens that are not shown, so
   each tab's editors are changed the first time the tab is on screen.
 

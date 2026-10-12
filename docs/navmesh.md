@@ -79,6 +79,26 @@ Rebuilding every Kino tile at once (the worst case) reproduces 94% of the shippe
 rebuilt (the other four tiles keep their shipped data). In normal use only the tiles around an
 edit are rebuilt.
 
+## Blocking objects: cutting instead of rebuilding
+
+An object set to **Block the walkable area** (a wall a script opens) does not change the
+level's collision: the floor under it is tagged with its name, so `NavMesh_SetTagOpen` can shut
+and open it. Rebuilding its tiles with Recast would lose floor the designers made from other
+input than the collision (Kino's stairs are a ramp up to 0.8 m under the steps, and a rebuilt
+tile next to them lost a quarter of their floor, trapping players). So the SDK keeps those
+tiles exactly as shipped and cuts the blocker's outline into their polygons (`bozkit.navcut`):
+
+- the pieces inside the outline are tagged (flags `| 0x2`, the object's name hash);
+- every new corner also goes into each polygon edge it lies on, so neighbouring polygons
+  still share whole edges (Detour links polygons only through shared edges);
+- polygons over six corners are halved along diagonals; new corners take their height from
+  the shipped detail surface; tile-border portals keep their sides; the BV tree is rebuilt.
+
+Floor area, connectivity and portals stay exactly the shipped ones; only tiles under a blocker
+change. Real geometry changes (your own walls and floors, moved or removed entities) still
+rebuild their tiles with Recast first, and blockers are cut in afterwards. Volumes (Trigger,
+Hit, Use) change nothing walkable and leave the navmesh alone.
+
 ## Limits
 
 - Tags stay where they were: moving a door does not move the floor it gates.

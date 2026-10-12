@@ -3,42 +3,26 @@
 The source lives in the project's ``source/`` folder, as files the editor writes and people can
 read::
 
-    source/world.json          what the world is made of (below)
-    source/meshes/<n>.json     a level mesh: vertices (centimetres, Y up, world space), UVs,
-                               triangles, and per triangle the texture it uses
-    source/props/<n>.json      a prop's mesh, in its own space (placed by instances)
+    source/world.json          what the world is made of (format 3, below)
+    source/meshes/<n>.json     a mesh of the world's own: vertices (centimetres, Y up, the
+                               model's own space), UVs, triangles, per triangle its texture
     source/textures/<n>.png    textures (power-of-two sides, 4 to 1024); <n>_<i>.png for the
                                second and later textures of a mesh
+    source/prefabs/<n>.json    the prefab library (save_prefab / load_prefab)
 
-``world.json`` (format 2; format 1 files still load)::
-
-    {"format": 2,
-     "base": "kino",          shipped level giving rounds, zombie types, sounds, cameras, weapons
-     "meshes": [{"name": "floor", "file": "meshes/floor.json", "textures": ["textures/floor.png"],
-                 "collision": "floor", "double_sided": true}],
-     "props": [{"name": "crate", "file": "props/crate.json", "textures": ["textures/crate.png"],
-                "collision": "solid", "shape": "box"}],
-     "instances": [{"prop": "crate", "position": [0, 0, 300], "yaw": 45},
-                   {"model": "ingame/ingame.group.bin#0x1234abcd", "position": [...], "yaw": 0,
-                    "collision": "solid", "shape": "box"}],
-     "entities": [{"source": "spawn_player_1", "position": [0, 5, 0], "yaw": 0},
-                  {"source": "0x9f1e2d3c", "group": "ingame/ingame.group.bin", "position": [...]}]}
-
-- Triangles are in the game's winding; ``double_sided`` also draws their backs.
-- ``collision`` is ``floor`` (walked on), ``solid`` (blocks) or ``none``. Floor and solid
-  geometry goes into the level's collision and the navmesh is built on top of it. A prop or
-  model's ``shape`` is ``box`` (its bounds) or ``mesh`` (its triangles).
-- An instance places a project prop, or a model from the game (``<group path>#0x<hash>``),
-  which is copied into the level with its materials and textures.
-- Entities are copies of the game's entities (perks, spawns, the power switch, ...), by name or
-  ``0x`` hash, from the base level's statics or from ``group``. Zombie spawn points among them
-  become the starting area's spawns; entities with a model get a solid box in the collision.
+``world.json`` lists **models** (a mesh you see and bump into), **volumes** (invisible boxes that
+send script events) and **prefabs** (named groups of parts with a script, or the game's own
+entities); see the Format 3 section. Format 1 and 2 files still load (from_layout). Compiling
+lowers a world into a Layout (the format 2 shape: level meshes, props, instances, entities),
+which _compile_layout turns into the game's groups.
 """
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import re
+import shutil
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,16 +30,16 @@ from pathlib import Path
 from . import group, levels, png
 from .hashing import iw_hash
 
-FORMAT = 2
 COLLISION_KINDS = ('floor', 'solid', 'none')
 SHAPES = ('box', 'mesh')
 NAME_RE = re.compile(r'^[a-z][a-z0-9_]{0,31}$')
-SCRIPT_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{0,47}$')
+SCRIPT_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_.]{0,95}$')   # '.' joins prefab parts
 # An object scripts can change ("script": {...}): its name in the game (CIsNamed, what
 # boz.objects finds), and how it starts. Scripted meshes and props get a collision entity of their
 # own (<name>_collision) and, when they block, a tagged walkable area instead of a hole, so
 # boz.objects can switch both; boz.world applies the start state when the level starts.
-SCRIPT_DEFAULTS = {'name': '', 'visible': True, 'collision': True, 'blocks': False}
+SCRIPT_DEFAULTS = {'name': '', 'visible': True, 'collision': True, 'blocks': False,
+                   'dynamic': True}   # dynamic: scripts may switch it (own collision, tagged area)
 MAX_TEXTURE = 1024
 INGAME = 'ingame/ingame.group.bin'
 
@@ -105,6 +89,9 @@ class Mesh:
 
 
 UNIT = (1.0, 1.0, 1.0)
+BLOCK_MARGIN = 10.0   # centimetres between a blocking object and the player's body, by default
+PLAYER_RADIUS = 0.4   # metres: the navmesh's agent radius in every shipped level (the walkable area
+                      # is where the player's centre may go, so it always stops this far from walls)
 
 
 def _yaw_quaternion(degrees: float) -> tuple[float, float, float, float]:
@@ -125,6 +112,8 @@ class Instance:
     rotation: tuple[float, float, float, float] | None = None   # x, y, z, w; None: from yaw
     scale: tuple[float, float, float] = UNIT
     script: dict = field(default_factory=dict)   # SCRIPT_DEFAULTS
+    padding: float = 0.0      # centimetres a box collision reaches past the model's bounds
+    block_margin: float = BLOCK_MARGIN   # centimetres between that and the player's body
 
     def model_ref(self) -> tuple[str, int]:
         path, _, value = self.model.partition('#')
@@ -159,7 +148,9 @@ class Placement:
 
 
 @dataclass
-class World:
+class Layout:
+    """The compiler's input: level meshes, props and their instances, and game entities (format
+    2's shape). Format 3 worlds lower into it (lower()); format 1 and 2 files load through it."""
     base: str = 'kino'
     meshes: list[Mesh] = field(default_factory=list)
     entities: list[Placement] = field(default_factory=list)
@@ -257,8 +248,8 @@ def _lines(key: str, items: list[dict], last: bool = False) -> list[str]:
     return lines + ['  ]' + ('' if last else ',')]
 
 
-def save(world: World, source: str | Path) -> None:
-    """Write *world* into a project's source folder, removing files it no longer uses."""
+def _save_layout(world: Layout, source: str | Path) -> None:
+    """Write a format 2 world (tests of the migration only: the editor writes format 3)."""
     source = Path(source)
     wanted = set()
     for folder in ('meshes', 'props', 'textures'):
@@ -300,7 +291,7 @@ def save(world: World, source: str | Path) -> None:
         entry.update(_transform_json(entity))
         entities.append(entry)
     # One line per item, so the file stays readable and diffs stay small.
-    lines = ['{', f'  "format": {FORMAT},', f'  "base": {json.dumps(world.base)},']
+    lines = ['{', '  "format": 2,', f'  "base": {json.dumps(world.base)},']
     if world.inherit:
         lines.append('  "inherit": true,')
     if world.removed:
@@ -333,7 +324,7 @@ def _read_mesh(source: Path, item: dict, default_collision: str) -> Mesh:
                 dict(item.get('script', {})))
 
 
-def load(source: str | Path) -> World:
+def _load_layout(source: str | Path) -> Layout:
     source = Path(source)
     try:
         data = json.loads((source / 'world.json').read_text(encoding='utf-8'))
@@ -341,9 +332,9 @@ def load(source: str | Path) -> World:
         raise WorldError(f'{source / "world.json"} not found: this map has no world yet') from None
     except (OSError, ValueError) as exc:
         raise WorldError(f'cannot read world.json: {exc}') from exc
-    if data.get('format') not in (1, FORMAT):
+    if data.get('format') not in (1, 2):
         raise WorldError(f'world.json format {data.get("format")!r} is not supported')
-    world = World(str(data.get('base', 'kino')), inherit=bool(data.get('inherit', False)),
+    world = Layout(str(data.get('base', 'kino')), inherit=bool(data.get('inherit', False)),
                   removed=[str(item) for item in data.get('removed', [])])
     world.meshes = [_read_mesh(source, item, 'floor') for item in data.get('meshes', [])]
     world.props = [_read_mesh(source, item, 'solid') for item in data.get('props', [])]
@@ -404,8 +395,8 @@ def _check_mesh(mesh: Mesh, label: str, problems: list[str]) -> None:
             problems.append(str(exc))
 
 
-def validate(world: World) -> list[str]:
-    """Problems that would stop the world from compiling."""
+def _validate_layout(world: Layout) -> list[str]:
+    """Problems that would stop a layout from compiling."""
     problems = []
     if world.base not in levels.SHIPPED_LEVELS:
         problems.append(f'base level {world.base!r} is not one of the game\'s levels')
@@ -500,11 +491,11 @@ def _player_spawns(spread: int = 100) -> list[Placement]:
                                              (-spread, spread), (spread, spread)), 1)]
 
 
-def empty_world(base: str = 'kino') -> World:
+def _empty_layout(base: str = 'kino') -> Layout:
     """A 6 m floor tile and the four player spawns: nothing else to start from."""
     vertices, uvs, triangles = _quads(_floor_quads(300, 200))
     floor = Mesh('floor', vertices, uvs, triangles, [_arena_texture()], 'floor', True)
-    return World(base, [floor], _player_spawns())
+    return Layout(base, [floor], _player_spawns())
 
 
 def start_area_spawns(pack, base: str = 'kino') -> list[tuple[int, int]]:
@@ -529,7 +520,7 @@ def start_area_spawns(pack, base: str = 'kino') -> list[tuple[int, int]]:
     return out
 
 
-def arena_world(pack, arena: levels.Arena | None = None, base: str = 'kino') -> World:
+def _arena_layout(pack, arena: levels.Arena | None = None, base: str = 'kino') -> Layout:
     """The debug arena: a walled square with the base level's starting-area zombie spawns around
     the walls (crawlers on top), Juggernog and the power switch."""
     arena = arena or levels.Arena()
@@ -548,18 +539,18 @@ def arena_world(pack, arena: levels.Arena | None = None, base: str = 'kino') -> 
         entities.append(Placement(f'0x{value:08x}', (float(x), float(y), float(z))))
     entities.append(Placement('Juggernog', (float(-h + 200), 0.0, -400.0), 90.0))
     entities.append(Placement('powerSwitch', (float(h - 60), 0.0, 0.0), -90.0))
-    return World(base, [mesh], entities)
+    return Layout(base, [mesh], entities)
 
 
-def template_world(template: str, pack=None) -> World:
+def template_world(template: str, pack=None) -> 'World':
     """The starting world of a map template: 'empty', 'debug' (needs the game's data) or one
     of the game's levels, inherited whole (a fresh copy every time)."""
     if template == 'empty':
-        return empty_world()
+        return from_layout(_empty_layout())
     if template == 'debug':
         if pack is None:
             raise WorldError('the debug arena needs the game data (build the asset library)')
-        return arena_world(pack)
+        return from_layout(_arena_layout(pack))
     if template in levels.SHIPPED_LEVELS:
         if pack is None:
             raise WorldError(f'the {template} template needs the game data (build the asset library)')
@@ -567,7 +558,617 @@ def template_world(template: str, pack=None) -> World:
     raise WorldError(f'unknown map template {template!r}')
 
 
-# Compiling
+def empty_world(base: str = 'kino') -> 'World':
+    """A 6 m floor tile and the four player spawns: nothing else to start from."""
+    return from_layout(_empty_layout(base))
+
+
+def arena_world(pack, arena: levels.Arena | None = None, base: str = 'kino') -> 'World':
+    """The debug arena: a walled square with zombie spawns, Juggernog and the power switch."""
+    return from_layout(_arena_layout(pack, arena, base))
+
+
+# Format 3: models, volumes and prefabs
+#
+# Everything placed in a map is one of three kinds, each with a name scripts find it by:
+#
+# - Model: one mesh you see and bump into, either a game model ('<group path>#0x<hash>') or one
+#   of the world's own meshes (source/meshes, in the model's own space). Collision floor /
+#   solid / none, shape box / mesh, and a start state (visible, collision, blocks the walkable
+#   area).
+# - Volume: an invisible box that sends events to scripts: trigger (enter / exit), hit (shot),
+#   use (the player presses use).
+# - Prefab: one object made of parts (models, volumes, prefabs), with an optional script and
+#   its property values; or a game prefab: one of the game's entities (a perk machine, wall buy,
+#   door, spawn, ...) with its settings, by toolkit piece, entity name or 0x hash. In an
+#   inherited map, the base level's own entities are game prefabs with ``base`` set.
+#
+# Prefab parts are flattened when compiled: a part is an entity named '<Prefab>.<Part>'.
+
+FORMAT = 3
+OBJECT_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{0,47}$')
+VOLUME_KINDS = ('trigger', 'hit', 'use')
+VOLUME_WHO = ('players', 'zombies', 'anyone')
+START_DEFAULTS = {'visible': True, 'collision': True, 'blocks': False}
+
+
+@dataclass
+class Model:
+    name: str
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotation: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    scale: tuple[float, float, float] = UNIT
+    mesh: str = ''            # one of World.meshes (your own geometry)
+    game: str = ''            # or a game model: '<group path>#0x<hash>'
+    collision: str = 'solid'
+    shape: str = 'mesh'
+    padding: float = 0.0      # centimetres a box collision reaches past the model on every side
+    block_margin: float = BLOCK_MARGIN   # centimetres between its collision and the player's body
+    start: dict = field(default_factory=dict)      # START_DEFAULTS keys that differ
+    script: str = ''          # scripts/<path>.lua, e.g. 'prefabs/Wall.lua'
+    properties: dict = field(default_factory=dict)
+
+    kind = 'model'
+
+    def quaternion(self) -> tuple[float, float, float, float]:
+        return tuple(self.rotation)
+
+
+@dataclass
+class Volume:
+    name: str
+    kind_of: str = 'trigger'  # VOLUME_KINDS
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotation: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    size: tuple[float, float, float] = (100.0, 100.0, 100.0)   # centimetres
+    who: str = 'players'      # VOLUME_WHO
+    once: bool = False
+    prompt: str = ''          # use volumes: the text players see
+    cost: int = 0             # use volumes: points it takes
+    script: str = ''
+    properties: dict = field(default_factory=dict)
+
+    kind = 'volume'
+
+    def quaternion(self) -> tuple[float, float, float, float]:
+        return tuple(self.rotation)
+
+
+@dataclass
+class Prefab:
+    name: str
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotation: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    scale: tuple[float, float, float] = UNIT
+    parts: list = field(default_factory=list)      # Model / Volume / Prefab, in the prefab's space
+    script: str = ''
+    properties: dict = field(default_factory=dict)
+    start: dict = field(default_factory=dict)
+    library: str = ''         # the library prefab it was placed from (information only)
+    # A game prefab: one of the game's entities.
+    source: str = ''          # entity name or 0x hash
+    group: str = ''           # its group; empty: the base level
+    piece: str = ''           # bozkit.toolkit piece
+    settings: dict = field(default_factory=dict)   # the piece's settings as the editor shows them
+    fields: dict = field(default_factory=dict)     # "Component.field" overrides
+    mesh: str = ''            # draws one of the world's meshes instead of its own model
+    game: str = ''            # or a game model
+    base: bool = False        # the inherited base level's own entity (moved / edited)
+    chalk_texture: Texture | None = field(default=None, compare=False, repr=False)
+
+    kind = 'prefab'
+
+    @property
+    def is_game(self) -> bool:
+        return bool(self.source)
+
+    @property
+    def hash(self) -> int:
+        return int(self.source, 16) if self.source.startswith('0x') else iw_hash(self.source)
+
+    def quaternion(self) -> tuple[float, float, float, float]:
+        return tuple(self.rotation)
+
+
+@dataclass
+class World:
+    base: str = 'kino'
+    inherit: bool = False     # start from the whole base level (its rooms, entities, navmesh)
+    removed: list[str] = field(default_factory=list)   # base level entities taken out (0x hashes)
+    meshes: list[Mesh] = field(default_factory=list)   # geometry the models and prefabs use
+    models: list[Model] = field(default_factory=list)
+    volumes: list[Volume] = field(default_factory=list)
+    prefabs: list[Prefab] = field(default_factory=list)
+
+    def objects(self):
+        return [*self.models, *self.volumes, *self.prefabs]
+
+
+def walk(items, prefix: str = ''):
+    """(full name, object) of every object and prefab part, depth first ('<Prefab>.<Part>')."""
+    for item in items:
+        full = f'{prefix}{item.name}'
+        yield full, item
+        if isinstance(item, Prefab):
+            yield from walk(item.parts, full + '.')
+
+
+# Format 3 files
+
+def _vec(values, digits=4):
+    return [round(float(c), digits) for c in values]
+
+
+def _place_json(item) -> dict:
+    out = {'position': _vec(item.position, 3), 'rotation': _vec(item.rotation, 6)}
+    scale = getattr(item, 'scale', UNIT)
+    if tuple(scale) != UNIT:
+        out['scale'] = _vec(scale, 5)
+    return out
+
+
+def _common_json(item, out: dict) -> dict:
+    start = {k: v for k, v in getattr(item, 'start', {}).items() if START_DEFAULTS.get(k) != v}
+    if start:
+        out['start'] = start
+    if item.script:
+        out['script'] = item.script
+    if item.properties:
+        out['properties'] = item.properties
+    return out
+
+
+def object_json(item) -> dict:
+    if isinstance(item, Model):
+        out = {'name': item.name}
+        out.update({'mesh': item.mesh} if item.mesh else {'game': item.game})
+        out.update({'collision': item.collision, 'shape': item.shape})
+        if item.padding:
+            out['padding'] = round(float(item.padding), 2)
+        if item.block_margin != BLOCK_MARGIN:
+            out['block_margin'] = round(float(item.block_margin), 2)
+        out.update(_place_json(item))
+        return _common_json(item, out)
+    if isinstance(item, Volume):
+        out = {'name': item.name, 'volume': item.kind_of, 'position': _vec(item.position, 3),
+               'rotation': _vec(item.rotation, 6), 'size': _vec(item.size, 3), 'who': item.who}
+        if item.once:
+            out['once'] = True
+        if item.prompt:
+            out['prompt'] = item.prompt
+        if item.cost:
+            out['cost'] = item.cost
+        return _common_json(item, out)
+    out = {'name': item.name}
+    if item.source:
+        out['source'] = item.source
+        for key in ('group', 'piece', 'mesh', 'game'):
+            if getattr(item, key):
+                out[key] = getattr(item, key)
+        if item.base:
+            out['base'] = True
+        if item.settings:
+            out['settings'] = item.settings
+        if item.fields:
+            out['fields'] = item.fields
+    else:
+        out['parts'] = [object_json(part) for part in item.parts]
+        if item.library:
+            out['library'] = item.library
+    out.update(_place_json(item))
+    return _common_json(item, out)
+
+
+def _floats(values, default):
+    return tuple(float(c) for c in values) if values is not None else default
+
+
+def object_from_json(item: dict):
+    common = {'script': str(item.get('script', '')), 'properties': dict(item.get('properties', {}))}
+    place = {'position': _floats(item.get('position'), (0.0, 0.0, 0.0)),
+             'rotation': _floats(item.get('rotation'), (0.0, 0.0, 0.0, 1.0))}
+    if 'volume' in item:
+        return Volume(str(item['name']), str(item['volume']), size=_floats(item.get('size'),
+                      (100.0, 100.0, 100.0)), who=str(item.get('who', 'players')),
+                      once=bool(item.get('once', False)), prompt=str(item.get('prompt', '')),
+                      cost=int(item.get('cost', 0)), **place, **common)
+    place['scale'] = _floats(item.get('scale'), UNIT)
+    start = dict(item.get('start', {}))
+    if 'mesh' in item and 'source' not in item or 'game' in item and 'source' not in item:
+        return Model(str(item['name']), mesh=str(item.get('mesh', '')),
+                     game=str(item.get('game', '')), collision=str(item.get('collision', 'solid')),
+                     shape=str(item.get('shape', 'mesh')), padding=float(item.get('padding', 0.0)),
+                     block_margin=float(item.get('block_margin', BLOCK_MARGIN)),
+                     start=start, **place, **common)
+    return Prefab(str(item['name']), parts=[object_from_json(p) for p in item.get('parts', [])],
+                  start=start, library=str(item.get('library', '')),
+                  source=str(item.get('source', '')), group=str(item.get('group', '')),
+                  piece=str(item.get('piece', '')), settings=dict(item.get('settings', {})),
+                  fields=dict(item.get('fields', {})), mesh=str(item.get('mesh', '')),
+                  game=str(item.get('game', '')), base=bool(item.get('base', False)),
+                  **place, **common)
+
+
+def _write_meshes(source: Path, meshes: list[Mesh]) -> tuple[list[dict], set]:
+    (source / 'meshes').mkdir(parents=True, exist_ok=True)
+    (source / 'textures').mkdir(parents=True, exist_ok=True)
+    items, wanted = [], set()
+    for mesh in meshes:
+        item = _write_mesh(source, 'meshes', mesh)
+        item.pop('collision', None)
+        item.pop('shape', None)
+        items.append(item)
+        wanted.add(item['file'])
+        wanted.update(item['textures'])
+    return items, wanted
+
+
+def _read_meshes(source: Path, data: dict) -> list[Mesh]:
+    return [_read_mesh(source, item, 'solid') for item in data.get('meshes', [])]
+
+
+def save(world: World, source: str | Path) -> None:
+    """Write *world* into a project's source folder (format 3), removing files it no longer
+    uses (prefab library files in source/prefabs are left alone)."""
+    source = Path(source)
+    meshes, wanted = _write_meshes(source, world.meshes)
+    for folder in ('meshes', 'props', 'textures'):
+        if (source / folder).is_dir():
+            for old in (source / folder).iterdir():
+                if old.suffix in ('.json', '.png') and f'{folder}/{old.name}' not in wanted:
+                    old.unlink()
+    lines = ['{', f'  "format": {FORMAT},', f'  "base": {json.dumps(world.base)},']
+    if world.inherit:
+        lines.append('  "inherit": true,')
+    if world.removed:
+        lines.append(f'  "removed": {json.dumps(sorted(world.removed))},')
+    lines += _lines('meshes', meshes) + _lines('models', [object_json(m) for m in world.models])
+    lines += _lines('volumes', [object_json(v) for v in world.volumes])
+    lines += _lines('prefabs', [object_json(p) for p in world.prefabs], last=True) + ['}']
+    (source / 'world.json').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+
+def load(source: str | Path) -> World:
+    """A project's world. Format 1 and 2 files load and convert (from_layout)."""
+    source = Path(source)
+    try:
+        data = json.loads((source / 'world.json').read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        raise WorldError(f'{source / "world.json"} not found: this map has no world yet') from None
+    except (OSError, ValueError) as exc:
+        raise WorldError(f'cannot read world.json: {exc}') from exc
+    if data.get('format') in (1, 2):
+        return from_layout(_load_layout(source))
+    if data.get('format') != FORMAT:
+        raise WorldError(f'world.json format {data.get("format")!r} is not supported')
+    world = World(str(data.get('base', 'kino')), inherit=bool(data.get('inherit', False)),
+                  removed=[str(item) for item in data.get('removed', [])],
+                  meshes=_read_meshes(source, data))
+    try:
+        for key, target in (('models', world.models), ('volumes', world.volumes),
+                            ('prefabs', world.prefabs)):
+            target.extend(object_from_json(item) for item in data.get(key, []))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WorldError(f'world.json: {exc}') from exc
+    _load_chalk_images(source, world.prefabs)
+    return world
+
+
+def _load_chalk_images(source: Path, prefabs) -> None:
+    for _full, item in walk(prefabs):
+        if not isinstance(item, Prefab):
+            continue
+        image = item.settings.get(CHALK_FIELD, '')
+        if isinstance(image, str) and image not in ('', 'none'):
+            try:
+                item.chalk_texture = read_texture(_inside(source, image))
+            except (OSError, ValueError) as exc:
+                raise WorldError(f'{item.name}: chalk image {image}: {exc}') from exc
+
+
+# The prefab library: source/prefabs/<Name>.json (+ <Name>/meshes, <Name>/textures)
+
+def library_names(source: str | Path) -> list[str]:
+    folder = Path(source) / 'prefabs'
+    return sorted(p.stem for p in folder.glob('*.json')) if folder.is_dir() else []
+
+
+def save_prefab(source: str | Path, prefab: Prefab, meshes: list[Mesh]) -> Path:
+    """Store *prefab* (placed at the origin) and the meshes its parts use in the library."""
+    if not OBJECT_NAME_RE.fullmatch(prefab.name):
+        raise WorldError(f'prefab name {prefab.name!r}: use letters, digits and _')
+    folder = Path(source) / 'prefabs'
+    own = folder / prefab.name
+    if own.is_dir():
+        shutil.rmtree(own)
+    own.mkdir(parents=True)
+    used = _meshes_used([prefab])
+    items, _wanted = _write_meshes(own, [m for m in meshes if m.name in used])
+    stored = copy.deepcopy(prefab)
+    stored.position, stored.rotation, stored.scale = (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), UNIT
+    stored.library = ''
+    path = folder / f'{prefab.name}.json'
+    path.write_text(json.dumps({'format': FORMAT, 'meshes': items, 'prefab': object_json(stored)},
+                               indent=1) + '\n', encoding='utf-8')
+    return path
+
+
+def load_prefab(source: str | Path, name: str) -> tuple[Prefab, list[Mesh]]:
+    """A library prefab and the meshes it uses (to add to a world under their names)."""
+    path = Path(source) / 'prefabs' / f'{name}.json'
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        prefab = object_from_json(data['prefab'])
+        meshes = _read_meshes(path.parent / name, data)
+    except (OSError, ValueError, KeyError) as exc:
+        raise WorldError(f'prefab {name}: {exc}') from exc
+    prefab.library = name
+    return prefab, meshes
+
+
+def _meshes_used(items) -> set[str]:
+    return {item.mesh for _full, item in walk(items) if getattr(item, 'mesh', '')}
+
+
+# Format 3 checks
+
+def validate(world: World) -> list[str]:
+    """Problems that would stop the world from compiling."""
+    problems = []
+    if world.base not in levels.SHIPPED_LEVELS:
+        problems.append(f'base level {world.base!r} is not one of the game\'s levels')
+    meshes = {mesh.name for mesh in world.meshes}
+    for mesh in world.meshes:
+        _check_mesh(mesh, f'mesh {mesh.name!r}', problems)
+    names: dict[str, str] = {}
+    for full, item in walk(world.objects()):
+        label = f'{item.kind} {full!r}'
+        if not OBJECT_NAME_RE.fullmatch(item.name):
+            problems.append(f'{label}: names use letters, digits and _ (at most 48, starting '
+                            'with a letter)')
+        key = full.lower()
+        if key in names:
+            problems.append(f'{full!r}: two objects have this name')
+        names[key] = full
+        if isinstance(item, Model):
+            if bool(item.mesh) == bool(item.game):
+                problems.append(f'{label}: needs either its own mesh or a game model')
+            elif item.mesh and item.mesh not in meshes:
+                problems.append(f'{label}: mesh {item.mesh!r} does not exist')
+            elif item.game:
+                try:
+                    Instance((0, 0, 0), model=item.game).model_ref()
+                except ValueError:
+                    problems.append(f'{label}: game model {item.game!r} is not <group path>#0x<hash>')
+            if item.collision not in COLLISION_KINDS or item.shape not in SHAPES:
+                problems.append(f'{label}: collision must be floor, solid or none and shape box or mesh')
+            if not 0.0 <= item.padding <= 500.0:
+                problems.append(f'{label}: box padding must be between 0 and 500 cm')
+            if not 0.0 <= item.block_margin <= 500.0:
+                problems.append(f'{label}: blocking margin must be between 0 and 500 cm')
+        elif isinstance(item, Volume):
+            if item.kind_of not in VOLUME_KINDS:
+                problems.append(f'{label}: kind must be trigger, hit or use')
+            if item.who not in VOLUME_WHO:
+                problems.append(f'{label}: who must be players, zombies or anyone')
+            if min(item.size) <= 0:
+                problems.append(f'{label}: size must be above zero')
+        else:
+            if item.is_game and item.parts:
+                problems.append(f'{label}: a game prefab has no parts')
+            if item.mesh and item.mesh not in meshes:
+                problems.append(f'{label}: mesh {item.mesh!r} does not exist')
+            if item.base and '.' in full:
+                problems.append(f'{label}: the base level\'s entities cannot be prefab parts')
+    if world.inherit:   # the base level brings its floors and spawns
+        return sorted(set(problems), key=problems.index)
+    flat = [item for _full, item in walk(world.objects())]
+    if not any(isinstance(i, Prefab) and (i.piece == 'player_spawn' or
+                                          i.source.startswith('spawn_player_')) for i in flat):
+        problems.append('the world needs a player spawn')
+    if not any(isinstance(i, Model) and i.collision == 'floor' for i in flat):
+        problems.append('the world needs a walkable model to stand on')
+    return sorted(set(problems), key=problems.index)
+
+
+# Format 1 and 2 -> 3
+
+def _unique(name: str, taken: set) -> str:
+    text = ''.join(c if c.isalnum() and c.isascii() else '_' for c in name).strip('_') or 'object'
+    if not text[0].isalpha():
+        text = 'obj_' + text
+    text = text[:44]
+    candidate, number = text, 1
+    while candidate.lower() in taken:
+        number += 1
+        candidate = f'{text}_{number}'
+    taken.add(candidate.lower())
+    return candidate
+
+
+def _start_of(script: dict) -> dict:
+    full = {**SCRIPT_DEFAULTS, **script} if script else {}
+    return {key: full[key] for key in START_DEFAULTS if full and full[key] != START_DEFAULTS[key]}
+
+
+def from_layout(layout: Layout) -> World:
+    """A format 3 world from a format 1/2 one: level meshes and props become models (sharing
+    their mesh), placed game models become models, entities become game prefabs."""
+    world = World(layout.base, inherit=layout.inherit, removed=list(layout.removed))
+    taken: set = set()
+    for mesh in layout.meshes + layout.props:
+        world.meshes.append(dataclasses.replace(mesh, script={}))
+    for mesh in layout.meshes:
+        world.models.append(Model(_unique(script_of(mesh).get('name') or mesh.name, taken),
+                                  mesh=mesh.name, collision=mesh.collision, shape='mesh',
+                                  start=_start_of(mesh.script)))
+    props = {prop.name: prop for prop in layout.props}
+    for number, instance in enumerate(layout.instances):
+        name = script_of(instance).get('name') or (instance.prop or f'model_{number}')
+        place = {'position': tuple(instance.position), 'rotation': instance.quaternion(),
+                 'scale': tuple(instance.scale), 'start': _start_of(instance.script)}
+        if instance.prop:
+            prop = props.get(instance.prop)
+            world.models.append(Model(_unique(name, taken), mesh=instance.prop,
+                                      collision=prop.collision if prop else 'solid',
+                                      shape=prop.shape if prop else 'box', **place))
+        else:
+            world.models.append(Model(_unique(name, taken), game=instance.model,
+                                      collision=instance.collision, shape=instance.shape, **place))
+    for entity in layout.entities:
+        base = layout.inherit and not entity.piece and not entity.group and \
+            entity.source.startswith('0x')
+        name = script_of(entity).get('name') or (
+            f'base_{entity.source[2:]}' if base else entity.source)
+        world.prefabs.append(Prefab(
+            _unique(name, taken), position=tuple(entity.position), rotation=entity.quaternion(),
+            scale=tuple(entity.scale), start=_start_of(entity.script), source=entity.source,
+            group=entity.group, piece=entity.piece, settings=dict(entity.settings),
+            fields=dict(entity.fields), mesh=entity.prop, game=entity.model, base=base,
+            chalk_texture=entity.chalk_texture))
+    return world
+
+
+# Format 3 -> the compiler's layout
+
+def _compose(parent, child):
+    """(position, rotation, scale) of *child* (in *parent*'s space) in the world."""
+    from . import blender_scene as scene
+
+    p_pos, p_rot, p_scale = parent
+    c_pos, c_rot, c_scale = child
+    scaled = tuple(c_pos[i] * p_scale[i] for i in range(3))
+    turned = scene._rotate(tuple(p_rot), scaled)
+    return (tuple(p_pos[i] + turned[i] for i in range(3)), scene._quat_mul(tuple(p_rot), tuple(c_rot)),
+            tuple(p_scale[i] * c_scale[i] for i in range(3)))
+
+
+def lower(world: World) -> Layout:
+    """The compiler's layout for a format 3 world: prefabs flattened into their parts (named
+    '<Prefab>.<Part>'), every object named, and objects scripts may change marked dynamic (own
+    collision, tagged walkable area)."""
+    layout = Layout(world.base, inherit=world.inherit, removed=list(world.removed))
+    meshes = {mesh.name: mesh for mesh in world.meshes}
+    variants: dict[tuple, str] = {}
+    used_prop_names: set = set()
+
+    def prop_for(mesh_name: str, collision: str, shape: str) -> str:
+        key = (mesh_name, collision, shape)
+        if key not in variants:
+            name = mesh_name
+            if name in used_prop_names:
+                name = f'{mesh_name[:24]}_{iw_hash(f"{collision}{shape}{mesh_name}") & 0xffff:04x}'
+            used_prop_names.add(name)
+            layout.props.append(dataclasses.replace(meshes[mesh_name], name=name,
+                                                    collision=collision, shape=shape, script={}))
+            variants[key] = name
+        return variants[key]
+
+    def script_for(full: str, item, dynamic: bool) -> dict:
+        start = {**START_DEFAULTS, **getattr(item, 'start', {})}
+        dynamic = dynamic or bool(item.script) or any(
+            start[k] != START_DEFAULTS[k] for k in START_DEFAULTS)
+        return {'name': full, **start, 'dynamic': dynamic}
+
+    def emit(item, transform, prefix: str, scripted_owner: bool) -> None:
+        full = f'{prefix}{item.name}'
+        position, rotation, scale = _compose(transform, (item.position, item.rotation,
+                                                         getattr(item, 'scale', UNIT)))
+        if isinstance(item, Model):
+            script = script_for(full, item, scripted_owner)
+            if item.mesh:
+                layout.instances.append(Instance(position, prop=prop_for(
+                    item.mesh, item.collision, item.shape), rotation=rotation, scale=scale,
+                    script=script, padding=item.padding,
+                    block_margin=item.block_margin))
+            else:
+                layout.instances.append(Instance(position, model=item.game, collision=item.collision,
+                                                 shape=item.shape, rotation=rotation, scale=scale,
+                                                 script=script, padding=item.padding,
+                    block_margin=item.block_margin))
+        elif isinstance(item, Volume):
+            size = tuple(item.size[i] * scale[i] for i in range(3))
+            layout.entities.append(Placement(VOLUME_SOURCES[item.kind_of], position, rotation=rotation,
+                                             scale=tuple(c / TRIGGER_SIZE for c in size),
+                                             script={'name': full}))
+        elif item.is_game:
+            # Player spawns are found by their own names (spawn_player_1..4); everything else is
+            # called what the world calls it (a base entity's name is its own already).
+            name = item.source if item.piece == 'player_spawn' else full
+            layout.entities.append(Placement(
+                item.source, position, group=item.group, rotation=rotation, scale=scale,
+                prop=prop_for(item.mesh, 'none', 'box') if item.mesh else '', model=item.game,
+                fields=dict(item.fields), piece=item.piece, settings=dict(item.settings),
+                chalk_texture=item.chalk_texture,
+                script=script_for(name, item, scripted_owner)))
+        else:
+            for part in item.parts:
+                emit(part, (position, rotation, scale), full + '.', scripted_owner or bool(item.script))
+
+    origin = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), UNIT)
+    for item in world.objects():
+        emit(item, origin, '', False)
+    return layout
+
+
+def describe(world: World) -> list[dict]:
+    """What the Lua runtime (boz.prefabs) needs: every scripted object and every volume, with
+    its parts, script module and property values."""
+    out = []
+
+    def owner_entry(full: str, item, owner):
+        entry = {'name': full, 'kind': item.kind, 'script': _module(item.script),
+                 'properties': dict(item.properties), 'owner': owner or ''}
+        if isinstance(item, Volume):
+            entry.update({'volume': item.kind_of, 'who': item.who, 'once': item.once,
+                          'prompt': item.prompt, 'cost': item.cost})
+        if isinstance(item, Prefab) and not item.is_game:
+            entry['parts'] = [{'name': f'{full}.{part.name}', 'part': part.name, 'kind': part.kind}
+                              for part in item.parts]
+            # Every entity under it (nested prefabs flattened): what hide() and friends reach.
+            entry['members'] = [name for name, member in walk(item.parts, full + '.')
+                                if not (isinstance(member, Prefab) and not member.is_game)]
+        return entry
+
+    def visit(items, prefix: str, owner: str):
+        for item in items:
+            full = f'{prefix}{item.name}'
+            if item.script or isinstance(item, Volume):
+                out.append(owner_entry(full, item, owner))
+            if isinstance(item, Prefab):
+                visit(item.parts, full + '.', full if item.script else owner)
+
+    visit(world.objects(), '', '')
+    return out
+
+
+def object_names(world: World) -> list[str]:
+    """Every object's name in the game, so game events can name the map's objects
+    (door_opened says which door)."""
+    names = {item.source if getattr(item, 'piece', '') == 'player_spawn' else full
+             for full, item in walk(world.objects())}
+    return sorted(name for name in names if name)
+
+
+def _module(script: str) -> str:
+    """'prefabs/Vault.lua' -> 'prefabs.Vault' (what require() takes)."""
+    if not script:
+        return ''
+    text = script[:-4] if script.endswith('.lua') else script
+    return text.replace('/', '.').replace('\\', '.')
+
+
+def compile_world(pack, name: str, world: World,
+                  fixed: group.Group | None = None) -> levels.LevelFiles:
+    """The game's groups for *world* under the level name *name* (format 3: lowered, then
+    compiled). files.runtime carries the start state and the scripted objects for boz.world."""
+    problems = validate(world)
+    if problems:
+        raise WorldError('; '.join(problems))
+    files = _compile_layout(pack, name, lower(world), fixed)
+    files.runtime['objects'] = describe(world)
+    files.runtime['names'] = object_names(world)
+    return files
 
 
 class _GameModels:
@@ -648,9 +1249,17 @@ class _GameModels:
         return out
 
 
-TRIGGER_SOURCE = 'boz:trigger_volume'   # bozkit.toolkit's trigger volume piece
-TRIGGER_TEMPLATE = 'levels/callofthedead/callofthedead_statics.group.bin'
-TRIGGER_SIZE = 100.0   # centimetres: the editor's trigger cube at scale 1
+# Volumes (format 3) compile to entities the compiler makes from shipped templates.
+TRIGGER_SOURCE = 'boz:trigger_volume'
+HIT_SOURCE = 'boz:hit_volume'
+USE_SOURCE = 'boz:use_volume'
+VOLUME_SOURCES = {'trigger': TRIGGER_SOURCE, 'hit': HIT_SOURCE, 'use': USE_SOURCE}
+TRIGGER_TEMPLATE = 'levels/callofthedead/callofthedead_statics.group.bin'   # CSnowTrigger
+HIT_TEMPLATE = 'levels/kino/kino_statics.group.bin'                         # CEasterEgg skulls
+USE_TEMPLATE = 'levels/kino/kino_statics.group.bin'                         # barricade CPOI
+TRIGGER_SIZE = 100.0   # centimetres: a volume's size at scale 1
+HIT_SONG_FIELD = 0xc0c5b1df   # CEasterEgg's song path (unnamed in the reflection)
+HIT_SONG = 'boz/hit_volume'   # no such song: the group never completes
 WEAPON_FIELD = 'boz.weapon'   # a wall buy's weapon (Placement.fields)
 CHALK_FIELD = 'boz.chalk'     # a wall buy's chalk (Placement.settings): '' auto, 'none', an image
 
@@ -730,9 +1339,10 @@ def _hull(points):
     return lower[:-1] + upper[:-1]
 
 
-def _box_corners(vertices):
-    low = [min(v[i] for v in vertices) for i in range(3)]
-    high = [max(v[i] for v in vertices) for i in range(3)]
+def _box_corners(vertices, padding=(0.0, 0.0, 0.0)):
+    """The 8 corners of the vertices' bounds, grown by *padding* (per axis, in their units)."""
+    low = [min(v[i] for v in vertices) - padding[i] for i in range(3)]
+    high = [max(v[i] for v in vertices) + padding[i] for i in range(3)]
     return [tuple(high[i] if corner >> i & 1 else low[i] for i in range(3)) for corner in range(8)]
 
 
@@ -789,6 +1399,8 @@ class _Level:
         # Objects scripts change: their own collision, tagged walkable areas, start state.
         self.script_collision: dict[str, tuple[list, list]] = {}
         self.blockers: list = []                   # door_footprints entries tagged by script name
+        self.blocker_points: dict = {}             # name hash -> (footprint points, below, grow)
+        self.player_radius = _player_radius(statics)
         self.runtime = {'hidden': [], 'no_collision': [], 'blocked': []}
         self.scripted: set[int] = set()            # id() of scripted entity resources
 
@@ -975,6 +1587,9 @@ class _Level:
         if entity.source == TRIGGER_SOURCE:
             self._trigger_volume(entity)
             return
+        if entity.source in (HIT_SOURCE, USE_SOURCE):
+            self._template_volume(entity)
+            return
         in_base = not entity.group or entity.group == self.base_statics
         existing = self.specs.get(entity.hash) if in_base else None
         rotation, scale = entity.quaternion(), tuple(entity.scale)
@@ -987,7 +1602,7 @@ class _Level:
             existing.body = resources.encode_entity_spec(spec)
             self._mark([old, entity.position])
             self.moved.append(existing)
-            if entity.script:
+            if entity.script and script_of(entity)['dynamic']:
                 self._script_entity(entity, existing, spec)
             return
         if existing is not None:
@@ -1052,7 +1667,7 @@ class _Level:
         self.kept.append(resource)
         self.added.append(resource)
         self._mark([entity.position])
-        if entity.script:
+        if entity.script and script_of(entity)['dynamic']:
             self._script_entity(entity, resource, spec)
 
     def _trigger_volume(self, entity: Placement) -> None:
@@ -1096,9 +1711,73 @@ class _Level:
         reflect.set_typed_value(ghost, True)
         resource = group.Resource(None, iw_hash(name), resources.encode_entity_spec(spec))
         self.kept.append(resource)
-        self.own.add(id(resource))    # no box of its own in the collision or the navmesh
-        self._mark([entity.position])
+        # No box of its own in the collision or the navmesh, so the walkable area around it is
+        # not rebuilt (a rebuilt tile is never quite as good as the game's own).
+        self.own.add(id(resource))
         self.script(entity)
+
+    def _template_spec(self, path: str, component: str):
+        from . import resources
+
+        for resource_type in group.parse(self.pack.read(path)).types():
+            if resource_type.class_hash != levels.ENTITY_SPEC:
+                continue
+            for item in resource_type.resources:
+                spec = resources.decode_entity_spec(item.body)
+                if levels._component(spec, component) is not None:
+                    return spec
+        raise WorldError(f'the game has no {component} entity to copy ({path})')
+
+    def _template_volume(self, entity: Placement) -> None:
+        """A Hit volume (a musical easter egg skull: health, a collision sphere, reports
+        weapon hits) or a Use volume (a barricade's point of interest without the barricade:
+        the game shows no prompt for it, scripts do)."""
+        from . import reflect, resources
+
+        size = max(abs(c) for c in entity.scale) * TRIGGER_SIZE
+        if entity.source == HIT_SOURCE:
+            spec = self._template_spec(HIT_TEMPLATE, 'CEasterEgg')
+            sphere = levels._component(spec, 'CIsCollisionSphere')
+            radius = levels._blob_prop(sphere.blob, 'm_radius') if sphere and sphere.blob else None
+            if radius is not None:
+                reflect.set_typed_value(radius, size / 2)
+            # The musical easter egg manager groups skulls by song: a song of its own keeps the
+            # volume out of the level's easter egg (boz.objects reports the hit and skips it).
+            egg = levels._component(spec, 'CEasterEgg')
+            for prop in egg.blob.properties if egg and egg.blob else []:
+                if prop.name_hash == HIT_SONG_FIELD:
+                    reflect.set_typed_value(prop, HIT_SONG)
+        else:
+            barricade = self._template_spec(USE_TEMPLATE, 'CBarricade')
+            keep = {iw_hash(n) for n in ('CIsTransform', 'CIsNamed', 'CPOI', 'CIsBroadcaster')}
+            spec = copy.deepcopy(barricade)
+            spec.components = [c for c in spec.components if c.type_hash in keep]
+            spec.children = []
+            poi = levels._component(spec, 'CPOI')
+            # The game offers a point of interest only within its reach (m_MaxDistance, from the
+            # player to its centre), height (m_MaxYDistance) and viewing cone (m_ViewingAngle
+            # around its forward axis, both ways with m_BiDirection). A Use volume works from
+            # every side: no cone, reach past its edge by an arm's length, the height of its box.
+            for field, kind, value in (('m_MaxDistance', 'float', size / 2 + 100.0),
+                                       ('m_MaxYDistance', 'float', size / 2 + 100.0),
+                                       ('m_HeightOffset', 'float', 0.0),
+                                       ('m_AngleDistanceOffset', 'float', 0.0),
+                                       ('m_ViewingAngle', 'float', 360.0),
+                                       ('m_BiDirection', 'bool', True),
+                                       ('m_IsReverseViewAngle', 'bool', False)):
+                prop = levels._blob_prop(poi.blob, field)
+                if prop is None:
+                    prop = reflect.Property(iw_hash('CPOI'), iw_hash(kind), iw_hash(field), b'')
+                    poi.blob.properties.append(prop)
+                reflect.set_typed_value(prop, value)
+        spec = copy.deepcopy(spec)
+        self.copies += 1
+        name = script_of(entity).get('name') or f'{self.name}_volume_{self.copies}'
+        self._name(spec, name)
+        levels._set_transform(spec, entity.position, entity.quaternion())
+        resource = group.Resource(None, iw_hash(name), resources.encode_entity_spec(spec))
+        self.kept.append(resource)
+        self.own.add(id(resource))    # nothing walkable changes: its navmesh tiles stay as shipped
 
     def _script_entity(self, entity: Placement, resource, spec) -> None:
         """A scripted entity: no baked box (its own collision is switched instead); a blocking
@@ -1297,7 +1976,7 @@ class _Level:
             spec.components.insert(1, named)
         reflect.set_typed_value(levels._blob_prop(named.blob, 'name'), name)
 
-    def script(self, item, footprint_points=None) -> str:
+    def script(self, item, footprint_points=None, margin: float = BLOCK_MARGIN) -> str:
         """Record a scripted object's start state; returns its script name ('' for none)."""
         script = script_of(item)
         name = script.get('name', '')
@@ -1307,15 +1986,22 @@ class _Level:
             self.runtime['hidden'].append(name)
         if not script['collision']:
             self.runtime['no_collision'].append(name)
-        if script['blocks']:
+        if script['blocks'] and script['dynamic']:
             self.runtime['blocked'].append(name)
             if footprint_points:
-                # A little below it: the floor it stands on is what gets tagged.
-                self.blockers.append(_tag_area(iw_hash(name), footprint_points, below=0.3))
+                # A little below it: the floor it stands on is what gets tagged. The area is the
+                # object's collision footprint (its box with padding), so they match.
+                # The margin is the gap to the player's body: the area also reaches the player's
+                # radius past it, as shipped floor stops that far from walls.
+                grow = margin / 100 + self.player_radius
+                self.blockers.append(_tag_area(iw_hash(name), footprint_points, below=0.3,
+                                               grow=grow))
+                self.blocker_points[iw_hash(name)] = (footprint_points, 0.3, grow)
         return name
 
     def collide(self, vertices, triangles, kind: str, shape: str, position=None,
-                rotation=(0.0, 0.0, 0.0, 1.0), scale=UNIT, script: str = '') -> list:
+                rotation=(0.0, 0.0, 0.0, 1.0), scale=UNIT, script: str = '',
+                padding: float = 0.0) -> list:
         """Add collision; a scripted object's goes into its own collision entity. Returns the
         world-space points used."""
         from . import blender_scene as scene
@@ -1323,10 +2009,12 @@ class _Level:
         if kind == 'none':
             return []
         chain = [(tuple(position), tuple(rotation), tuple(scale))] if position else []
+        # Padding is in world centimetres: in the model's own units it is divided by its scale.
+        local_padding = tuple(padding / abs(scale[i]) if scale[i] else 0.0 for i in range(3))
         if script:
             solid, single = self.script_collision.setdefault(script, ([], []))
             if shape == 'box':
-                points = [scene._native_apply(chain, c) for c in _box_corners(vertices)]
+                points = [scene._native_apply(chain, c) for c in _box_corners(vertices, local_padding)]
                 single.extend(levels.box_triangles(len(solid)))
             else:
                 points = [scene._native_apply(chain, tuple(map(float, v))) if chain
@@ -1334,11 +2022,11 @@ class _Level:
                 single.extend((a + len(solid), b + len(solid), c + len(solid))
                               for a, b, c in triangles)
             solid.extend(points)
-            self._mark(points)
+            # Not marked for a navmesh rebuild: its walkable area is tagged (navcut), not cut.
             return points
         before = len(self.single)
         if shape == 'box':
-            points = [scene._native_apply(chain, c) for c in _box_corners(vertices)]
+            points = [scene._native_apply(chain, c) for c in _box_corners(vertices, local_padding)]
             self.single.extend(levels.box_triangles(len(self.solid)))
             self.solid.extend(points)
         else:
@@ -1437,11 +2125,11 @@ class _Level:
             quad.vertices, quad.uvs, triangles, [iw_hash(material_name)]))
         return True
 
-    def build_props(self, world: World) -> None:
+    def build_props(self, world: Layout) -> None:
         for prop in world.props:
             self.build(prop, f'{self.name}_prop_{prop.name}')
 
-    def contents(self, world: World) -> None:
+    def contents(self, world: Layout) -> None:
         """The world's own meshes and instances (props are built first: build_props)."""
         from . import native
 
@@ -1449,22 +2137,25 @@ class _Level:
         for mesh in world.meshes:
             model_name = f'{name}_{mesh.name}'
             script = script_of(mesh).get('name', '')
+            dynamic = script if script_of(mesh).get('dynamic', True) else ''
             self.build(mesh, model_name)
             self.place(script or model_name, iw_hash(model_name), (0, 0, 0), named=bool(script))
             points = self.collide(mesh.vertices, mesh.triangles, mesh.collision, 'mesh',
-                                  script=script)
+                                  script=dynamic)
             self.script(mesh, points or [tuple(map(float, v)) for v in mesh.vertices])
         props = {prop.name: prop for prop in world.props}
         for number, instance in enumerate(world.instances):
             rotation, scale = instance.quaternion(), tuple(instance.scale)
             script = script_of(instance).get('name', '')
+            dynamic = script if script_of(instance).get('dynamic', True) else ''
             if instance.prop:
                 prop = props[instance.prop]
                 self.place(script or f'{name}_prop_{prop.name}_{number}',
                            iw_hash(f'{name}_prop_{prop.name}'), instance.position, rotation, scale,
                            named=bool(script))
                 points = self.collide(prop.vertices, prop.triangles, prop.collision, prop.shape,
-                                      instance.position, rotation, scale, script=script)
+                                      instance.position, rotation, scale, script=dynamic,
+                                      padding=instance.padding)
             else:
                 path, model_hash = instance.model_ref()
                 self.copy_model(path, model_hash)
@@ -1473,8 +2164,8 @@ class _Level:
                 decoded = native.decode_model(self.models[model_hash])
                 points = self.collide(decoded.vertices, decoded.triangles, instance.collision,
                                       instance.shape, instance.position, rotation, scale,
-                                      script=script)
-            self.script(instance, points)
+                                      script=dynamic, padding=instance.padding)
+            self.script(instance, points, instance.block_margin)
 
     def script_collisions(self) -> None:
         """A collision entity (<name>_collision, a copy of the level's) for each scripted object
@@ -1483,7 +2174,10 @@ class _Level:
 
         if not self.script_collision:
             return
-        source = next((r for r in self.kept if any(
+        # The level's own collision entity (kept in an inherited level; a generated level adds
+        # it after this, from the base level's statics).
+        candidates = list(self.kept) + list(self.by_class[levels.ENTITY_SPEC].resources)
+        source = next((r for r in candidates if any(
             c.class_hash == resources.COLLISION_MESH_SPEC
             for c in resources.decode_entity_spec(r.body).components)), None)
         if source is None:
@@ -1518,9 +2212,10 @@ class _Level:
                 self.solid += box
                 self._mark(box)
 
-    def door_footprints(self, resources_list) -> list:
+    def door_footprints(self, resources_list, blockers: bool = True) -> list:
         """(name hash, XZ footprint in metres, min y, max y) of each door (its collision boxes
-        and its model), for navbuild."""
+        and its model), for navbuild; with the areas of blocking objects unless *blockers* is
+        false."""
         from . import blender_scene as scene
         from . import native, resources
 
@@ -1541,7 +2236,27 @@ class _Level:
             if not corners:
                 continue
             doors.append(_tag_area(name_hash, corners))
-        return doors + self.blockers
+        return doors + (self.blockers if blockers else [])
+
+    def build_navmesh(self, build) -> bytes:
+        """Run *build* (doors -> navmesh body) until every blocking object's area made it into
+        the navmesh: Recast drops regions under its minimum size (a thin wall in a tight spot),
+        so a missing one is grown and the navmesh built again. One still missing is reported in
+        runtime['warnings'] (its spot stays walkable)."""
+        body = build()
+        for extra in (0.3, 0.6, 1.2):
+            missing = set(self.blocker_points) - _navmesh_tags(body)
+            if not missing:
+                return body
+            self.blockers = [_tag_area(h, self.blocker_points[h][0], below=self.blocker_points[h][1],
+                                       grow=self.blocker_points[h][2] + extra) if h in missing else entry
+                             for entry in self.blockers for h in (entry[0],)]
+            body = build()
+        missing = set(self.blocker_points) - _navmesh_tags(body)
+        if missing:
+            self.runtime.setdefault('warnings', []).append(
+                f'{len(missing)} blocking objects have no walkable floor under them to block')
+        return body
 
     def set_collision(self, resource: group.Resource) -> None:
         from . import collision, resources
@@ -1560,26 +2275,51 @@ class _Level:
         self.by_class[levels.ENTITY_SPEC].resources = self.kept
 
 
-def _tag_area(name_hash: int, corners, below: float = 0.0) -> tuple:
-    """(name hash, XZ hull in metres, min y, max y) of points in centimetres, grown a little: a
-    navmesh area tagged with the name (doors, and objects scripts open and close)."""
+TAG_GROW = 0.1   # metres a door's tagged area reaches past its collision on every side
+
+
+def _player_radius(statics) -> float:
+    """The level navmesh's agent radius (metres), else PLAYER_RADIUS."""
+    from . import navbuild, navigation
+
+    for resource_type in statics.types():
+        if resource_type.class_hash == levels.NAVMESH and resource_type.resources:
+            try:
+                return navbuild.Settings.from_raw(
+                    navigation.decode(resource_type.resources[0].body).config.raw).agent_radius
+            except (ValueError, struct.error):
+                break
+    return PLAYER_RADIUS
+
+
+def _navmesh_tags(body: bytes) -> set[int]:
+    """The name hashes navmesh polygons are tagged with."""
+    from . import navigation
+
+    tags = set()
+    for tile in navigation.decode(body).tiles:
+        for poly in navigation.decode_tile(tile.data).polys:
+            if poly.extra:
+                tags.add(poly.extra)
+    return tags
+
+
+def _tag_area(name_hash: int, corners, below: float = 0.0, grow: float = TAG_GROW) -> tuple:
+    """(name hash, XZ hull in metres, min y, max y) of points in centimetres: a navmesh area
+    tagged with the name (doors, and objects scripts open and close). The outline is grown
+    evenly on every side (a circle swept around the hull), so a thin wall still tags a strip
+    wide enough for the navmesh to keep (a narrow one is dropped when regions are built)."""
+    import math
+
     points = [(x / 100, z / 100) for x, _y, z in corners]
-    centre = (sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points))
-    # Reach a little past it: the area must catch whole polygons.
-    grown = []
-    for x, z in _hull(points) if len(points) >= 3 else [(centre[0] - 0.5, centre[1] - 0.5),
-                                                        (centre[0] + 0.5, centre[1] - 0.5),
-                                                        (centre[0] + 0.5, centre[1] + 0.5),
-                                                        (centre[0] - 0.5, centre[1] + 0.5)]:
-        dx, dz = x - centre[0], z - centre[1]
-        length = (dx * dx + dz * dz) ** 0.5 or 1.0
-        grown.append((x + dx / length * 0.4, z + dz / length * 0.4))
+    swept = [(x + grow * math.cos(angle), z + grow * math.sin(angle))
+             for x, z in points for angle in (i * math.pi / 8 for i in range(16))]
     ys = [y / 100 for _x, y, _z in corners]
-    return (name_hash, grown, min(ys) - below, max(ys))
+    return (name_hash, _hull(swept), min(ys) - below, max(ys))
 
 
-def compile_world(pack, name: str, world: World,
-                  fixed: group.Group | None = None) -> levels.LevelFiles:
+def _compile_layout(pack, name: str, world: Layout,
+                    fixed: group.Group | None = None) -> levels.LevelFiles:
     """The game's groups for *world* under the level name *name*.
 
     A generated world gets the base level's weapons, arms, rounds, zombie types, sounds and
@@ -1588,7 +2328,7 @@ def compile_world(pack, name: str, world: World,
     all, with the world's additions and moved entities; only the navmesh tiles near changes are
     rebuilt.
     """
-    problems = validate(world)
+    problems = _validate_layout(world)
     if problems:
         raise WorldError('; '.join(problems))
     if world.inherit:
@@ -1632,10 +2372,10 @@ def compile_world(pack, name: str, world: World,
     level.kept.append(level.specs[collision_key])
     level.finish_entities()
     navmesh = by_class[levels.NAVMESH].resources[0]
-    navmesh.body = navbuild.build(navmesh.body,
-                                  [(x / 100, y / 100, z / 100) for x, y, z in level.solid],
-                                  level.single, blocking=level.blocking,
-                                  doors=level.door_footprints(level.kept))
+    template = navmesh.body
+    navmesh.body = level.build_navmesh(lambda: navbuild.build(
+        template, [(x / 100, y / 100, z / 100) for x, y, z in level.solid], level.single,
+        blocking=level.blocking, doors=level.door_footprints(level.kept)))
 
     files.groups[f'{name}.group.bin'] = levels.renamed(
         levels._read(pack, f'levels/{base}/{base}'), name,
@@ -1648,7 +2388,7 @@ def compile_world(pack, name: str, world: World,
     return files
 
 
-def _compile_inherited(pack, name: str, world: World, fixed) -> levels.LevelFiles:
+def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFiles:
     from . import blender_scene as scene
     from . import blender_scene, navbuild, resources
 
@@ -1671,7 +2411,6 @@ def _compile_inherited(pack, name: str, world: World, fixed) -> levels.LevelFile
     level.contents(world)
     level.add_chalks()
     level.entity_boxes(level.added)
-    level.script_collisions()
     level.finish_entities()
     navmesh_input = None
     if level.dirty:
@@ -1685,6 +2424,10 @@ def _compile_inherited(pack, name: str, world: World, fixed) -> levels.LevelFile
             except KeyError:
                 pass
         navmesh_input = scene.navmesh_input(parsed)
+    # Collision of objects scripts change comes after the navmesh input: their walkable area is
+    # a tagged one the script opens and closes, not a hole cut around them.
+    level.script_collisions()
+    level.finish_entities()
     if level.solid:
         # The world's own collision: a copy of the level's collision entity, at the origin.
         source = next((r for r in level.kept if any(
@@ -1699,16 +2442,27 @@ def _compile_inherited(pack, name: str, world: World, fixed) -> levels.LevelFile
         level.set_collision(added)
         level.kept.append(added)
         level.finish_entities()
+    navmesh = level.by_class[levels.NAVMESH].resources[0]
     if navmesh_input is not None:
+        # Geometry changed: Recast rebuilds the tiles around it (added doors gate theirs).
         vertices, triangles = navmesh_input
         offset = len(vertices)
         vertices = list(vertices) + [(x / 100, y / 100, z / 100) for x, y, z in level.solid]
         triangles = list(triangles) + [(a + offset, b + offset, c + offset)
                                        for a, b, c in level.single]
         blocking = [0] * len(navmesh_input[1]) + level.blocking
-        navmesh = level.by_class[levels.NAVMESH].resources[0]
-        navmesh.body, _report = navbuild.rebuild(navmesh.body, vertices, triangles,
-                                                 dirty=level.dirty, blocking=blocking,
-                                                 doors=level.door_footprints(level.added + level.moved))
+        navmesh.body = navbuild.rebuild(
+            navmesh.body, vertices, triangles, dirty=level.dirty, blocking=blocking,
+            doors=level.door_footprints(level.added + level.moved, blockers=False))[0]
+    if level.blockers:
+        # Blocking objects: their floor is cut out of the tiles as they are and tagged, so the
+        # rest of each tile stays the game's own (a Recast rebuild loses some of the designers'
+        # floor, Kino's stairs among it).
+        from . import navcut
+        navmesh.body, tagged = navcut.cut_areas(navmesh.body, level.blockers)
+        missing = set(level.blocker_points) - tagged
+        if missing:
+            level.runtime.setdefault('warnings', []).append(
+                f'{len(missing)} blocking objects have no walkable floor under them to block')
     files.runtime = level.runtime
     return files

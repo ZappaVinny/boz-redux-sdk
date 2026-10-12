@@ -163,5 +163,18 @@ class SdkHomeTests(unittest.TestCase):
         self.assertEqual(sdkhome.suggest_id('!!!'), 'my_mod')
 
 
+
+class OpenPathTests(unittest.TestCase):
+    def test_opening_never_waits(self):
+        from unittest import mock
+        started = []
+        with mock.patch.object(sdkhome, 'start_detached', lambda command, cwd, *a, **k: started.append(command)), \
+                mock.patch.object(sdkhome.sys, 'platform', 'linux'), \
+                mock.patch('shutil.which', lambda name: '/usr/bin/code' if name == 'code' else None):
+            sdkhome.open_path('/tmp/x/Vault.lua', editor=True)
+            sdkhome.open_path('/tmp/x')
+        self.assertEqual(started, [['/usr/bin/code', '--goto', '/tmp/x/Vault.lua'], ['xdg-open', '/tmp/x']])
+
+
 if __name__ == '__main__':
     unittest.main()

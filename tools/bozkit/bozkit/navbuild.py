@@ -85,6 +85,17 @@ def _tile_triangles(tile: navigation.TileData):
         yield poly, triangle
 
 
+SLOPED = math.cos(math.radians(12.0))   # steeper than this is a stair or ramp
+
+
+def _sloped(a, b, c) -> bool:
+    ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+    vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+    nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+    length = math.sqrt(nx * nx + ny * ny + nz * nz)
+    return length > 0 and abs(ny) / length < SLOPED
+
+
 class _SurfaceIndex:
     """Find the shipped polygon (flags, name hash) under a point, by XZ cell lookup."""
 
@@ -98,7 +109,9 @@ class _SurfaceIndex:
                     for gz in range(math.floor(min(zs) / cell), math.floor(max(zs) / cell) + 1):
                         self.cells.setdefault((gx, gz), []).append((poly, a, b, c))
 
-    def find(self, point, height_tolerance: float):
+    def find(self, point, height_tolerance: float, sloped_tolerance: float | None = None):
+        """The shipped polygon under *point* within *height_tolerance* vertically; under sloped
+        shipped floor (stairs, ramps) within *sloped_tolerance* when given."""
         x, y, z = point
         best = None
         for poly, a, b, c in self.cells.get((math.floor(x / self.cell), math.floor(z / self.cell)), ()):
@@ -111,7 +124,10 @@ class _SurfaceIndex:
             if min(l1, l2, l3) < -1e-4:
                 continue
             gap = abs(l1 * a[1] + l2 * b[1] + l3 * c[1] - y)
-            if gap <= height_tolerance and (best is None or gap < best[0]):
+            allowed = height_tolerance
+            if sloped_tolerance is not None and _sloped(a, b, c):
+                allowed = max(allowed, sloped_tolerance)
+            if gap <= allowed and (best is None or gap < best[0]):
                 best = (gap, poly)
         return best[1] if best else None
 
@@ -300,12 +316,26 @@ def _inside(point, boxes, margin=0.0) -> bool:
                box[1] - margin <= point[2] <= box[3] + margin for box in boxes)
 
 
+def _facing_up(vertices, triangles) -> list:
+    """Each triangle wound so Recast sees its face pointing up. The game's collision is mostly
+    wound the opposite way to Recast's, but not all of it (some of Kino's stairs are the other way
+    round): flipping every triangle turned those floors upside down and Recast dropped them.
+    Walls are unaffected; floor this adds on top of a ceiling is filtered out of rebuilt tiles
+    with the rest of the floor the shipped navmesh does not have."""
+    out = []
+    for a, b, c in triangles:
+        pa, pb, pc = vertices[a], vertices[b], vertices[c]
+        up = (pb[2] - pa[2]) * (pc[0] - pa[0]) - (pb[0] - pa[0]) * (pc[2] - pa[2])
+        out.append((a, b, c) if up > 0 else (a, c, b))
+    return out
+
+
 def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | None = None,
             blocking=None, doors=()) -> tuple[bytes, RebuildReport]:
     """Rebuild the tiles of a CIsNavMesh that edits touched.
 
     *vertices_m*/*triangles* are the level's navmesh input (collision, metres, the game's Y-up
-    axes, the game's winding; reversed here for Recast). *dirty* lists XZ boxes (min x, min z,
+    axes; any winding: each triangle is turned to face up for Recast). *dirty* lists XZ boxes (min x, min z,
     max x, max z in metres) around changed geometry, old and new positions; ``None`` rebuilds
     every tile (used to validate the pipeline against shipped data).
 
@@ -316,7 +346,7 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
     whose rebuild would drop one of its off-mesh links (window crossings, climbs) keeps its
     shipped data.
     """
-    triangles = [(a, c, b) for a, b, c in triangles]
+    triangles = _facing_up(vertices_m, triangles)
     mesh = navigation.decode(body)
     settings = Settings.from_raw(mesh.config.raw)
     old_by_xy = {}
@@ -347,10 +377,10 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
                     grid.append((x, y))
     if not grid:
         return body, RebuildReport(len(mesh.tiles), 0, 0, len(links), len(links))
+    vertices_m, triangles = list(vertices_m), list(triangles)
     # Shipped floor outside the edits is extra walkable input: some shipped floor has no geometry
     # under it (the original tool had more input than the current collision), and keeping it
     # keeps rebuilt tiles faithful away from the edit and anchors window crossings and climbs.
-    vertices_m, triangles = list(vertices_m), list(triangles)
     wanted = {(x + dx, y + dy) for x, y in grid for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
     for (x, y), (_, decoded) in old_by_xy.items():
         if (x, y) not in wanted:
@@ -383,13 +413,16 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
                        check=True, capture_output=True)
         built = {(x, y): data for x, y, data in _read_reply(reply_path.read_bytes())}
     tolerance = settings.agent_max_climb
+    # The designers' stairs are a ramp under the steps (Kino's are up to 0.8 m below the step
+    # tops): a rebuilt polygon on the steps still stands on that shipped floor.
+    sloped_tolerance = settings.agent_height * 2 / 3
     boxes = dirty or []
     report = RebuildReport(0, 0, 0, len(links), 0)
 
     def tag(index, centre, flags=1):
         if flags >> 8 and flags >> 8 <= len(doors):   # an added door's volume (see build)
             return _door_tag(flags, doors)
-        old = surfaces.find(centre, tolerance)
+        old = surfaces.find(centre, tolerance, sloped_tolerance)
         if old is None:
             return (1, 0) if _inside(centre, boxes, settings.agent_radius) else (0, 0)
         if old.flags != 1 or old.extra:
@@ -442,7 +475,7 @@ def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None,
     obstacle triangles that are never walkable on top. *doors*: (name hash, XZ polygon, min y,
     max y): floor under each is cut out as its own polygons, tagged as the game tags doors
     (flags | 2, the door's name), so it opens only when the door is bought."""
-    triangles = [(a, c, b) for a, b, c in triangles]
+    triangles = _facing_up(vertices_m, triangles)
     mesh = navigation.decode(body)
     settings = Settings.from_raw(mesh.config.raw)
     if not vertices_m:
