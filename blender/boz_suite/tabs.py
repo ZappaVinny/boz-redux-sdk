@@ -69,8 +69,8 @@ def space_of(area):
     return next((space for space in area.spaces if space.type == area.type), area.spaces.active)
 
 
-FORMS_TABS = ("Game", "Audio", "UI / HUD", "Weapons")
-WEAPONS_FORMS_KEY = "boz_weapons_forms"   # Weapons: its largest Properties area shows the forms
+FORMS_TABS = ("Game", "Audio", "UI / HUD", "Weapons", "Assets")
+WEAPONS_FORMS_KEY = "boz_weapons_forms"   # Weapons, Assets: the largest Properties area shows the forms
 
 
 def _configured(space) -> bool:
@@ -278,16 +278,20 @@ def refresh_windows() -> float:
                 apply_layout(window, workspace)
             if workspace.name == "World" and workspace.get(PALETTE_KEY) != "done":
                 add_palette_area(window)
-            if workspace.name == "Weapons" and not workspace.get(WEAPONS_FORMS_KEY):
+            if workspace.name in ("Weapons", "Assets") and not workspace.get(WEAPONS_FORMS_KEY):
                 areas = [a for a in window.screen.areas if a.type == "PROPERTIES"]
                 if areas:
                     setup_properties(space_of(max(areas, key=lambda a: a.width * a.height)), True)
                     workspace[WEAPONS_FORMS_KEY] = True
-            from . import weapons_tab
+            from . import assets_tab, weapons_tab
             if workspace.name == "Weapons":
                 weapons_tab.refresh_view(window)
             else:
                 weapons_tab.leave_view(window)
+            if workspace.name == "Assets":
+                assets_tab.refresh_view(window)
+            else:
+                assets_tab.leave_view(window)
             if workspace.name == "Scripts" and layout_scripts(window):
                 busy = True
                 continue    # areas mid-layout are set up once it is done

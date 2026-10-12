@@ -85,6 +85,11 @@ def build(context) -> str:
     problems = []
     source = convert.scene_to_world(link.map_scene(), problems)
     try:
+        from bozkit import assets
+    except ModuleNotFoundError:
+        from ._vendor.bozkit import assets
+    try:
+        assets.attach(source, project.root / "source")
         files = world.compile_world(pack, project.map_name, source, None)
     except (world.WorldError, levels.LevelError) as exc:
         raise ValueError(str(exc)) from None

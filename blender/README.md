@@ -15,6 +15,11 @@ Two parts live here:
 - **Weapons tab:** the project's weapons: Import from game (this map's or another map's, with
   models and animations), New weapon (a copy), every field with units and help, Pack-a-Punch
   result, Add script. See [docs/weapons.md](../docs/weapons.md).
+- **Assets tab:** your own models: Import a high-quality .blend, FBX, glTF or OBJ as a Prop or
+  a Weapon, Make game version (reduced to the Stock or PC preset's triangles and textures, the
+  normal map baked into the colour), Game checks with fixes, Save edits, Refresh from source,
+  Place in map (also Add → My assets and the palette's My assets). See
+  [docs/assets.md](../docs/assets.md).
 - **Tabs:** Game, World, Weapons, Characters, Assets, Effects, Animation, Scripts, Audio,
   UI / HUD, drawn in the top bar in that order. **Build & Run** (and its ⚙ settings) is at the
   right of the top bar on every tab. The menus are Project, Edit and Help.

@@ -153,6 +153,11 @@ def realize() -> None:
             made = objects.place_library_prefab(scene, obj.get("boz_prefab", ""), position, rotation)
             if made is not None:
                 label = made.name
+        elif kind == "asset":
+            from . import assets_tab
+            made = assets_tab.place_asset(scene, obj.get("boz_asset", ""), position, rotation)
+            if made is not None:
+                label = made.name
         elif kind == "volume":
             made = convert.volume_object(world.Volume(label, obj.get("boz_volume", "trigger"),
                                                       position, rotation), scene)
@@ -163,7 +168,7 @@ def realize() -> None:
         bpy.data.objects.remove(obj)
         if made is None:
             continue
-        if kind != "prefab":
+        if kind not in ("prefab", "asset"):
             made.name = convert.clean_name(label)
         for other in bpy.context.selected_objects:
             other.select_set(False)

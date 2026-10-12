@@ -96,7 +96,7 @@ class WorldTests(unittest.TestCase):
                                        parts=[world.Model('X', game=GAME_MODEL)])]
         problems = ' | '.join(world.validate(broken))
         for text in ('names use', "mesh 'missing' does not exist", 'collision must be',
-                     'either its own mesh or a game model', 'powers of two', '±327 m',
+                     'either its own mesh, an asset or a game model', 'powers of two', '±327 m',
                      'two objects have this name', 'kind must be trigger', 'size must be',
                      'a game prefab has no parts', 'player spawn'):
             self.assertIn(text, problems)

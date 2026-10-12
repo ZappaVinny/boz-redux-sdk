@@ -53,14 +53,16 @@ LOG_LINES = 3000
 
 
 VIEW_SCENE = "BOZ Weapon View"   # the Weapons tab's own scene (weapons_tab): never the map
+ASSET_SCENE = "BOZ Asset View"   # the Assets tab's own scene (assets_tab): never the map
+VIEW_SCENES = (VIEW_SCENE, ASSET_SCENE)
 
 
 def map_scene():
-    """The map's scene: the current one, unless that is the Weapons tab's view."""
+    """The map's scene: the current one, unless that is a tab's own view scene."""
     current = getattr(bpy.context, "scene", None)
-    if current is not None and current.name != VIEW_SCENE:
+    if current is not None and current.name not in VIEW_SCENES:
         return current
-    return next((scene for scene in bpy.data.scenes if scene.name != VIEW_SCENE), current)
+    return next((scene for scene in bpy.data.scenes if scene.name not in VIEW_SCENES), current)
 
 
 def project_root() -> Path | None:
@@ -254,8 +256,9 @@ def on_load(_dummy):
         from . import palette, prefab_library
         palette.show_palette()
         prefab_library.rebuild(project.root)   # My prefabs: this project's prefabs
-        from . import weapons_tab
+        from . import assets_tab, weapons_tab
         weapons_tab.on_load()
+        assets_tab.on_load()
         return
     blend = project.root / "map.blend"
     if blend.exists() or map_scene().objects:  # both startup handlers run; build once

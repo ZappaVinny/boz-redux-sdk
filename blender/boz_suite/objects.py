@@ -645,7 +645,12 @@ class BOZ_PT_object(Panel):
                               f"{convert.object_name(obj)}")
 
         if settings.role == "model":
-            if settings.source:
+            if obj.get("boz_asset"):
+                users = obj.data.users if obj.data else 1
+                layout.label(text=f"Asset {obj['boz_asset']}" +
+                             (f": {users} copies" if users > 1 else "") +
+                             " (change it in the Assets tab)", icon="ASSET_MANAGER")
+            elif settings.source:
                 layout.operator(link.BOZ_OT_make_editable.bl_idname, icon="MESH_DATA")
             else:
                 users = obj.data.users if obj.data else 1

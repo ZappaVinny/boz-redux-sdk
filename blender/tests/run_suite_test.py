@@ -45,6 +45,9 @@ def main() -> int:
             print(f'{template}:\n{output}')
             return 1
         print(f'{template}: BOZ_SUITE_OK')
+        for line in output.splitlines():
+            if line.startswith('BOZ_SUITE_INFO'):
+                print(f'  {line[len("BOZ_SUITE_INFO "):]}')
     return 0
 
 

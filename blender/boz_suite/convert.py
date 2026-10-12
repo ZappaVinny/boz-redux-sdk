@@ -455,10 +455,15 @@ def set_links(obj, base: str, source_hash: int, group_path: str = "") -> None:
 
 def model_object(model: "world.Model", scene, parent=None, data=None):
     """An object for a model: a game model, or *data* (mesh data of your own)."""
-    if data is None and model.game:
+    if data is None and model.asset:
+        from . import assets_tab
+        data = assets_tab.asset_mesh(model.asset)
+    elif data is None and model.game:
         path, model_hash = world.Instance((0, 0, 0), model=model.game).model_ref()
         data = game.model_mesh(path, model_hash)
     obj = bpy.data.objects.new(model.name, data)
+    if model.asset:
+        obj["boz_asset"] = model.asset
     if data is None:
         obj.empty_display_type = "CUBE"
         obj.empty_display_size = 50.0
@@ -1045,6 +1050,12 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
                                  "Blender unit is a centimetre): scale it up, or use Add → Game "
                                  "shapes", obj.name))
                 return None
+            if obj.get("boz_asset"):
+                return world.Model(name, position, rotation, scale, asset=str(obj["boz_asset"]),
+                                   collision=obj.boz.collision, shape=obj.boz.shape,
+                                   padding=round(obj.boz.padding, 2) if obj.boz.shape == "box" else 0.0,
+                                   block_margin=round(obj.boz.block_margin, 2),
+                                   start=start_of(obj), **common)
             mesh = "" if obj.boz.source else own_mesh(obj)
             if mesh is None:
                 return None

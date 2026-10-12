@@ -444,7 +444,7 @@ def _hash_files(root: Path) -> list[dict]:
 def compile_map(project: Project, game, fixed=None):
     """The game's groups for a map project's world (``bozkit.levels.LevelFiles``). *game*
     reads the shipped groups: ``bozkit.library.open_game``."""
-    from . import levels, weapons, world
+    from . import assets, levels, weapons, world
     if project.kind != 'map':
         raise ProjectError(f'{project.mod.id} is not a map project')
     if game is None:
@@ -455,7 +455,8 @@ def compile_map(project: Project, game, fixed=None):
         defs = weapons.load_defs(source)
         index = weapons.load_index(source) or []
         start, reserve = weapons.load_start(source)
-        files = world.compile_world(game, project.map_name, world.load(source), fixed,
+        files = world.compile_world(game, project.map_name,
+                                    assets.attach(world.load(source), source), fixed,
                                     weapons=defs)
     except (world.WorldError, levels.LevelError, weapons.WeaponError) as exc:
         raise ProjectError(str(exc)) from None

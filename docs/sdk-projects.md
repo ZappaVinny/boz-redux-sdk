@@ -96,7 +96,13 @@ source/
   prefabs/<Name>.json    the prefab library (with <Name>/meshes and <Name>/textures)
   weapons/index.json     the project's weapon list (Weapons tab; see weapons.md)
   weapons/<name>.json    a changed, new or imported weapon
+  assets/<name>.json     an asset's settings (Assets tab; see assets.md)
+  assets/<name>/         its game version: model.json, textures/N.png, stats.json
+assets/<name>/<file>     the high-quality source the asset was made from (a copy)
 ```
+
+A model can also be an asset (`{"name": "Gun", "asset": "idgun", ...}`): the build uses the
+asset's game version, stored in tenths of a centimetre and placed at 0.1 scale.
 
 ```json
 {

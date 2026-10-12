@@ -1,5 +1,5 @@
-"""The project's prefab library in the asset browser: the "My prefabs" catalog of the BOZ Game
-palette.
+"""The project's prefab library and assets in the asset browser: the "My prefabs" and "My
+assets" catalogs of the BOZ Game palette.
 
 Prefabs are saved in the project (source/prefabs, bozkit.world.save_prefab). For the asset
 browser, the editor writes ``my_prefabs.blend`` into the palette's folder: one stand-in per
@@ -18,19 +18,20 @@ from pathlib import Path
 import bpy
 
 try:
-    from bozkit import library, png, world
+    from bozkit import assets, library, png, world
 except ModuleNotFoundError:
-    from ._vendor.bozkit import library, png, world
+    from ._vendor.bozkit import assets, library, png, world
 
 CATALOG = "My prefabs"
+ASSET_CATALOG = "My assets"
 FILE_NAME = "my_prefabs.blend"
 # The palette's catalog ids are uuid5(NAMESPACE, path) (palette_build.py); the same here.
 NAMESPACE = uuid.UUID("6d1f1c52-7a0e-4d43-9a58-1f2a6b9c0b11")
 COLOUR = (230, 190, 60)
 
 
-def catalog_id() -> str:
-    return str(uuid.uuid5(NAMESPACE, CATALOG))
+def catalog_id(name: str = CATALOG) -> str:
+    return str(uuid.uuid5(NAMESPACE, name))
 
 
 def palette_dir() -> Path:
@@ -44,9 +45,11 @@ def _ensure_catalog() -> None:
         text = path.read_text()
     except OSError:
         text = "# Blender asset catalogs, written by the BOZ Redux editor\nVERSION 1\n\n"
-    if catalog_id() not in text:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text.rstrip("\n") + f"\n{catalog_id()}:{CATALOG}:{CATALOG}\n")
+    for name in (CATALOG, ASSET_CATALOG):
+        if catalog_id(name) not in text:
+            text = text.rstrip("\n") + f"\n{catalog_id(name)}:{name}:{name}\n"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
 
 
 def _set_preview(datablock, width: int, height: int, rgba: bytes) -> None:
@@ -96,7 +99,8 @@ def _preview(datablock, prefab) -> None:
 
 
 def rebuild(root: Path | None) -> int:
-    """Write the open project's prefabs into the palette's My prefabs; returns how many."""
+    """Write the open project's prefabs and assets into the palette's My prefabs and My assets;
+    returns how many."""
     folder = palette_dir()
     if not folder.is_dir():
         return 0
@@ -128,6 +132,13 @@ def rebuild(root: Path | None) -> int:
             (f", script {prefab.script}" if prefab.script else "")
         _preview(obj, prefab)
         stand_ins.add(obj)
+    for name, obj in _asset_stand_ins(root):
+        renamed_clash = bpy.data.objects.get(name)
+        if renamed_clash is not None and renamed_clash is not obj:
+            renamed[renamed_clash] = renamed_clash.name
+            renamed_clash.name = f"{name}__boz_library_tmp"
+        obj.name = name
+        stand_ins.add(obj)
     try:
         if stand_ins:
             bpy.data.libraries.write(str(target), stand_ins, fake_user=True, compress=True)
@@ -140,6 +151,55 @@ def rebuild(root: Path | None) -> int:
             obj.name = name
     refresh_browsers()
     return len(stand_ins)
+
+
+def _asset_preview(datablock, source: Path, name: str) -> None:
+    """A three-quarter view of the asset's game version, coloured by its textures."""
+    try:
+        model, textures = assets.load_game(source, name)
+        colours = []
+        for texture in textures:
+            data = texture.bgra
+            colours.append(tuple(sum(data[i::4][:4096]) // max(1, len(data[i::4][:4096]))
+                                 for i in (2, 1, 0)))
+        flat = type("Flat", (), {"vertices": model.vertices, "triangles": model.triangles})
+        image = library.render_model(flat, lambda i: colours[model.materials[i]] if model.materials
+                                     else colours[0])
+    except Exception:   # noqa: BLE001 - no Pillow or no game version: a badge
+        image = None
+    if image is None:
+        _badge(datablock)
+        return
+    width, height = image.size
+    _set_preview(datablock, width, height, image.convert("RGBA").tobytes())
+
+
+def _asset_stand_ins(root: Path | None):
+    """(name, stand-in) for each made asset of the project, in the My assets catalog."""
+    if root is None:
+        return []
+    source = root / "source"
+    out = []
+    folder = assets.assets_dir(source)
+    for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+        try:
+            asset = assets.load_def(source, path.stem)
+        except assets.AssetError:
+            continue
+        if not assets.has_game(source, asset.name):
+            continue
+        obj = bpy.data.objects.new(asset.name, None)
+        obj.empty_display_type = "CUBE"
+        obj.empty_display_size = 30.0
+        obj["boz_asset_kind"] = "asset"
+        obj["boz_asset"] = asset.name
+        obj.asset_mark()
+        obj.asset_data.catalog_id = catalog_id(ASSET_CATALOG)
+        stats = assets.load_stats(source, asset.name)
+        obj.asset_data.description = f"Your {asset.kind}: {stats.get('triangles', '?')} triangles"
+        _asset_preview(obj, source, asset.name)
+        out.append((asset.name, obj))
+    return out
 
 
 def refresh_browsers() -> None:

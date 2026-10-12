@@ -63,6 +63,136 @@ def build_and_compile(label):
     return saved, ""
 
 
+def _synthetic_gun(path):
+    """A high-quality test gun: a dense textured tube (colour and normal maps) skinned to an
+    armature with tag_weapon and tag_clip (no magazine mesh), written to *path*."""
+    import bmesh
+    mesh = bpy.data.meshes.new("HQ gun")
+    shape = bmesh.new()
+    bmesh.ops.create_cone(shape, cap_ends=True, segments=64, radius1=4.0, radius2=4.0, depth=60.0)
+    bmesh.ops.subdivide_edges(shape, edges=shape.edges[:], cuts=6, use_grid_fill=True)
+    shape.to_mesh(mesh)
+    shape.free()
+    mesh.uv_layers.new(name="UVMap")
+    for loop, uv in zip(mesh.loops, mesh.uv_layers[0].data):
+        co = mesh.vertices[loop.vertex_index].co
+        uv.uv = ((co.x + 4) / 8, (co.z + 30) / 60)
+    colour = bpy.data.images.new("hq_gun_c", 1024, 1024)
+    colour.pixels.foreach_set([0.6, 0.3, 0.2, 1.0] * (1024 * 1024))
+    normal = bpy.data.images.new("hq_gun_n", 256, 256)
+    normal.pixels.foreach_set([0.5, 0.5, 1.0, 1.0] * (256 * 256))
+    for image in (colour, normal):
+        image.pack()
+    material = bpy.data.materials.new("hq_gun")
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    principled = nodes["Principled BSDF"]
+    tex = nodes.new("ShaderNodeTexImage")
+    tex.image = colour
+    material.node_tree.links.new(tex.outputs["Color"], principled.inputs["Base Color"])
+    ntex = nodes.new("ShaderNodeTexImage")
+    ntex.image = normal
+    nmap = nodes.new("ShaderNodeNormalMap")
+    material.node_tree.links.new(ntex.outputs["Color"], nmap.inputs["Color"])
+    material.node_tree.links.new(nmap.outputs["Normal"], principled.inputs["Normal"])
+    mesh.materials.append(material)
+    gun = bpy.data.objects.new("HQ gun", mesh)
+    rig_data = bpy.data.armatures.new("Joints")
+    rig = bpy.data.objects.new("Joints", rig_data)
+    bpy.context.scene.collection.objects.link(rig)
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode="EDIT")
+    for name, head in (("tag_weapon", (0, 0, 0)), ("tag_clip", (0, 0, -10))):
+        bone = rig_data.edit_bones.new(name)
+        bone.head, bone.tail = head, (head[0], head[1] + 5, head[2])
+    rig_data.edit_bones["tag_clip"].parent = rig_data.edit_bones["tag_weapon"]
+    bpy.ops.object.mode_set(mode="OBJECT")
+    group = gun.vertex_groups.new(name="tag_weapon")
+    group.add(range(len(mesh.vertices)), 1.0, "REPLACE")
+    gun.modifiers.new("Armature", "ARMATURE").object = rig
+    gun.parent = rig
+    bpy.data.libraries.write(str(path), {gun, rig}, fake_user=True)
+    triangles = sum(len(p.vertices) - 2 for p in mesh.polygons)
+    for obj in (gun, rig):
+        bpy.data.objects.remove(obj)
+    return triangles
+
+
+IDGUN = Path(os.environ.get("BOZ_SDK_ROOT", ".")).parent / "boz-redux" / "original" / "idgun_world.blend"
+
+
+def asset_checks(label):
+    """The Assets tab: import a high-quality model, make its game version (both presets), the
+    checks, Save edits, place it in the map."""
+    at = suite.assets_tab
+    assets_mod = at.assets
+    source_path = project.parent / f"hq_gun_{label}.blend"
+    high = _synthetic_gun(source_path)
+    check(high > 4000, f"{label}: the test gun is high quality ({high} triangles)")
+    bpy.ops.boz.asset_import("EXEC_DEFAULT", filepath=str(source_path), kind="weapon", preset="stock")
+    names = [i.name for i in scene.boz_assets]
+    check(names == [f"hq_gun_{label}"], f"{label}: the asset is listed ({names})")
+    name = names[0]
+    stats = at.stats_of(name)
+    check(stats and not stats["errors"], f"{label}: the game version is made ({stats})")
+    check(stats["triangles"] <= 1500 and max(max(t) for t in stats["textures"]) <= 512,
+          f"{label}: the stock preset's budget and textures ({stats['triangles']}, {stats['textures']})")
+    check(any("magazine" in w for w in stats["warnings"]), f"{label}: the missing magazine warns")
+    print(f"BOZ_SUITE_INFO {label} asset: {high} -> {stats['triangles']} triangles")
+    check((project / "assets" / name / source_path.name).is_file(), f"{label}: the source is copied")
+    scene.boz_asset_settings.preset = "pc"
+    bpy.ops.boz.asset_make()
+    stats = at.stats_of(name)
+    check(1500 < stats["triangles"] <= 4000 and max(max(t) for t in stats["textures"]) <= 1024,
+          f"{label}: the PC preset ({stats['triangles']}, {stats['textures']})")
+    view = bpy.data.scenes.get(link.ASSET_SCENE)
+    check(view is not None and view.objects.get(at.GAME_OBJECT) is not None
+          and any(o.get("boz_preview") == "asset_high" for o in view.objects),
+          f"{label}: the Assets view shows both versions")
+    check(not any(o.get("boz_preview") for o in scene.objects), f"{label}: the map is untouched")
+    game_obj = view.objects[at.GAME_OBJECT]
+    game_obj.data.vertices[0].co.z += 5.0
+    bpy.ops.boz.asset_save_edits()
+    check(at.asset_def(name).edited, f"{label}: Save edits keeps the hand edit")
+    model, _textures = assets_mod.load_game(project / "source", name)
+    check(model.weights and len(model.weights) == len(model.vertices), f"{label}: edits keep bone weights")
+    scene.cursor.location = (0.0, -300.0, 0.0)
+    bpy.ops.boz.asset_place(name=name)
+    copy = next((o for o in scene.objects if o.get("boz_asset") == name), None)
+    check(copy is not None and copy.type == "MESH" and copy.data.materials,
+          f"{label}: the asset is placed in the map")
+    try:
+        bpy.ops.boz.asset_remove("EXEC_DEFAULT")
+    except RuntimeError:
+        pass        # refused (reported as an error)
+    check(at.asset_def(name) is not None, f"{label}: an asset placed in the map is not removed")
+    stand_in = bpy.data.objects.new("dropped asset", None)   # dragged from My assets
+    stand_in["boz_asset_kind"], stand_in["boz_asset"] = "asset", name
+    convert.map_collection(scene).objects.link(stand_in)
+    stand_in.location = (200.0, -300.0, 0.0)
+    suite.palette.realize()
+    copies = [o for o in scene.objects if o.get("boz_asset") == name]
+    check(len(copies) == 2 and "dropped asset" not in bpy.data.objects,
+          f"{label}: an asset dropped from the palette is placed ({[o.name for o in copies]})")
+    back = link.scene_to_world(scene, [])
+    placed = [m for m in back.models if m.asset == name]
+    check(placed and placed[0].collision == "solid", f"{label}: the placed asset is written ({placed})")
+    fake = type("Panel", (), {"layout": FakeLayout()})()
+    for panel in (at.BOZ_PT_assets, at.BOZ_PT_asset_settings, at.BOZ_PT_asset_checks):
+        try:
+            panel.draw(fake, FakeContext(None))
+        except Exception as exc:   # noqa: BLE001
+            check(False, f"{label}: {panel.__name__} fails: {exc!r}")
+    if IDGUN.is_file() and label == "inherited":   # local only: never committed
+        bpy.ops.boz.asset_import("EXEC_DEFAULT", filepath=str(IDGUN), kind="weapon", preset="stock")
+        stats = at.stats_of("idgun_world")
+        check(stats and not stats["errors"] and stats["triangles"] <= 1500,
+              f"the idgun's game version is made ({stats})")
+        print(f"BOZ_SUITE_INFO idgun: {stats['high_triangles']} -> {stats['triangles']} triangles, "
+              f"textures {stats['textures']}, warnings {stats['warnings']}")
+    return name
+
+
 def weapon_checks(label):
     """The Weapons tab: the list, a changed value, a new weapon, an import, a script, the box pool."""
     wt = suite.weapons_tab
@@ -408,7 +538,9 @@ if source.inherit:
     prefab_checks((-1100.0, -1300.0, 30.0))
     check(draw_panels("inherited") > 5, "panels draw for every kind")
     weapon_checks("inherited")
+    asset_name = asset_checks("inherited")
     saved, data = build_and_compile("inherited")
+    check(any(m.asset == asset_name for m in saved.models), "the placed asset is saved")
     weapon_build_checks("inherited", data)
     check(perk["boz_entity_name"] in data, "the hidden perk is in the start state")
     # The scripted wall that blocks: its floor is a tagged area (not a hole) a script opens.
@@ -556,6 +688,7 @@ if LIBRARY:
           {p.kind for p in shrine.parts} == {"prefab"}, f"prefabs nest ({[p.name for p in shrine.parts]})")
     check(draw_panels("generated") > 5, "panels draw for every kind")
     weapon_checks("generated")
+    asset_checks("generated")
     saved, data = build_and_compile("generated")
     weapon_build_checks("generated", data)
     check("Shrine.Vault" in data, "the nested prefab is in the runtime data")

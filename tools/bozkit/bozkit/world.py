@@ -601,6 +601,7 @@ class Model:
     scale: tuple[float, float, float] = UNIT
     mesh: str = ''            # one of World.meshes (your own geometry)
     game: str = ''            # or a game model: '<group path>#0x<hash>'
+    asset: str = ''           # or a project asset (bozkit.assets; attach() sets mesh and scale)
     collision: str = 'solid'
     shape: str = 'mesh'
     padding: float = 0.0      # centimetres a box collision reaches past the model on every side
@@ -722,7 +723,10 @@ def _common_json(item, out: dict) -> dict:
 def object_json(item) -> dict:
     if isinstance(item, Model):
         out = {'name': item.name}
-        out.update({'mesh': item.mesh} if item.mesh else {'game': item.game})
+        if item.asset:
+            out['asset'] = item.asset
+        else:
+            out.update({'mesh': item.mesh} if item.mesh else {'game': item.game})
         out.update({'collision': item.collision, 'shape': item.shape})
         if item.padding:
             out['padding'] = round(float(item.padding), 2)
@@ -775,9 +779,10 @@ def object_from_json(item: dict):
                       cost=int(item.get('cost', 0)), **place, **common)
     place['scale'] = _floats(item.get('scale'), UNIT)
     start = dict(item.get('start', {}))
-    if 'mesh' in item and 'source' not in item or 'game' in item and 'source' not in item:
+    if any(key in item for key in ('mesh', 'game', 'asset')) and 'source' not in item:
         return Model(str(item['name']), mesh=str(item.get('mesh', '')),
-                     game=str(item.get('game', '')), collision=str(item.get('collision', 'solid')),
+                     game=str(item.get('game', '')), asset=str(item.get('asset', '')),
+                     collision=str(item.get('collision', 'solid')),
                      shape=str(item.get('shape', 'mesh')), padding=float(item.get('padding', 0.0)),
                      block_margin=float(item.get('block_margin', BLOCK_MARGIN)),
                      start=start, **place, **common)
@@ -932,8 +937,10 @@ def validate(world: World) -> list[str]:
             problems.append(f'{full!r}: two objects have this name')
         names[key] = full
         if isinstance(item, Model):
-            if bool(item.mesh) == bool(item.game):
-                problems.append(f'{label}: needs either its own mesh or a game model')
+            if bool(item.mesh or item.asset) == bool(item.game):
+                problems.append(f'{label}: needs either its own mesh, an asset or a game model')
+            elif item.asset and not item.mesh:
+                pass    # bozkit.assets.attach() resolves it when the map builds
             elif item.mesh and item.mesh not in meshes:
                 problems.append(f'{label}: mesh {item.mesh!r} does not exist')
             elif item.game:
@@ -1165,6 +1172,10 @@ def compile_world(pack, name: str, world: World,
     compiled). *weapons*: the project's bozkit.weapons.WeaponDef (edits, new and imported
     weapons). files.runtime carries the start state and the scripted objects for boz.world."""
     problems = validate(world)
+    unattached = sorted({item.asset for _full, item in walk(world.objects())
+                         if isinstance(item, Model) and item.asset and not item.mesh})
+    if unattached:
+        problems.append(f'assets {", ".join(unattached)} were not attached (bozkit.assets.attach)')
     if problems:
         raise WorldError('; '.join(problems))
     layout = lower(world)
