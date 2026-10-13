@@ -14,7 +14,11 @@ Two parts live here:
 
 - **Weapons tab:** the project's weapons: Import from game (this map's or another map's, with
   models and animations), New weapon (a copy), every field with units and help, Pack-a-Punch
-  result, Add script. See [docs/weapons.md](../docs/weapons.md).
+  result, Add script, your own model with its own skeleton (fit, bones, ghost), the arms and
+  gun as armatures. See [docs/weapons.md](../docs/weapons.md).
+- **Animation tab:** change a weapon's animations: one rig (hands on the gun with IK), arms
+  and gun each with their own timeline; a change holds from its frame on; copy and paste poses
+  and original frames.
 - **Assets tab:** your own models: Import a high-quality .blend, FBX, glTF or OBJ as a Prop or
   a Weapon, Make game version (reduced to the Stock or PC preset's triangles and textures, the
   normal map baked into the colour), Game checks with fixes, Save edits, Refresh from source,

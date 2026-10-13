@@ -362,5 +362,24 @@ memory[address("g_console")] = 0xb000
 functions["Console_Print"] = function(_, text) table.insert(console_lines, text) end
 prefabs.find("Altar"):say()
 check(console_lines[1] == "50%% done\t2", "print goes to the game console (" .. tostring(console_lines[1]) .. ")")
+-- A weapon's in-game name answers the wall buy prompt's string id "<weapon>_S_WEAPON".
+prefabs.start({}, {}, {{name = "idgun", script = "", display = "Apothicon Servant"}})
+local function localise(id)
+    local answer
+    for _, handlers in ipairs(hooks["Localise_GetString"] or {}) do
+        handlers.before({arg = function(_, i) return i == 1 and id or 0 end,
+                         skip = function(_, value) answer = value end})
+    end
+    if not answer then
+        return nil
+    end
+    local chars = {}
+    while memory[answer + #chars] and memory[answer + #chars] ~= 0 do
+        table.insert(chars, string.char(memory[answer + #chars]))
+    end
+    return table.concat(chars)
+end
+check(localise(hash.name("idgun_S_WEAPON")) == "Apothicon Servant", "the in-game name is the prompt's")
+check(localise(hash.name("thundergun_S_WEAPON")) == nil, "other weapons keep the game's names")
 os.execute("rm -rf " .. dir)
 print("prefabs_test: OK")

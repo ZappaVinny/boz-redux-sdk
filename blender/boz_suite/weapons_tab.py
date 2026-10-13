@@ -11,6 +11,7 @@ writes the weapon's file.
 """
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -22,9 +23,9 @@ from bpy.types import Operator, Panel, PropertyGroup, UIList
 from . import link
 
 try:
-    from bozkit import blender_scene, library, viewmodel, weapons as wp
+    from bozkit import assets, blender_scene, library, viewmodel, weapon_model, weapons as wp
 except ModuleNotFoundError:
-    from ._vendor.bozkit import blender_scene, library, viewmodel, weapons as wp
+    from ._vendor.bozkit import assets, blender_scene, library, viewmodel, weapon_model, weapons as wp
 
 WORKSPACE = "Weapons"
 SCRIPT_TEMPLATE = '''-- {name}: a weapon script. self is the weapon: self.name, and the live weapon's
@@ -123,6 +124,25 @@ def weapon_def(context, name: str):
     return defs().get(name) or wp.WeaponDef(name)
 
 
+def wall_display(context, name: str, base: str):
+    """(game model override, mesh of your own) a wall buy selling weapon *name* shows: a weapon
+    with a model of its own shows it as the game will (its asset placed by the fit); a new weapon
+    its base's model; an imported one its own map's."""
+    from . import game
+    weapon = weapon_def(context, name)
+    asset = (weapon.model or {}).get("asset")
+    if asset:
+        from . import assets_tab, weapon_view
+        data = bpy.data.meshes.get(f"BOZ wall weapon {name}")
+        if data is not None:
+            bpy.data.meshes.remove(data)       # the fit may have changed: made again
+        data = assets_tab.build_mesh(asset, f"BOZ wall weapon {name}", unit_scale=1.0)
+        if data is not None:
+            data.transform(weapon_view.fit_matrix(weapon.model.get("fit") or {}))
+            return None, data
+    return game.weapon_model(weapon.level or base, weapon.source or name), None
+
+
 def current_values(context, name: str) -> tuple[dict, dict]:
     """(values with the project's changes, the base values)."""
     weapon = weapon_def(context, name)
@@ -137,7 +157,8 @@ def save(context, weapon) -> None:
     if source is None:
         return
     is_new = weapon.base and weapon.base != weapon.name
-    if not weapon.fields and not weapon.level and not is_new and not weapon.script:
+    if not weapon.fields and not weapon.level and not is_new and not weapon.script \
+            and not weapon.model and not weapon.display:
         wp.delete_def(source, weapon.name)
     else:
         wp.save_def(source, weapon)
@@ -273,7 +294,7 @@ class BOZ_WeaponField(PropertyGroup):
 
 def _selected_changed(self, context):
     refresh_fields(context)
-    show_preview(context)
+    request_preview()
 
 
 class BOZ_WeaponItem(PropertyGroup):
@@ -320,12 +341,24 @@ def refresh_list(context, keep: str | None = None) -> None:
         _state["refreshing"] = False
 
 
+def _display_changed(self, context):
+    if _state.get("refreshing"):
+        return
+    item = selected(link.map_scene())
+    if item is None:
+        return
+    weapon = weapon_def(context, item.name)
+    weapon.display = self.boz_weapon_display.strip()
+    save(context, weapon)
+
+
 def refresh_fields(context) -> None:
     scene = link.map_scene()
     item = selected(scene)
     _state["refreshing"] = True
     try:
         scene.boz_weapon_fields.clear()
+        scene.boz_weapon_display = weapon_def(context, item.name).display if item else ""
         if item is None:
             return
         values, base = current_values(context, item.name)
@@ -435,7 +468,8 @@ class BOZ_OT_weapon_new(Operator):
             self.report({"ERROR"}, f"There is already a weapon called {name}")
             return {"CANCELLED"}
         start = weapon_def(context, item.name)
-        new = wp.WeaponDef(name, start.source, start.level, dict(start.fields))
+        new = wp.WeaponDef(name, start.source, start.level, dict(start.fields), "",
+                           json.loads(json.dumps(start.model)))
         source = source_dir()
         wp.save_def(source, new)
         wp.save_index(source, project_index(context) + [name])
@@ -754,8 +788,10 @@ class BOZ_PT_weapon_properties(_WeaponsPanel, Panel):
         if weapon.level:
             layout.label(text=f"From {weapon.level}: its sounds and effects may be missing here",
                          icon="IMPORT")
-        if _state.get("preview"):
-            layout.label(text=_state["preview"], icon="VIEW_CAMERA")
+        from . import weapon_view
+        if weapon_view._state.get("preview"):
+            layout.label(text=weapon_view._state["preview"], icon="VIEW_CAMERA")
+        layout.prop(scene, "boz_weapon_display")
         start, _reserve = start_weapon()
         is_start = start == item.name
         row = layout.row(align=True)
@@ -799,396 +835,26 @@ CLASSES = (BOZ_WeaponField, BOZ_WeaponItem, BOZ_PoolItem, BOZ_OT_box_pool, BOZ_U
            BOZ_PT_weapons, BOZ_PT_weapon_properties, *GROUP_PANELS, BOZ_PT_weapon_script)
 
 
-# --- First-person preview -------------------------------------------------------------------
-# The Weapons tab has a scene of its own (link.VIEW_SCENE): the selected weapon as the player sees
-# it, the arms in their idle pose holding the gun (bozkit.viewmodel), through a camera at the
-# game's eye. The tab is pinned to that scene; every other tab shows the map, and everything
-# that works on the map asks link.map_scene() for it.
-
-VIEW_CAMERA = "BOZ view camera"
-VIEW_KEY = "boz_weapon_view"     # Weapons workspace: its viewport is set up
-
-
-def view_scene():
-    scene = bpy.data.scenes.get(link.VIEW_SCENE)
-    if scene is None:
-        scene = bpy.data.scenes.new(link.VIEW_SCENE)
-        scene.render.resolution_x, scene.render.resolution_y = 1280, 720   # the game's frame
-        scene.view_settings.view_transform = "Standard"
-        world = bpy.data.worlds.get(link.VIEW_SCENE) or bpy.data.worlds.new(link.VIEW_SCENE)
-        world.color = (0.05, 0.05, 0.06)
-        scene.world = world
-    return scene
-
-
-def _view_object(scene, name, data):
-    obj = bpy.data.objects.get(name)
-    wanted = "CAMERA" if isinstance(data, bpy.types.Camera) else "MESH"
-    if obj is not None and obj.type != wanted:
-        bpy.data.objects.remove(obj)
-        obj = None
-    if obj is None:
-        obj = bpy.data.objects.new(name, data)
-    elif obj.data is not data:
-        old = obj.data
-        obj.data = data
-        if isinstance(old, bpy.types.Mesh) and old.users == 0:
-            bpy.data.meshes.remove(old)
-    for collection in list(obj.users_collection):
-        if collection is not scene.collection:
-            collection.objects.unlink(obj)
-    if obj.name not in scene.collection.objects:
-        scene.collection.objects.link(obj)
-    obj.boz.role = "reference"
-    obj["boz_preview"] = "weapon"
-    obj.hide_select = True
-    return obj
-
-
-def _rig(context, item):
-    """The selected weapon's posable arms and gun (cached), or raises KeyError/ValueError."""
-    weapon = weapon_def(context, item.name)
-    level = weapon.level or base_level(context)
-    key = (level, weapon.source)
-    if _state.get("rig_key") != key:
-        pack = _pack()
-        if pack is None:
-            raise KeyError("no asset library")
-        _state["rig"] = viewmodel.Rig(pack.read, level, weapon.source)
-        _state["rig_key"] = key
-        _state["poses"] = {}
-        _state["anim_items"] = None
-    return _state["rig"]
-
-
-def _posed(rig, state: int | None, frame: int) -> dict:
-    """{part label: flat Blender vertex coordinates} of the rig in *state* at *frame* (cached)."""
-    key = (state, frame)
-    poses = _state.setdefault("poses", {})
-    if key not in poses:
-        out = {}
-        for part in rig.pose(state, frame):
-            coords = []
-            for position in part.positions:
-                coords += blender_scene.to_blender(position)
-            out[part.label] = (part, coords)
-        poses[key] = out
-    return poses[key]
-
+# --- The view (weapon_view) ----------------------------------------------------------------
 
 def show_preview(context) -> str:
-    """Build the selected weapon's first-person view in the Weapons tab's scene (idle)."""
-    scene = link.map_scene()
-    item = selected(scene)
-    if item is None or _pack() is None:
-        return "No weapon selected"
-    from . import game
-    try:
-        rig = _rig(context, item)
-        posed = _posed(rig, None, 0)
-    except (KeyError, ValueError, OSError) as exc:
-        _state["rig_key"] = None
-        _state["preview"] = f"No first-person view: {exc}"
-        return _state["preview"]
-    _stop_playing()
-    view = view_scene()
-    wanted = set()
-    for label, (part, coords) in posed.items():
-        base = game.model_mesh(part.path, part.model)
-        if base is None or len(base.vertices) != len(part.positions):
-            continue
-        mesh = base.copy()
-        mesh.name = f"BOZ view {label}"
-        mesh.vertices.foreach_set("co", coords)
-        mesh.update()
-        obj = _view_object(view, f"BOZ view {label}", mesh)
-        obj.matrix_world.identity()
-        wanted.add(obj.name)
-    camera_data = bpy.data.cameras.get(VIEW_CAMERA) or bpy.data.cameras.new(VIEW_CAMERA)
-    camera_data.sensor_fit = "VERTICAL"   # the game's field of view is vertical
-    camera_data.angle = math.radians(viewmodel.DEFAULT_FOV)
-    camera_data.clip_start = 5.0
-    camera_data.clip_end = 100000.0
-    camera = _view_object(view, VIEW_CAMERA, camera_data)
-    camera.location = (0.0, 0.0, 0.0)
-    # The game's eye looks down +Z with Y up: Blender's -Y with Z up.
-    camera.rotation_euler = (math.pi / 2, 0.0, math.pi)
-    view.camera = camera
-    wanted.add(camera.name)
-    for obj in list(view.objects):
-        if obj.name not in wanted:
-            bpy.data.objects.remove(obj)
-    wm = context.window_manager
-    _state["anim_guard"] = True
-    try:
-        wm.boz_anim_state = str(rig.idle())
-        wm.boz_anim_frame = 0
-    except TypeError:
-        pass
-    finally:
-        _state["anim_guard"] = False
-    _apply_visibility(context)
-    _state["frame_gun"] = True
-    for window in wm.windows:
-        if window.workspace.name == WORKSPACE:
-            window.workspace[VIEW_KEY] = False   # set the viewport up again
-    _state["preview"] = f"{item.label}: first-person view"
-    return _state["preview"]
+    from . import weapon_view
+    return weapon_view.show_preview(context)
 
 
-def _apply_visibility(context) -> None:
-    """Arms shown or hidden; the camera hidden in the free view."""
-    wm = context.window_manager
-    arms = bpy.data.objects.get("BOZ view arms")
-    if arms is not None:
-        arms.hide_viewport = not wm.boz_view_arms
-    camera = bpy.data.objects.get(VIEW_CAMERA)
-    if camera is not None:
-        camera.hide_viewport = wm.boz_view_free
-
-
-def show_pose(context, state: int | None, frame: int) -> None:
-    """Pose the view's arms and gun in *state* at *frame*."""
-    item = selected(link.map_scene())
-    if item is None:
-        return
-    try:
-        posed = _posed(_rig(context, item), state, frame)
-    except (KeyError, ValueError, OSError):
-        return
-    for label, (_part, coords) in posed.items():
-        obj = bpy.data.objects.get(f"BOZ view {label}")
-        if obj is None or obj.type != "MESH" or len(obj.data.vertices) * 3 != len(coords):
-            continue
-        obj.data.vertices.foreach_set("co", coords)
-        obj.data.update()
-
-
-def _frame_gun(window) -> None:
-    """Free view: look at the gun from its side, orbiting around it."""
-    from mathutils import Euler, Vector
-    gun = bpy.data.objects.get("BOZ view gun") or bpy.data.objects.get("BOZ view arms")
-    if gun is None or gun.type != "MESH" or not gun.data.vertices:
-        return
-    points = [v.co for v in gun.data.vertices]
-    low = Vector(tuple(min(p[i] for p in points) for i in range(3)))
-    high = Vector(tuple(max(p[i] for p in points) for i in range(3)))
-    for area in window.screen.areas:
-        if area.type != "VIEW_3D":
-            continue
-        region = area.spaces.active.region_3d
-        region.view_perspective = "PERSP"
-        region.view_location = (low + high) / 2
-        region.view_distance = max((high - low).length * 1.4, 1.0)
-        region.view_rotation = Euler((math.radians(75), 0.0, math.radians(125))).to_quaternion()
-        area.tag_redraw()
-
-
-def setup_view(window) -> bool:
-    """Show the Weapons tab's scene in its window, pinned: through the camera (first person) or
-    free to move around (free view)."""
-    view = bpy.data.scenes.get(link.VIEW_SCENE)
-    if view is None or view.camera is None:
-        return False
-    if window.scene != view:
-        window.scene = view
-    workspace = window.workspace
-    if not workspace.use_pin_scene:
-        workspace.use_pin_scene = True     # pins the window's scene: the view
-    free = bpy.context.window_manager.boz_view_free
-    for area in window.screen.areas:
-        if area.type != "VIEW_3D":
-            continue
-        space = area.spaces.active
-        space.use_local_collections = False
-        space.use_local_camera = False
-        space.overlay.show_floor = False
-        space.overlay.show_axis_x = space.overlay.show_axis_y = False
-        space.clip_start, space.clip_end = 1.0, 100000.0
-        if not free:
-            space.region_3d.view_perspective = "CAMERA"
-        area.tag_redraw()
-    if free and _state.pop("frame_gun", False):
-        _frame_gun(window)
-    workspace[VIEW_KEY] = True
-    return True
-
-
-def _view_changed(self, context):
-    _apply_visibility(context)
-    _state["frame_gun"] = True
-    for window in context.window_manager.windows:
-        if window.workspace.name == WORKSPACE:
-            setup_view(window)
-
-
-def _arms_changed(self, context):
-    _apply_visibility(context)
-
-
-# --- Animations (view only) -----------------------------------------------------------------
-
-def _anim_items(self, context):
-    item = selected(link.map_scene())
-    rig = _state.get("rig") if item is not None and _state.get("rig_key") else None
-    if rig is None:
-        return [("0", "No animations", "")]
-    if _state.get("anim_items") is None:
-        items = []
-        for state in rig.states():
-            seconds = state.frames / viewmodel.FPS
-            items.append((str(state.name), state.label,
-                          f"{state.frames} frames, {seconds:.1f} s"
-                          + (", loops" if state.looping else "")
-                          + f" (state 0x{state.name:08x})"))
-        _state["anim_items"] = items or [("0", "No animations", "")]
-        _state["anim_states"] = {s.name: s for s in rig.states()}
-    return _state["anim_items"]
-
-
-def current_anim():
-    """(state, its ViewState or None, frame) chosen in the Animations panel."""
-    wm = bpy.context.window_manager
-    try:
-        name = int(wm.boz_anim_state)
-    except (TypeError, ValueError):
-        return None, None, 0
-    return name, _state.get("anim_states", {}).get(name), wm.boz_anim_frame
-
-
-def _anim_state_changed(self, context):
-    if _state.get("anim_guard"):
-        return
-    _state["anim_guard"] = True
-    try:
-        context.window_manager.boz_anim_frame = 0
-    finally:
-        _state["anim_guard"] = False
-    name, _view_state, _frame = current_anim()
-    show_pose(context, name, 0)
-
-
-def _anim_frame_changed(self, context):
-    if _state.get("anim_guard"):
-        return
-    name, view_state, frame = current_anim()
-    if view_state is not None and frame >= view_state.frames:
-        _state["anim_guard"] = True
-        try:
-            context.window_manager.boz_anim_frame = frame = view_state.frames - 1
-        finally:
-            _state["anim_guard"] = False
-    show_pose(context, name, frame)
-
-
-def _play_tick():
-    wm = bpy.context.window_manager
-    if not wm.boz_anim_playing or bpy.data.objects.get("BOZ view arms") is None:
-        wm.boz_anim_playing = False
-        return None
-    _name, view_state, frame = current_anim()
-    if view_state is None:
-        wm.boz_anim_playing = False
-        return None
-    frame += 1
-    if frame >= view_state.frames:
-        if not wm.boz_anim_loop:
-            wm.boz_anim_playing = False
-            return None
-        frame = 0
-    wm.boz_anim_frame = frame
-    return 1.0 / viewmodel.FPS
-
-
-def _stop_playing() -> None:
-    wm = bpy.context.window_manager
-    if wm.boz_anim_playing:
-        wm.boz_anim_playing = False
-    if bpy.app.timers.is_registered(_play_tick):
-        bpy.app.timers.unregister(_play_tick)
-
-
-class BOZ_OT_weapon_anim_play(Operator):
-    bl_idname = "boz.weapon_anim_play"
-    bl_label = "Play"
-    bl_description = "Play the chosen animation in the view (again to pause)"
-
-    def execute(self, context):
-        wm = context.window_manager
-        if wm.boz_anim_playing:
-            _stop_playing()
-            return {"FINISHED"}
-        _name, view_state, frame = current_anim()
-        if view_state is None:
-            return {"CANCELLED"}
-        if frame >= view_state.frames - 1:
-            wm.boz_anim_frame = 0          # from the start again
-        wm.boz_anim_playing = True
-        if not bpy.app.timers.is_registered(_play_tick):
-            bpy.app.timers.register(_play_tick, first_interval=1.0 / viewmodel.FPS)
-        return {"FINISHED"}
-
-
-class BOZ_PT_weapon_animations(_WeaponsPanel, Panel):
-    bl_idname = "BOZ_PT_weapon_animations"
-    bl_label = "Animations"
-
-    @classmethod
-    def poll(cls, context):
-        return super().poll(context) and selected(link.map_scene()) is not None
-
-    def draw(self, context):
-        layout = self.layout
-        wm = context.window_manager
-        if not _state.get("rig_key"):
-            layout.label(text="Select a weapon to see its animations", icon="INFO")
-            return
-        layout.prop(wm, "boz_anim_state", text="Animation")
-        _name, view_state, _frame = current_anim()
-        row = layout.row(align=True)
-        row.operator(BOZ_OT_weapon_anim_play.bl_idname, text="Pause" if wm.boz_anim_playing else "Play",
-                     icon="PAUSE" if wm.boz_anim_playing else "PLAY")
-        row.prop(wm, "boz_anim_loop", text="", icon="FILE_REFRESH", toggle=True)
-        row.prop(wm, "boz_anim_frame", text="Frame")
-        if view_state is not None:
-            layout.label(text=f"{view_state.frames} frames, {view_state.frames / viewmodel.FPS:.1f} s"
-                         + (", loops in the game" if view_state.looping else ""))
-        layout.label(text="Viewing only for now: replacing animations comes later", icon="INFO")
-
-
-def draw_view_header(self, context):
-    """The Weapons tab's viewport header: first person or free view, arms, play."""
-    workspace = context.workspace
-    if workspace is None or workspace.name != WORKSPACE:
-        return
-    wm = context.window_manager
-    layout = self.layout
-    layout.separator()
-    row = layout.row(align=True)
-    row.prop(wm, "boz_view_free", text="Free view" if wm.boz_view_free else "First person",
-             icon="ORIENTATION_GIMBAL" if wm.boz_view_free else "VIEW_CAMERA", toggle=True)
-    row.prop(wm, "boz_view_arms", text="Arms", icon="HIDE_OFF" if wm.boz_view_arms else "HIDE_ON",
-             toggle=True)
-    if _state.get("rig_key"):
-        layout.operator(BOZ_OT_weapon_anim_play.bl_idname, text="",
-                        icon="PAUSE" if wm.boz_anim_playing else "PLAY")
-
-
-VIEW_CLASSES = (BOZ_OT_weapon_anim_play, BOZ_PT_weapon_animations)
+def request_preview() -> None:
+    from . import weapon_view
+    weapon_view.request_preview()
 
 
 def leave_view(window) -> None:
-    """Any other tab: the map, never the weapon view."""
-    if window.scene is not None and window.scene.name == link.VIEW_SCENE:
-        window.scene = link.map_scene()
+    from . import weapon_view
+    weapon_view.leave_view(window)
 
 
 def refresh_view(window) -> None:
-    """Called by the tabs' timer while the Weapons tab is on screen."""
-    if not window.workspace.get(VIEW_KEY) or window.scene.name != link.VIEW_SCENE:
-        if bpy.data.objects.get(VIEW_CAMERA) is None and selected(link.map_scene()) is not None:
-            show_preview(bpy.context)
-        setup_view(window)
+    from . import weapon_view
+    weapon_view.refresh_view(window)
 
 
 def on_load() -> None:
@@ -1205,26 +871,18 @@ def on_load() -> None:
 
 
 def register():
-    for cls in CLASSES + VIEW_CLASSES:
+    from . import weapon_view
+    for cls in CLASSES:
         bpy.utils.register_class(cls)
-    wm = bpy.types.WindowManager
-    wm.boz_view_free = BoolProperty(
-        name="Free view", update=_view_changed,
-        description="Move around the weapon freely instead of looking through the game's eye")
-    wm.boz_view_arms = BoolProperty(name="Arms", default=True, update=_arms_changed,
-                                    description="Show the player's arms")
-    wm.boz_anim_state = EnumProperty(name="Animation", items=_anim_items,
-                                     update=_anim_state_changed,
-                                     description="The animation shown in the view")
-    wm.boz_anim_frame = IntProperty(name="Frame", min=0, update=_anim_frame_changed,
-                                    description="The animation's keyframe shown (24 a second)")
-    wm.boz_anim_playing = BoolProperty()
-    wm.boz_anim_loop = BoolProperty(name="Loop", default=True,
-                                    description="Play the animation over and over")
-    bpy.types.VIEW3D_HT_header.append(draw_view_header)
+    weapon_view.register()
     bpy.types.Scene.boz_weapons = CollectionProperty(type=BOZ_WeaponItem)
     bpy.types.Scene.boz_weapon_index = IntProperty(update=_selected_changed)
     bpy.types.Scene.boz_weapon_fields = CollectionProperty(type=BOZ_WeaponField)
+    bpy.types.Scene.boz_weapon_display = StringProperty(
+        name="In-game name",
+        description="The name players see in game, as on wall buys (empty: the game's own name; "
+                    "a new weapon has none)",
+        update=_display_changed)
     bpy.types.Scene.boz_start_reserve = IntProperty(
         name="Starting spare rounds", min=0, default=wp.DEFAULT_START_RESERVE,
         description="Spare rounds of the starting weapon (the game's default: 40)",
@@ -1233,16 +891,13 @@ def register():
 
 
 def unregister():
-    if bpy.app.timers.is_registered(_play_tick):
-        bpy.app.timers.unregister(_play_tick)
-    bpy.types.VIEW3D_HT_header.remove(draw_view_header)
-    for name in ("boz_view_free", "boz_view_arms", "boz_anim_state", "boz_anim_frame",
-                 "boz_anim_playing", "boz_anim_loop"):
-        delattr(bpy.types.WindowManager, name)
+    from . import weapon_view
     del bpy.types.WindowManager.boz_pool_items
     del bpy.types.Scene.boz_start_reserve
+    del bpy.types.Scene.boz_weapon_display
     del bpy.types.Scene.boz_weapon_fields
     del bpy.types.Scene.boz_weapon_index
     del bpy.types.Scene.boz_weapons
-    for cls in reversed(CLASSES + VIEW_CLASSES):
+    weapon_view.unregister()
+    for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)

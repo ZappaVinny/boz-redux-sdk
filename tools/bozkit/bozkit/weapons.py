@@ -368,6 +368,11 @@ class WeaponDef:
     level: str = ''
     fields: dict = field(default_factory=dict)
     script: str = ''
+    model: dict = field(default_factory=dict)    # your own model (bozkit.weapon_model)
+    arms: dict = field(default_factory=dict)     # where the arms sit: {"location", "rotation"}
+    display: str = ''                            # its name in game prompts ('' = the game's own)
+    model_data: tuple | None = field(default=None, compare=False, repr=False)   # attach_models
+    clips: dict = field(default_factory=dict, compare=False, repr=False)      # attach_models
 
     @property
     def source(self) -> str:
@@ -440,7 +445,8 @@ def load_defs(source: Path) -> list[WeaponDef]:
             raise WeaponError(f'{path}: {exc}') from exc
         out.append(WeaponDef(str(data.get('name') or path.stem), str(data.get('base', '')),
                              str(data.get('level', '')), dict(data.get('fields', {})),
-                             str(data.get('script', ''))))
+                             str(data.get('script', '')), dict(data.get('model', {})),
+                             dict(data.get('arms', {})), str(data.get('display', ''))))
     return out
 
 
@@ -456,6 +462,12 @@ def save_def(source: Path, weapon: WeaponDef) -> Path:
     data = {'name': weapon.name, 'base': weapon.base if weapon.base != weapon.name else '',
             'level': weapon.level, 'fields': dict(sorted(weapon.fields.items())),
             'script': weapon.script}
+    if weapon.model:
+        data['model'] = weapon.model
+    if weapon.arms:
+        data['arms'] = weapon.arms
+    if weapon.display:
+        data['display'] = weapon.display
     path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8', newline='\n')
     return path
 
@@ -636,16 +648,293 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef]) -> dict:
         for key, value in weapon.fields.items():
             set_value(blob, key, value)
         resource.body = resources.encode_entity_spec(spec)
-    return {'aliases': aliases, 'warnings': warnings}
+    # 4. Your own models and animations.
+    for weapon in defs:
+        if not (weapon.model and weapon.model.get('asset')) and not weapon.clips and not weapon.arms:
+            continue
+        resource = by_hash.get(_hash_of(weapon.name))
+        if resource is None:
+            raise WeaponError(f'weapon {weapon.name} is not in the level')
+        apply_model(groups, weapon, resource)
+    # Weapons with a model of their own show it on wall buys (not their base's).
+    own_models = {_hash_of(w.name) for w in defs if w.model and w.model.get('asset')}
+    for name_hash in own_models:
+        aliases.pop(name_hash, None)
+    return {'aliases': aliases, 'warnings': warnings, 'own_models': own_models}
+
+
+def attach_models(defs: list[WeaponDef], source: Path) -> None:
+    """Load the assets the weapons use as their model (WeaponDef.model_data) and their own
+    animations (WeaponDef.clips, bozkit.weapon_anim)."""
+    from . import assets, weapon_anim
+    for weapon in defs:
+        try:
+            weapon.clips = weapon_anim.load_clips(source, weapon.name)
+        except weapon_anim.WeaponAnimError as exc:
+            raise WeaponError(f'weapon {weapon.name}: {exc}') from None
+        name = weapon.model.get('asset') if weapon.model else None
+        if not name:
+            continue
+        try:
+            asset = assets.load_def(source, name)
+            model, textures = assets.load_game(source, name)
+        except assets.AssetError as exc:
+            raise WeaponError(f'weapon {weapon.name}: {exc}') from None
+        if asset.kind != 'weapon':
+            raise WeaponError(f'weapon {weapon.name}: asset {name} is a prop (make it a weapon '
+                              'in the Assets tab)')
+        weapon.model_data = (model, textures)
+
+
+def _model_refs(blob):
+    """(property, role) for every model/skin reference of a weapon: role 'view', 'ads' or
+    ('lod', n)."""
+    from . import reflect  # noqa: F401
+    out = []
+    for prop_name, role in (('renderableAsset', 'view'), ('renderableAssetADS', 'ads')):
+        prop = _prop(blob, prop_name)
+        if prop is not None and prop.nested is not None:
+            out += [(p, role) for p in prop.nested.properties
+                    if p.name_hash in (iw_hash('model'), iw_hash('skin'))]
+    lods = _prop(blob, 'LODS')
+    if lods is not None and lods.nested is not None:
+        number = 0
+
+        def walk(nested):
+            nonlocal number
+            for p in nested.properties:
+                if p.name_hash == iw_hash('model'):
+                    out.append((p, ('lod', number)))
+                elif p.name_hash == iw_hash('skin'):
+                    out.append((p, ('lod', number)))
+                    number += 1
+                if p.nested is not None:
+                    walk(p.nested)
+                for element in p.elements or []:
+                    walk(element)
+        walk(lods.nested)
+    return out
+
+
+def _templates(parsed, view_model: int):
+    """(the material the stock view model uses, a raw texture to copy headers from)."""
+    from . import native
+    materials = {r.in_group_hash: r.body for t in parsed.types()
+                 if t.class_hash == iw_hash('CIwMaterial') for r in t.resources}
+    models = {r.in_group_hash: r.body for t in parsed.types()
+              if t.class_hash == iw_hash('CIwModel') for r in t.resources}
+    material = None
+    body = models.get(view_model, b'')
+    for mh in _references(body, set(materials)):
+        decoded = native.decode_material(materials[mh])
+        if material is None or decoded.same_as_default:
+            material = decoded
+    if material is None and materials:
+        material = native.decode_material(next(iter(materials.values())))
+    texture = None
+    for t in parsed.types():
+        if t.class_hash not in TEXTURE_CLASSES:
+            continue
+        for r in t.resources:
+            try:
+                native.texture_layout(r.body)
+            except ValueError:
+                continue
+            texture = r.body
+            break
+        if texture is not None:
+            break
+    return material, texture
+
+
+def _resources_of(parsed, class_name: str) -> dict:
+    return {r.in_group_hash: r for t in parsed.types() if t.class_hash == iw_hash(class_name)
+            for r in t.resources}
+
+
+def _put(parsed, class_name: str, value: int, body: bytes) -> None:
+    """Add a resource to a group, or replace the one already there."""
+    from . import group as group_module
+    existing = _resources_of(parsed, class_name).get(value)
+    if existing is not None:
+        existing.body = body
+    else:
+        _add(parsed, iw_hash(class_name), group_module.Resource(value, value, body))
+
+
+def _set_reference(blob, name: str, value) -> None:
+    """Point a weapon's existing reference at another resource: a hash (skel) or a name
+    (m_weaponAsm, m_armsAsm)."""
+    from . import reflect
+    prop = _prop(blob, name)
+    if prop is None:
+        raise WeaponError(f'the weapon has no {name}')
+    if isinstance(value, str):
+        reflect.set_typed_value(prop, value)
+    else:
+        prop.raw = struct.pack('<I', value)
+        prop.nested = prop.elements = None
+
+
+def _patch_offsets(body: bytes, changes: dict) -> bytes:
+    out = bytearray(body)
+    for offset, value in changes.items():
+        struct.pack_into('<I', out, offset, value)
+    return bytes(out)
+
+
+def apply_model(groups: dict, weapon: WeaponDef, resource) -> None:
+    """Put *weapon*'s own model (WeaponDef.model, attached: on its own skeleton) and its own
+    animations (WeaponDef.clips) on its spec. *groups*: 'weapons' and 'arms' parsed groups."""
+    from . import anim, resources, weapon_anim, weapon_model
+    weapons_group, arms_group = groups['weapons'], groups.get('arms')
+    spec = resources.decode_entity_spec(resource.body)
+    blob = _weapon_blob(spec)
+    skels = _resources_of(weapons_group, 'CIwAnimSkel')
+    anims = _resources_of(weapons_group, 'CIwAnim')
+    asms = _resources_of(weapons_group, 'CIsAnimStateMachine')
+    stock_skel = get_value(blob, 'skel')
+    if not stock_skel or stock_skel not in skels:
+        raise WeaponError(f'weapon {weapon.name}: its base has no skeleton')
+    stock_bones = anim.decode_skel(skels[stock_skel].body)
+    gun_asm_name = get_value(blob, 'm_weaponAsm') or ''
+    gun_asm = asms.get(iw_hash(gun_asm_name))
+    clips = weapon.clips or {}
+    asset = bool(weapon.model.get('asset')) if weapon.model else False
+    fit = (weapon.model.get('fit') or {}) if asset else {}
+
+    try:
+        if asset:
+            if weapon.model_data is None:
+                raise WeaponError(f'weapon {weapon.name}: its model asset was not attached')
+            model, textures = weapon.model_data
+            names = weapon_anim.bone_names(model)
+            own = weapon_anim.own_skeleton(model, fit)
+            own_hash = iw_hash(f'{weapon.name}_skel')
+            _put(weapons_group, 'CIwAnimSkel', own_hash, anim.encode_skel(own))
+            refs = _model_refs(blob)
+            view = next((int.from_bytes(p.raw[:4], 'little') for p, role in refs if role == 'view'), 0)
+            material, texture = _templates(weapons_group, view)
+            if material is None or texture is None:
+                raise WeaponError(f'weapon {weapon.name}: no material or raw texture to copy from')
+            built = weapon_model.build(weapon.name, model, textures, fit, {n: n for n in names}, own,
+                                       own_hash, material, texture)
+            for class_name, value, body in built.resources:
+                _put(weapons_group, class_name, value, body)
+            for prop, role in refs:
+                value = built.view if role == 'view' else built.ads if role == 'ads' else \
+                    built.lods[min(role[1], len(built.lods) - 1)]
+                prop.raw = struct.pack('<I', value)     # a resource reference: its hash
+            _set_reference(blob, 'skel', own_hash)
+            follow = weapon_anim.follow_list(model, stock_bones, weapon.model.get('bones') or {})
+            gun_bones, gun_skel = own, own_hash
+
+            def gun_keys(keys):
+                return keys
+        else:
+            gun_bones, gun_skel = stock_bones, stock_skel
+
+            def gun_keys(keys):
+                return {int(k): v for k, v in keys.items() if str(k).isdigit()}
+
+        # Your animations' lengths: the game ends a state (a reload: done) when its length is up.
+        def length_ms(entry):
+            frames = int(entry.get('length') or 0) or max(
+                (c.frames[-1][0] for c in (entry.get('arms'), entry.get('gun')) if c and c.frames),
+                default=0)
+            return round(frames * 1000 / weapon_anim.FPS)
+        lengths = {state: length_ms(entry) for state, entry in clips.items()
+                   if entry.get('arms') or entry.get('gun')}
+
+        # The gun's animations: all of them on its own skeleton; your clips on either.
+        mine_gun = {state: entry['gun'] for state, entry in clips.items() if 'gun' in entry}
+        if gun_asm is not None and (asset or mine_gun):
+            changes, made = {}, {}
+            for state, at, second in anim.asm_anim_offsets(gun_asm.body):
+                for offset, is_primary in ((at, True), (second, False)):
+                    source_hash = struct.unpack_from('<I', gun_asm.body, offset)[0]
+                    stock = anims.get(source_hash)
+                    clip = mine_gun.get(state) if is_primary else None
+                    if stock is None and clip is None:
+                        continue
+                    if clip is None and not asset:
+                        continue          # stock skeleton, no clip: the stock animation stays
+                    stock_anim = anim.decode_anim(stock.body) if stock is not None else None
+                    template = stock_anim.keyframes[0].header if stock_anim and stock_anim.keyframes else None
+                    if clip is not None:
+                        key = iw_hash(f'{weapon.name}_gun_{state:08x}')
+                        game = weapon_anim.gun_clip_to_game(clip, model, fit) if asset else clip
+                        body = weapon_anim.encode_clip(game, gun_skel, gun_bones,
+                                                       gun_keys if not asset else (lambda k: k), template)
+                    else:
+                        key = iw_hash(f'{weapon.name}_gun_{source_hash:08x}')
+                        if key not in made:
+                            moved = weapon_anim.retarget(stock_bones, stock_anim, own, follow)
+                            made[key] = weapon_anim.encode_clip(moved, gun_skel, gun_bones,
+                                                                lambda k: k, template)
+                        body = made[key]
+                    _put(weapons_group, 'CIwAnim', key, body)
+                    changes[offset] = key
+            changes.update(anim.asm_lengths(gun_asm.body, lengths))
+            name = f'{weapon.name}_gun'
+            _put(weapons_group, 'CIsAnimStateMachine', iw_hash(name), _patch_offsets(gun_asm.body, changes))
+            _set_reference(blob, 'm_weaponAsm', name)
+
+        # The arms: your clips and where the arms sit, in a copy of the arms' state machine.
+        mine_arms = {state: entry['arms'] for state, entry in clips.items() if 'arms' in entry}
+        arms_asm_name = get_value(blob, 'm_armsAsm') or ''
+        offset = weapon_anim.arms_offset(weapon.arms)
+        if (mine_arms or offset is not None) and arms_group is not None:
+            arm_asms = _resources_of(arms_group, 'CIsAnimStateMachine')
+            arm_anims = _resources_of(arms_group, 'CIwAnim')
+            arm_skels = _resources_of(arms_group, 'CIwAnimSkel')
+            arms_asm = arm_asms.get(iw_hash(arms_asm_name))
+            if arms_asm is None or not arm_skels:
+                raise WeaponError(f'weapon {weapon.name}: no arms state machine {arms_asm_name}')
+            arm_skel_hash, arm_skel = next(iter(arm_skels.items()))
+            arm_bones = anim.decode_skel(arm_skel.body)
+            changes = {}
+            for state, at, _second in anim.asm_anim_offsets(arms_asm.body):
+                clip = mine_arms.get(state)
+                source_hash = struct.unpack_from('<I', arms_asm.body, at)[0]
+                stock = arm_anims.get(source_hash)
+                stock_anim = anim.decode_anim(stock.body) if stock is not None else None
+                if clip is None:
+                    if offset is None or stock_anim is None:
+                        continue
+                    stock_clip = weapon_anim.stock_clip(stock_anim, arm_bones)
+                    clip = weapon_anim.Clip([(f, {str(i): v for i, v in k.items()})
+                                             for f, k in stock_clip.frames])
+                if offset is not None:
+                    clip = weapon_anim.offset_arms(clip, arm_bones, offset)
+                template = stock_anim.keyframes[0].header if stock_anim and stock_anim.keyframes else None
+                key = iw_hash(f'{weapon.name}_arms_{state:08x}')
+                body = weapon_anim.encode_clip(clip, arm_skel_hash, arm_bones,
+                                               lambda k: {int(i): v for i, v in k.items()
+                                                          if str(i).isdigit()}, template)
+                _put(arms_group, 'CIwAnim', key, body)
+                changes[at] = key
+            changes.update(anim.asm_lengths(arms_asm.body, lengths))
+            name = f'{weapon.name}_arms'
+            _put(arms_group, 'CIsAnimStateMachine', iw_hash(name), _patch_offsets(arms_asm.body, changes))
+            _set_reference(blob, 'm_armsAsm', name)
+    except (weapon_model.WeaponModelError, weapon_anim.WeaponAnimError, anim.AnimError,
+            ValueError) as exc:
+        raise WeaponError(f'weapon {weapon.name}: {exc}') from None
+    resource.body = resources.encode_entity_spec(spec)
 
 
 def runtime(defs: list[WeaponDef], index: list[str]) -> list[dict]:
-    """What boz.weapons needs at runtime: the project's weapons by name, with scripts."""
+    """What boz.weapons needs at runtime: the project's weapons by name, with scripts and the
+    names prompts show (a wall buy asks the game's text for "<weapon>_S_WEAPON")."""
     by_name = {d.name: d for d in defs}
     out = []
     for name in dict.fromkeys(list(index) + [d.name for d in defs]):
         weapon = by_name.get(name)
-        out.append({'name': name, 'script': _module(weapon.script) if weapon else ''})
+        entry = {'name': name, 'script': _module(weapon.script) if weapon else ''}
+        if weapon and weapon.display:
+            entry['display'] = weapon.display
+        out.append(entry)
     return out
 
 

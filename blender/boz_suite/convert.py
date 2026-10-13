@@ -412,10 +412,13 @@ def game_prefab_object(prefab: "world.Prefab", base: str, scene, parent=None, cu
     """An object for a game prefab: the model the game draws for it (or *custom*, mesh data of
     your own, or the game model it was given), or a coloured marker cube when it draws nothing."""
     weapon = (prefab.settings or prefab.fields).get(toolkit.WEAPON_FIELD)
-    override = game.weapon_model(base, str(weapon)) if weapon else None
+    override, own = None, None
+    if weapon:
+        from . import weapons_tab
+        override, own = weapons_tab.wall_display(bpy.context, str(weapon), base)
     drawn = game.model_mesh(*world.Instance((0, 0, 0), model=prefab.game).model_ref()) \
         if prefab.game and custom is None else None
-    data = custom or drawn or game.entity_mesh(base, prefab.hash, prefab.group, override)
+    data = custom or drawn or game.entity_mesh(base, prefab.hash, prefab.group, override, own)
     obj = bpy.data.objects.new(prefab.name or prefab.source, data or marker_mesh())
     if data is None:
         colour_marker(obj, entity_category(base, prefab.hash, prefab.group))

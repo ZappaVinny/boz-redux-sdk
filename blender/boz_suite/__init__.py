@@ -11,7 +11,7 @@ import os
 import bpy
 
 from . import (assets_tab, link, objects, palette, placeholders, preview, shapes, shell, tabs,
-               weapons_tab)
+               weapon_view, weapons_tab)
 
 ADDON = "boz_redux"
 

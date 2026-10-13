@@ -592,11 +592,9 @@ class BOZ_OT_choose_weapon(Operator):
         if not obj.get("boz_custom_model"):
             from . import weapons_tab
             placement = world.Placement(obj.boz.source, (0.0, 0.0, 0.0), group=obj.boz.group)
-            # A new weapon shows its base's model; an imported one its own map's.
-            shown = weapons_tab.weapon_def(context, self.weapon)
-            level = shown.level or map_scene().boz.base
+            override, own = weapons_tab.wall_display(context, self.weapon, map_scene().boz.base)
             data = game.entity_mesh(map_scene().boz.base, placement.hash, obj.boz.group,
-                                    game.weapon_model(level, shown.source))
+                                    override, own)
             if data is not None and obj.type == "MESH":
                 convert.show_mesh(obj, data)
                 for child in obj.children:

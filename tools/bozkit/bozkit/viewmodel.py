@@ -5,11 +5,12 @@ The arms (``arms_<level>``: one skeleton "armRig", its skins and animations) pla
 arms state machine (CPlayerWeapon m_armsAsm, e.g. "colt45_arms"); the gun (``weapons_<level>``:
 its own skeleton, skin and animations) plays its state machine (m_weaponAsm) and hangs from the
 arms' TAG_WEAPON bone. The first-person camera sits at the origin of the arms' space looking down
-+Z (Y up); its vertical field of view is the map camera's (CWeaponManager base FOV), 65
-degrees by default. Animations play at FPS keyframes per second.
++Z (Y up). The game's field of view is the map camera's FOV (50 by default) turned into a
+horizontal angle by its projection (view_angle: about 71 degrees across a 16:9 screen). Keyframes carry their times (bozkit.weapon_anim: a 30 a second grid).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from . import anim, group as group_module, levels, resources, weapons
@@ -20,7 +21,15 @@ SKIN = iw_hash('CIwAnimSkin')
 ANIM = iw_hash('CIwAnim')
 ASM = iw_hash('CIsAnimStateMachine')
 MODEL = levels.MODEL
-DEFAULT_FOV = 65.0
+DEFAULT_FOV = 50.0     # CIsCamera's m_fov when a map leaves it unset (every shipped map)
+ASPECT = 16 / 9        # the client's window
+
+
+def view_angle(fov: float = DEFAULT_FOV) -> float:
+    """The horizontal angle (radians) the game shows for a camera FOV of *fov* degrees.
+    CWeaponManager::UpdateFov sets the projection to screen width / (2 x atan(fov in radians)):
+    atan, not tan(fov / 2), so the half-angle across the width is atan(atan(fov))."""
+    return 2.0 * math.atan(math.atan(math.radians(fov)))
 
 
 @dataclass
@@ -40,7 +49,6 @@ def _by_class(parsed) -> dict:
     return out
 
 
-FPS = 24          # animation keyframes per second (CIwAnim duration: 4096 = 1 s)
 
 # Animation state names (the state machines keep only their hashes; found by hashing the names).
 STATE_NAMES = ('idle', 'shooting', 'Firing_From_Idle', 'Aim_Shoot', 'aim_idle', 'Aim_up',
@@ -102,6 +110,16 @@ class Rig:
                 self.gun_skin = anim.decode_skin(skin_body)
                 self.gun_bones = anim.decode_skel(skel_body)
         self._decoded: dict[int, anim.Anim] = {}
+        self.custom = False
+
+    def use_model(self, vertices, skin) -> None:
+        """Show your own model (model units, the skeleton's bind pose) skinned by *skin* in
+        place of the stock gun (bozkit.weapon_model.use_on_rig)."""
+        from . import native
+        self.gun_model = native.Model(vertices=list(vertices), triangles=[])
+        self.gun_skin = skin
+        self.gun_model_hash = 0
+        self.custom = True
 
     @staticmethod
     def _states(data, asm_name) -> tuple[dict, int | None]:
@@ -150,6 +168,22 @@ class Rig:
             state = self.arm_states[0].get(name) or self.gun_states[0].get(name)
             out.append(ViewState(name, label, frames, state.looping))
         return out
+
+    def worlds(self, state: int | None = None, frame: int = 0):
+        """(arm bone worlds, gun bone worlds) posed in *state* at *frame* (skeleton units)."""
+        state = self.idle() if state is None else state
+
+        def keyframe(anims, states):
+            found = self._anim(anims, states, state) or self._anim(anims, states, self.idle())
+            if found is None or not found.keyframes:
+                return None
+            return found.keyframes[min(frame, len(found.keyframes) - 1)]
+
+        arm_pose = anim.pose(self.arm_bones, keyframe(self.arm_anims, self.arm_states))
+        tag = anim.bone_world(self.arm_bones, arm_pose, 'TAG_WEAPON')
+        gun_pose = anim.pose(self.gun_bones, keyframe(self.gun_anims, self.gun_states), root=tag) \
+            if self.gun_bones else []
+        return arm_pose, gun_pose
 
     def pose(self, state: int | None = None, frame: int = 0) -> list[ViewPart]:
         """The arms and gun in *state* (default: idle) at keyframe *frame* (held at its last

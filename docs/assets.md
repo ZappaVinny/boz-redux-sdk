@@ -49,6 +49,15 @@ Log). It:
    (Call of Duty's, with an empty blue channel) work too. A material without an image gets a
    small texture of its colour.
 
+5. Closes what reducing opened, so nothing is see-through: reducing rounds corners off and lets
+   the borders of the model's open shells (parts tucked into each other) creep back, which opens
+   gaps. The reduced surface is pushed out gently to cover the original, and every open border
+   grows back a little so neighbouring shells overlap again. Then the game version is drawn as
+   the game draws it (one side) from six directions against the original: if anything is
+   see-through, it is made again from the original with more triangles (up to five times). Game
+   checks says when it needed more triangles than your budget; a model this busy at the Stock
+   preset may need two or three times as many.
+
 **Own budget** sets the triangle count yourself; **Textures** caps the texture size.
 
 ## The view

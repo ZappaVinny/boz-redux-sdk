@@ -266,16 +266,16 @@ def _images(name: str) -> list:
     return out
 
 
-def build_mesh(name: str, data_name: str):
-    """New mesh data for *name*'s game version, in centimetres, with game materials; None
-    without a game version."""
+def build_mesh(name: str, data_name: str, unit_scale: float = assets.ASSET_SCALE):
+    """New mesh data for *name*'s game version, in centimetres (or its stored units times
+    *unit_scale*), with game materials; None without a game version."""
     from . import convert
     try:
         model, _textures = assets.load_game(source_dir(), name)
     except (assets.AssetError, TypeError):
         return None
     data = bpy.data.meshes.new(data_name)
-    data.from_pydata([tuple(c * assets.ASSET_SCALE for c in blender_scene.to_blender(v))
+    data.from_pydata([tuple(c * unit_scale for c in blender_scene.to_blender(v))
                       for v in model.vertices], [], [tuple(t) for t in model.triangles])
     layer = data.uv_layers.new(name="UVMap")
     corners = [0] * len(data.loops)

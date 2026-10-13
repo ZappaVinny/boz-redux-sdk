@@ -162,10 +162,12 @@ def entity_spec(base: str, source_hash: int, group_path: str = ""):
         return None
 
 
-def entity_mesh(base: str, source_hash: int, group_path: str = "", model_override=None):
+def entity_mesh(base: str, source_hash: int, group_path: str = "", model_override=None,
+                source_mesh=None):
     """The mesh an entity draws, placed as the game places it (its own scale, children's
     transforms), or None. *model_override*: (group path, model hash) of a different model for
-    the same drawing entity (a wall buy's chosen weapon)."""
+    the same drawing entity (a wall buy's chosen weapon); *source_mesh*: mesh data in that model's
+    units instead (a weapon's own model)."""
     spec = entity_spec(base, source_hash, group_path)
     if spec is None:
         return None
@@ -173,13 +175,17 @@ def entity_mesh(base: str, source_hash: int, group_path: str = "", model_overrid
     if drawn is None:
         return None
     model, chain = drawn
-    models = game_models()
-    path = model_override[0] if model_override else _model_group(models, base, model, group_path)
-    if model_override:
-        model = model_override[1]
-    if path is None:
-        return None
-    source = model_mesh(path, model)
+    if source_mesh is not None:
+        source = source_mesh
+        model = iw_hash(source_mesh.name)
+    else:
+        models = game_models()
+        path = model_override[0] if model_override else _model_group(models, base, model, group_path)
+        if model_override:
+            model = model_override[1]
+        if path is None:
+            return None
+        source = model_mesh(path, model)
     if source is None:
         return None
     from mathutils import Matrix
@@ -191,6 +197,9 @@ def entity_mesh(base: str, source_hash: int, group_path: str = "", model_overrid
         return source
     name = f"{PREFIX} entity {source_hash:08x} {model:08x}"
     mesh = bpy.data.meshes.get(name)
+    if mesh is not None and source_mesh is not None:
+        bpy.data.meshes.remove(mesh)           # your model may have changed: placed again
+        mesh = None
     if mesh is None:
         mesh = source.copy()
         mesh.name = name

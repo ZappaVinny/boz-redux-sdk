@@ -186,12 +186,91 @@ def asset_checks(label):
     if IDGUN.is_file() and label == "inherited":   # local only: never committed
         bpy.ops.boz.asset_import("EXEC_DEFAULT", filepath=str(IDGUN), kind="weapon", preset="stock")
         stats = at.stats_of("idgun_world")
-        check(stats and not stats["errors"] and stats["triangles"] <= 1500,
-              f"the idgun's game version is made ({stats})")
-        print(f"BOZ_SUITE_INFO idgun: {stats['high_triangles']} -> {stats['triangles']} triangles, "
+        check(stats and not stats["errors"] and stats.get("see_through", 1) <= 0.05,
+              f"the idgun's game version is made with nothing see-through ({stats})")
+        print(f"BOZ_SUITE_INFO idgun: {stats['high_triangles']} -> {stats['triangles']} triangles "
+              f"({stats['see_through']}% see-through), "
               f"textures {stats['textures']}, warnings {stats['warnings']}")
     return name
 
+
+def own_model_checks(label, asset_name):
+    """A weapon made from the Thundergun with your Weapon asset on its own skeleton in the rig:
+    fitted in the hand, the original reload moving it, a gun change of its own, built."""
+    wt = suite.weapons_tab
+    wv = suite.weapon_view
+    from mathutils import Vector
+    names = [i.name for i in scene.boz_weapons]
+    if "thundergun" not in names:
+        return None
+    wm = bpy.context.window_manager
+    scene.boz_weapon_index = names.index("thundergun")
+    bpy.ops.boz.weapon_new("EXEC_DEFAULT", name="hq_wonder")
+    scene.boz_weapon_index = [i.name for i in scene.boz_weapons].index("hq_wonder")
+    wv.flush()
+    wm.boz_weapon_model = asset_name
+    wv.flush()
+    weapon = {d.name: d for d in wt.wp.load_defs(project / "source")}["hq_wonder"]
+    check(weapon.model.get("asset") == asset_name and weapon.model.get("fit", {}).get("scale"),
+          f"{label}: the weapon uses your model, fitted ({weapon.model})")
+    model, _textures = wt.assets.load_game(project / "source", asset_name)
+    rig_obj = bpy.data.objects[wv.RIG]
+    check(all(f"gun {b.name}" in rig_obj.data.bones for b in model.bones),
+          f"{label}: the rig has your model's bones under the gun position")
+    check(len(bpy.data.objects[wv.GUN].data.vertices) == len(model.vertices), f"{label}: the view shows your model")
+    view = bpy.data.scenes[link.VIEW_SCENE]
+    states = {i[1].split("  (")[0]: i[0] for i in wv._state_items(None, bpy.context)}
+    wm.boz_anim_state = states["reloading"]
+    depsgraph = view.view_layers[0].depsgraph
+
+    def gun_points(frame):
+        view.frame_set(frame)
+        depsgraph.update()
+        gun = bpy.data.objects[wv.GUN].evaluated_get(depsgraph)
+        mesh = gun.to_mesh()
+        points = [gun.matrix_world @ v.co for v in mesh.vertices]
+        gun.to_mesh_clear()
+        return points
+
+    idle = gun_points(0)
+    best = max(max((a - b).length for a, b in zip(idle, gun_points(f))) for f in range(5, view.frame_end, 10))
+    check(best > 1.0, f"{label}: the original reload moves your model ({best:.1f})")
+    # Fit model in hand: a rigid copy to move, the stock gun see-through, kept when done.
+    before = list(weapon.model["fit"]["location"])
+    wm.boz_fit_edit = True
+    fit_obj = bpy.data.objects.get(wv.FIT_MODEL)
+    check(fit_obj is not None and bpy.data.objects.get(wv.GHOST) is not None
+          and view.view_layers[0].objects.active == fit_obj, f"{label}: Fit model in hand shows your model to move")
+    fit_obj.location.x += 100.0
+    wm.boz_fit_edit = False
+    wv.flush()
+    after = {d.name: d for d in wt.wp.load_defs(project / "source")}["hq_wonder"].model["fit"]["location"]
+    check(abs(after[0] - before[0] - 100.0) < 0.5, f"{label}: moving your model moves the fit ({before} -> {after})")
+    wm.boz_fit_location = (after[0] - 100.0, after[1], after[2])
+    wv.flush()
+    again = {d.name: d for d in wt.wp.load_defs(project / "source")}["hq_wonder"].model["fit"]["location"]
+    check(abs(again[0] - before[0]) < 0.5, f"{label}: the Position field sets the fit")
+    # A gun change of its own: the magazine lower from frame 10 on.
+    rig_obj = bpy.data.objects[wv.RIG]
+    wm.boz_anim_state = states["reloading"]
+    clip_name = next((f"gun {b.name}" for b in model.bones if b.name.lower() == "tag_clip"), None)
+    if clip_name is not None:
+        bone = rig_obj.pose.bones[clip_name]
+        view.frame_set(10)
+        bone.location.z -= 30.0
+        changed = Vector(bone.location)
+        view.frame_set(30)
+        held = (Vector(bone.location) - changed).length
+        check([c["frame"] for c in wv._state["edits"]["gun"]] == [10] and held < 0.01,
+              f"{label}: the magazine change holds from frame 10 ({held:.4f} off)")
+        bpy.ops.boz.weapon_anim_save()
+        stored = wv.weapon_anim.load_clips(project / "source", "hq_wonder").get(int(states["reloading"]), {})
+        pose = stored.get("edits", {}).get("gun", [{}])[0].get("pose", {})
+        check("tag_clip" in {k.lower() for k in pose} and stored.get("gun"),
+              f"{label}: your change is stored by your bone's name ({sorted(pose)})")
+    wv.BOZ_PT_weapon_model.draw(type("Panel", (), {"layout": FakeLayout()})(), FakeContext(None))
+    print(f"BOZ_SUITE_INFO {label} own model: reload moves it up to {best:.0f} units")
+    return "hq_wonder"
 
 def weapon_checks(label):
     """The Weapons tab: the list, a changed value, a new weapon, an import, a script, the box pool."""
@@ -244,44 +323,136 @@ def weapon_checks(label):
     check((project / "scripts" / "weapons" / "colt_auto.lua").is_file()
           and {d.name: d for d in wp.load_defs(project / "source")}["colt_auto"].script,
           f"{label}: Add script makes the weapon's script")
-    # The first-person view of the selected weapon (arms in their idle pose holding it).
+    # The view: one rig (arms, the gun under the gun position, grips), the models skinned by Blender.
+    wv = suite.weapon_view
+    from mathutils import Vector
     scene.boz_weapon_index = [i.name for i in scene.boz_weapons].index("colt45")
+    stale = bpy.data.objects.new("BOZ bone bone 9", None)    # what an older version left behind
+    wv.view_scene().collection.objects.link(stale)
     message = wt.show_preview(bpy.context)
+    check("BOZ bone bone 9" not in bpy.data.objects, f"{label}: the view clears what older versions left")
     view = bpy.data.scenes.get(link.VIEW_SCENE)
     names = sorted(o.name for o in view.objects) if view else []
-    check(names == ["BOZ view arms", "BOZ view camera", "BOZ view gun"],
-          f"{label}: the first-person view is built ({names}, {message})")
-    gun = bpy.data.objects["BOZ view gun"]
-    ys = [v.co.y for v in gun.data.vertices]
-    check(max(ys) < 0, f"{label}: the gun is in front of the camera (Blender -Y; {max(ys):.0f})")
-    check(not any(o.name.startswith("BOZ view") for o in scene.objects),
-          f"{label}: the view has a scene of its own, not the map's")
-    # Free view and the arms switch; the animations, posed in the view.
+    check({wv.RIG, wv.ARMS, wv.GUN, wv.VIEW_CAMERA} <= set(names), f"{label}: the view is built ({names}, {message})")
+    rig_obj = bpy.data.objects[wv.RIG]
+    check(rig_obj.data.bones["gun root"].parent.name == wv.TAG and "hand L" in rig_obj.data.bones,
+          f"{label}: the gun and the grips hang from the gun position")
+    check(not any(o.get("boz_preview") for o in scene.objects), f"{label}: the map is untouched")
     wm = bpy.context.window_manager
-    wm.boz_view_free = True
-    check(bpy.data.objects["BOZ view camera"].hide_viewport, f"{label}: the free view hides the camera")
-    wm.boz_view_arms = False
-    check(bpy.data.objects["BOZ view arms"].hide_viewport, f"{label}: the arms can be hidden")
-    wm.boz_view_arms, wm.boz_view_free = True, False
-    states = {i[1]: i[0] for i in wt._anim_items(None, bpy.context)}
+    states = {i[1].split("  (")[0]: i[0] for i in wv._state_items(None, bpy.context)}
     check({"idle", "reloading", "shooting"} <= set(states), f"{label}: the animations are listed ({sorted(states)})")
-    arms = bpy.data.objects["BOZ view arms"]
-    idle = [v.co.copy() for v in arms.data.vertices]
+    reload_state = int(states["reloading"])
     wm.boz_anim_state = states["reloading"]
-    wm.boz_anim_frame = 30
-    moved = max((a - v.co).length for a, v in zip(idle, arms.data.vertices))
-    check(moved > 1.0, f"{label}: a reload frame moves the arms ({moved:.1f})")
-    wm.boz_anim_frame = 10000
-    check(wm.boz_anim_frame == wt.current_anim()[1].frames - 1, f"{label}: the frame stays in the animation")
-    wm.boz_anim_frame = 0
+    rig = wv._state["rig"]
+    reload_anim = rig._anim(rig.arm_anims, rig.arm_states, reload_state)
+    depsgraph = view.view_layers[0].depsgraph
+    worst = 0.0
+    for number in (0, len(reload_anim.keyframes) // 2, len(reload_anim.keyframes) - 1):
+        frame = wv.weapon_anim.frame_of(reload_anim.keyframes[number].time)
+        view.frame_set(frame)
+        depsgraph.update()
+        arms = bpy.data.objects[wv.ARMS].evaluated_get(depsgraph)
+        mesh = arms.to_mesh()
+        want = rig.pose(reload_state, number)[0].positions
+        worst = max(worst, max((v.co - Vector(suite.convert.blender_scene.to_blender(p))).length
+                               for v, p in zip(mesh.vertices, want)))
+        arms.to_mesh_clear()
+    size = max(bpy.data.objects[wv.ARMS].dimensions)
+    check(worst < size * 0.002, f"{label}: Blender skins the arms as the game does ({worst:.2f} off, {size:.0f} across)")
+    print(f"BOZ_SUITE_INFO {label} skinning: Blender within {worst:.2f} of the game's ({size:.0f} across)")
+    camera = bpy.data.cameras[wv.VIEW_CAMERA]
+    check(camera.sensor_fit == "HORIZONTAL" and abs(__import__("math").degrees(camera.angle) - 71.3) < 0.5,
+          f"{label}: the camera frames the game's view")
+    wm.boz_view_fov = 90.0
+    check(abs(camera.angle - wv.viewmodel.view_angle(90.0)) < 1e-4, f"{label}: the field of view slider sets the camera")
+    wm.boz_view_fov = 50.0
+    wm.boz_view_free = True
+    check(bpy.data.objects[wv.VIEW_CAMERA].hide_viewport, f"{label}: the free view hides the camera")
+    wm.boz_view_arms = False
+    check(bpy.data.objects[wv.ARMS].hide_viewport, f"{label}: the arms can be hidden")
+    wm.boz_view_arms, wm.boz_view_free = True, False
+    # Position on screen: clicking the arms picks the rig; moved, saved, kept on a rebuild.
+    layer = view.view_layers[0]
+    layer.objects.active = bpy.data.objects[wv.ARMS]
+    wv._picked()
+    check(layer.objects.active == rig_obj and wm.boz_arms_edit, f"{label}: clicking the arms picks the rig to place it")
+    rig_obj.location.z -= 50.0
+    wv._position_changed()
+    wm.boz_arms_edit = False
+    saved_arms = {d.name: d for d in wp.load_defs(project / "source")}["colt45"].arms
+    check(saved_arms and abs(saved_arms["location"][1] + 50.0) < 0.5, f"{label}: the position is saved ({saved_arms})")
+    wt.show_preview(bpy.context)
+    rig_obj = bpy.data.objects[wv.RIG]
+    check(abs(rig_obj.location.z + 50.0) < 0.5, f"{label}: the position stays after a rebuild")
+    wm.boz_anim_state = states["reloading"]
+    view.frame_set(0)
     bpy.ops.boz.weapon_anim_play()
     check(wm.boz_anim_playing, f"{label}: Play starts the animation")
-    wt._play_tick()
-    check(wm.boz_anim_frame == 1, f"{label}: playing steps the frames")
+    wv._play_tick()
+    check(view.frame_current == 1, f"{label}: playing steps the frames")
     bpy.ops.boz.weapon_anim_play()
     check(not wm.boz_anim_playing, f"{label}: Play again pauses")
-    fake = type("Panel", (), {"layout": FakeLayout()})()
-    wt.BOZ_PT_weapon_animations.draw(fake, FakeContext(None))
+    # Editing: a change holds forward from its frame; earlier frames never move.
+    hand = rig_obj.pose.bones["hand L"]
+    view.frame_set(10)
+    before_10 = Vector(hand.location)
+    view.frame_set(20)
+    original_20 = Vector(hand.location)
+    hand.location.z += 4.0
+    edited_20 = Vector(hand.location)
+    view.frame_set(25)                                 # leaving the frame keeps the change
+    edits = wv._state["edits"]
+    check([c["frame"] for c in edits["arms"]] == [20] and not edits["gun"],
+          f"{label}: leaving the frame keeps the arms change ({edits})")
+    check((Vector(hand.location) - edited_20).length < 1e-3, f"{label}: the change holds on frame 25")
+    view.frame_set(10)
+    check((Vector(hand.location) - before_10).length < 1e-3, f"{label}: frame 10 (before) is unchanged")
+    # The gun's own timeline: moving the gun position changes only the gun's.
+    view.frame_set(40)
+    gun_bone = rig_obj.pose.bones[wv.TAG]
+    gun_bone.location.x += 3.0
+    view.frame_set(45)
+    check([c["frame"] for c in wv._state["edits"]["gun"]] == [40] and
+          [c["frame"] for c in wv._state["edits"]["arms"]] == [20],
+          f"{label}: arms and gun keep their own timelines ({wv._state['edits']})")
+    depsgraph.update()
+    evaluated = rig_obj.evaluated_get(depsgraph)
+    wrist = evaluated.pose.bones["wrist L"].matrix.to_translation()
+    grip = evaluated.pose.bones["hand L"].matrix.to_translation()
+    check((wrist - grip).length < 2.0, f"{label}: the hand stays on the gun ({(wrist - grip).length:.2f})")
+    # Back to original, copy and paste, original frames.
+    view.frame_set(60)
+    bpy.ops.boz.weapon_original(part="arms")
+    check(wv.weapon_anim.source_of(wv._state["edits"]["arms"], 70)[0] == "original",
+          f"{label}: back to original from 60")
+    wm.boz_copy_part, wm.boz_copy_source = "ARMS", "ORIGINAL"
+    view.frame_set(5)
+    bpy.ops.boz.weapon_copy_pose()
+    view.frame_set(80)
+    bpy.ops.boz.weapon_paste_pose()
+    check(80 in [c["frame"] for c in wv._state["edits"]["arms"]], f"{label}: a pose pastes at 80")
+    wm.boz_copy_part = "BOTH"
+    wm.boz_copy_from, wm.boz_copy_to = 0, 10
+    view.frame_set(90)
+    bpy.ops.boz.weapon_copy_frames()
+    check(wv.weapon_anim.source_of(wv._state["edits"]["gun"], 95) == ("original", 5),
+          f"{label}: original frames play from 90 ({wv._state['edits']['gun']})")
+    bpy.ops.boz.weapon_anim_save()
+    stored = wv.weapon_anim.load_clips(project / "source", "colt45").get(reload_state, {})
+    check(stored.get("edits", {}).get("arms") and stored.get("arms") and stored.get("gun") and
+          len(stored["arms"].frames[0][1]) == len(rig.arm_bones),
+          f"{label}: the changes and the result at every frame are stored")
+    for workspace in ("Weapons", "Animation"):
+        wv.BOZ_PT_weapon_animations.draw(type("Panel", (), {"layout": FakeLayout()})(),
+                                         FakeContext(None, workspace))
+    wv.BOZ_PT_weapon_model.draw(type("Panel", (), {"layout": FakeLayout()})(), FakeContext(None))
+    bpy.ops.boz.weapon_reset_anim("EXEC_DEFAULT")
+    check(reload_state not in wv.weapon_anim.load_clips(project / "source", "colt45"),
+          f"{label}: Reset gives the original back")
+    view.frame_set(30)                                 # one change kept, for the build
+    rig_obj.pose.bones["hand R"].location.y += 2.0
+    view.frame_set(31)
+    bpy.ops.boz.weapon_anim_save()
     window = bpy.context.window_manager.windows[0]
     window.scene = view                 # as when the Weapons tab is on screen
     check(link.map_scene() == scene, f"{label}: the map is still the map while the view shows")
@@ -353,7 +524,8 @@ class FakeLayout:
 
 
 class FakeContext:
-    def __init__(self, obj):
+    def __init__(self, obj, workspace="Weapons"):
+        self.workspace = bpy.data.workspaces.get(workspace)
         self.object = obj
         self.scene = scene
         self.window_manager = bpy.context.window_manager
@@ -539,7 +711,16 @@ if source.inherit:
     check(draw_panels("inherited") > 5, "panels draw for every kind")
     weapon_checks("inherited")
     asset_name = asset_checks("inherited")
+    own = own_model_checks("inherited", asset_name)
     saved, data = build_and_compile("inherited")
+    if own:
+        built_group = next((project / "build").glob(f"*/assets/weapons_*.group.bin")).read_bytes()
+        for name in ("hq_wonder_model", "hq_wonder_skel", "hq_wonder_gun"):
+            check(world.iw_hash(name).to_bytes(4, "little") in built_group, f"{name} is built")
+        check(b"hq_wonder_gun" in built_group, "the weapon plays its own state machine")
+        arms_group = next((project / "build").glob(f"*/assets/arms_*.group.bin")).read_bytes()
+        check(b"colt45_arms" in built_group and world.iw_hash("colt45_arms").to_bytes(4, "little") in arms_group,
+              "the colt's own arms animations are built")
     check(any(m.asset == asset_name for m in saved.models), "the placed asset is saved")
     weapon_build_checks("inherited", data)
     check(perk["boz_entity_name"] in data, "the hidden perk is in the start state")
@@ -688,7 +869,7 @@ if LIBRARY:
           {p.kind for p in shrine.parts} == {"prefab"}, f"prefabs nest ({[p.name for p in shrine.parts]})")
     check(draw_panels("generated") > 5, "panels draw for every kind")
     weapon_checks("generated")
-    asset_checks("generated")
+    own_model_checks("generated", asset_checks("generated"))
     saved, data = build_and_compile("generated")
     weapon_build_checks("generated", data)
     check("Shrine.Vault" in data, "the nested prefab is in the runtime data")

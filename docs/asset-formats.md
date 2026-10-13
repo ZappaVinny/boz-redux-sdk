@@ -415,4 +415,13 @@ a quaternion, 24 keyframes a second); a state machine names its states (by hash 
 names found so far are in `viewmodel.STATE_NAMES`) ("idle", "shooting", "reloading", ...) and the
 animation each plays. The arms hold the gun at their TAG_WEAPON bone. The byte layouts are in
 `bozkit/anim.py`; `bozkit/viewmodel.py` poses a weapon's first-person view from them in any
-state and keyframe (`Rig`).
+state and keyframe (`Rig`). Keyframes carry their times (4096 = 1 second, on a 30 a second
+grid, not evenly spaced). `anim.encode_skel` and `anim.encode_anim` write skeletons and
+animations (every shipped one round-trips byte for byte) and `anim.patch_asm` copies a state
+machine with other animations; `bozkit/weapon_anim.py` builds a weapon's own skeleton and
+animations with them. `anim.encode_skin` writes skins (every shipped skin round-trips byte for
+byte; weight bytes add up to 128) and `anim.build_skin` makes one for a model on a skeleton's
+bind pose; `bozkit/weapon_model.py` puts your own model on a weapon that way. A skinned model's
+flags are 0x30000 (rigid: 0x20000); a weapon's spec points at its model and skin (same hash) in
+renderableAsset, renderableAssetADS (aiming down the sights, on some guns) and LODS (three
+distance models).

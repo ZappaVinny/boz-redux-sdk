@@ -21,14 +21,12 @@ PLACEHOLDERS = [
     ("World", "Palettes", "Drag props, models, textures, effects and triggers from the game into the world", "UI"),
     ("World", "Make prop", "Turn a model into a prop with its own textures, collision and script stub", "UI"),
     ("World", "Rooms", "Rooms as collections and portals in doorways, for big maps", "UI"),
-    ("Weapons", "Your own models", "Replace a gun's model with your own, moving with its rig", "RE"),
-    ("Weapons", "Animations", "Idle, fire, reload, draw, sprint and aim animations from the Animation tab; "
-     "single-shot fire rate and reload time come from these", "RE"),
     ("Characters", "Model replacement", "Replace player arms, characters and zombies with your models", "RE"),
     ("Characters", "Skeleton and preview", "Map bones to the game skeleton and preview animations", "RE"),
     ("Assets", "Lightmaps", "Bake lighting into the game's lightmap textures", "later"),
     ("Effects", "Effects", "Browse, preview, edit and add particle effects", "RE"),
-    ("Animation", "Export animations", "Write object, weapon and character animations in the game's format", "RE"),
+    ("Animation", "Map and character animations", "Animate map objects and characters in the game's "
+     "format (weapons are done: pick a weapon in the Weapons tab)", "RE"),
     ("Scripts", "Lua completions", "boz.* suggestions while typing in the script editor", "UI"),
     ("Scripts", "Object scripts", "Every object with a script stub; jump between the object and its script", "UI"),
     ("Scripts", "Reload in game", "Reload the project's scripts in the running game", "client"),

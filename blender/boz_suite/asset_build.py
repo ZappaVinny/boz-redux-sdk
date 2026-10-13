@@ -116,6 +116,149 @@ def prepare(obj, merge: float):
     return obj.data.copy()
 
 
+def cover(obj, original, limit: float) -> float:
+    """Push the reduced mesh out until it covers the original: reducing rounds corners off and
+    pulls surfaces in, which thins edges and opens gaps where parts only just overlapped. For
+    every original vertex outside the reduced surface, the reduced triangle under it is pushed
+    out by that much (along the vertex normals, at most *limit*). Returns the largest push."""
+    from mathutils.bvhtree import BVHTree
+    data = obj.data
+    data.calc_loop_triangles()
+    if not len(data.loop_triangles):
+        return 0.0
+    positions = [v.co.copy() for v in data.vertices]
+    tree = BVHTree.FromPolygons(positions, [tuple(t.vertices) for t in data.loop_triangles])
+    push = [0.0] * len(positions)
+    triangles = [tuple(t.vertices) for t in data.loop_triangles]
+    for vertex in original.vertices:
+        location, normal, index, _distance = tree.find_nearest(vertex.co)
+        if index is None:
+            continue
+        outside = (vertex.co - location).dot(normal)
+        if outside > 0:
+            for corner in triangles[index]:
+                if outside > push[corner]:
+                    push[corner] = min(outside, limit)
+    data.update()
+    normals = [v.normal.copy() for v in data.vertices]
+    for index, amount in enumerate(push):
+        if amount > 0:
+            data.vertices[index].co = positions[index] + normals[index] * amount
+    data.update()
+    return max(push)
+
+
+def extend_borders(obj, margin: float) -> int:
+    """Grow every open border of the reduced mesh outward along its own surface by *margin*:
+    the model's shells tuck under each other, and reducing pulls their borders back, opening
+    cracks you can see through; grown back, they overlap again. Returns the vertices moved."""
+    from mathutils import Vector
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    mesh.normal_update()
+    moves = {}
+    for edge in mesh.edges:
+        if not edge.is_boundary:
+            continue
+        face = edge.link_faces[0]
+        a, b = edge.verts
+        along = (b.co - a.co)
+        if along.length < 1e-9:
+            continue
+        outward = along.cross(face.normal).normalized()
+        if outward.dot(face.calc_center_median() - a.co) > 0:
+            outward = -outward             # away from the face: out over the crack
+        for vert in (a, b):
+            moves.setdefault(vert.index, Vector()).__iadd__(outward)
+    for vert in mesh.verts:
+        direction = moves.get(vert.index)
+        if direction is not None and direction.length > 1e-9:
+            vert.co += direction.normalized() * margin
+    mesh.to_mesh(obj.data)
+    mesh.free()
+    return len(moves)
+
+
+HOLE_LIMIT = 0.0005     # see-through allowed: 0.05% of the model's area, pixel fringe along spikes
+                        # (an unreduced copy scores 0.006%; what is left at this level is not a hole)
+VIEWS = (((0, -1, 0), (90, 0, 0)), ((0, 1, 0), (90, 0, 180)), ((0, 0, 1), (0, 0, 0)),
+         ((0, 0, -1), (180, 0, 0)), ((-1, 0, 0), (90, 0, -90)), ((1, 0, 0), (90, 0, 90)))
+
+
+def see_through(reduced, originals: dict, length: float) -> float:
+    """The share of the original's area you can see through on the reduced model, drawn as the
+    game draws it (one side), from six directions: background enclosed by the reduced model where
+    the original has surface (holes; outlines a little thinner do not count)."""
+    import math
+    import tempfile
+    import numpy as np
+    from mathutils import Vector
+    scene = bpy.context.scene
+    for obj in scene.objects:
+        obj.hide_render = True
+    temps = []
+    for name, data in originals.items():
+        temp = bpy.data.objects.new(f"{name} check", data)
+        scene.collection.objects.link(temp)
+        temps.append(temp)
+    corners = [v.co for o in reduced for v in o.data.vertices]
+    centre = Vector(tuple((min(c[i] for c in corners) + max(c[i] for c in corners)) / 2 for i in range(3)))
+    camera = bpy.data.objects.new("check camera", bpy.data.cameras.new("check camera"))
+    scene.collection.objects.link(camera)
+    scene.camera = camera
+    camera.data.type = "ORTHO"
+    camera.data.ortho_scale = length * 1.1
+    camera.data.clip_end = length * 10
+    scene.render.engine = "BLENDER_WORKBENCH"
+    shading = scene.display.shading
+    shading.light, shading.color_type, shading.single_color = "FLAT", "SINGLE", (1, 1, 1)
+    scene.world = scene.world or bpy.data.worlds.new("check")
+    scene.world.color = (0, 0, 0)
+    scene.render.resolution_x, scene.render.resolution_y = 600, 400
+    scene.render.image_settings.file_format = "PNG"
+    folder = Path(tempfile.mkdtemp())
+
+    def shot(objects, culling, path):
+        for obj in scene.objects:
+            obj.hide_render = obj not in objects
+        camera.hide_render = False
+        shading.show_backface_culling = culling
+        scene.render.filepath = str(path)
+        bpy.ops.render.render(write_still=True)
+        image = bpy.data.images.load(str(path))
+        pixels = np.array(image.pixels[:]).reshape(image.size[1], image.size[0], 4)[..., 0] > 0.5
+        bpy.data.images.remove(image)
+        return pixels
+
+    worst = 0.0
+    try:
+        for direction, rotation in VIEWS:
+            camera.location = centre + Vector(direction) * length * 3
+            camera.rotation_euler = tuple(math.radians(r) for r in rotation)
+            want = shot(temps, False, folder / "original.png")
+            got = shot(reduced, True, folder / "game.png")
+            # Background reachable from the image's edge is outside; the rest is a hole.
+            h, w = got.shape
+            outside = np.zeros_like(got)
+            stack = [(y, x) for y in range(h) for x in (0, w - 1) if not got[y, x]] + \
+                    [(y, x) for x in range(w) for y in (0, h - 1) if not got[y, x]]
+            for y, x in stack:
+                outside[y, x] = True
+            while stack:
+                y, x = stack.pop()
+                for ny, nx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                    if 0 <= ny < h and 0 <= nx < w and not got[ny, nx] and not outside[ny, nx]:
+                        outside[ny, nx] = True
+                        stack.append((ny, nx))
+            holes = (~got & ~outside & want).sum()
+            worst = max(worst, holes / max(1, want.sum()))
+    finally:
+        for temp in temps:
+            bpy.data.objects.remove(temp)
+        bpy.data.objects.remove(camera)
+    return worst
+
+
 class Surface:
     """The original surface of a mesh, to read texture coordinates back from after reducing:
     its triangles grouped into texture islands (triangles joined by an edge whose two corners
@@ -209,7 +352,53 @@ def decimate(obj, target: int) -> None:
         bpy.ops.object.modifier_apply(modifier=modifier.name)
 
 
-def reduce(meshes, budget: int) -> None:
+def drop_small_pieces(meshes, budget: int) -> None:
+    """Remove the smallest separate pieces (by surface) until the meshes fit *budget*: what a
+    distance model can do without when collapsing cannot go lower (teeth, spikes)."""
+    pieces = []
+    for obj in meshes:
+        mesh = bmesh.new()
+        mesh.from_mesh(obj.data)
+        mesh.faces.ensure_lookup_table()
+        seen = set()
+        for face in mesh.faces:
+            if face.index in seen:
+                continue
+            stack, members = [face], []
+            seen.add(face.index)
+            while stack:
+                current = stack.pop()
+                members.append(current.index)
+                for edge in current.edges:
+                    for other in edge.link_faces:
+                        if other.index not in seen:
+                            seen.add(other.index)
+                            stack.append(other)
+            area = sum(mesh.faces[i].calc_area() for i in members)
+            pieces.append((area, obj, members))
+        mesh.free()
+    total = sum(triangle_count(o) for o in meshes)
+    drop: dict = {}
+    for area, obj, members in sorted(pieces, key=lambda p: p[0]):
+        if total <= budget:
+            break
+        if len(members) >= triangle_count(obj) - len(drop.get(obj.name, ())):
+            continue      # never a mesh's last piece
+        drop.setdefault(obj.name, set()).update(members)
+        total -= len(members)
+    for obj in meshes:
+        faces = drop.get(obj.name)
+        if not faces:
+            continue
+        mesh = bmesh.new()
+        mesh.from_mesh(obj.data)
+        mesh.faces.ensure_lookup_table()
+        bmesh.ops.delete(mesh, geom=[mesh.faces[i] for i in faces], context="FACES")
+        mesh.to_mesh(obj.data)
+        mesh.free()
+
+
+def reduce(meshes, budget: int, drop: bool = False) -> None:
     targets = assets.split_budget([triangle_count(o) for o in meshes], budget)
     for obj, target in zip(meshes, targets):
         decimate(obj, target)
@@ -220,6 +409,8 @@ def reduce(meshes, budget: int) -> None:
         ratio = budget / total * 0.97
         for obj in meshes:
             decimate(obj, max(assets.MIN_PART_TRIANGLES, int(triangle_count(obj) * ratio)))
+    if drop and sum(triangle_count(o) for o in meshes) > budget:
+        drop_small_pieces(meshes, budget)
 
 
 # --- Materials and textures --------------------------------------------------------------------
@@ -290,8 +481,9 @@ def make_texture(material, side: int, bake_normals: bool):
 
 # --- The game version ------------------------------------------------------------------------
 
-def collect(meshes, armature, scale: float, kind: str):
-    """(GameModel, materials in texture order, per-material surface area)."""
+def collect(meshes, armature, scale: float, kind: str, material_index: dict | None = None):
+    """(GameModel, materials in texture order, per-material surface area). *material_index*
+    (a lighter level of a weapon): reuse the main model's texture order."""
     bones, bone_index = [], {}
     if armature is not None:
         for bone in armature.data.bones:
@@ -300,7 +492,8 @@ def collect(meshes, armature, scale: float, kind: str):
             bones.append(assets.Bone(bone.name, bone.parent.name if bone.parent else "",
                                      tuple(round(c * scale, 3) for c in blender_scene.from_blender(tuple(head)))))
     vertices, uvs, triangles, faces, weights = [], [], [], [], []
-    materials, material_index, areas = [], {}, []
+    fixed_materials = material_index is not None
+    materials, material_index, areas = [], dict(material_index or {}), []
     for obj in meshes:
         data = obj.data
         data.calc_loop_triangles()
@@ -312,7 +505,11 @@ def collect(meshes, armature, scale: float, kind: str):
             material = obj.material_slots[triangle.material_index].material \
                 if triangle.material_index < len(obj.material_slots) else None
             key = material.name if material else f"{obj.name} flat"
-            if key not in material_index:
+            if fixed_materials:
+                key = key if key in material_index else next(iter(material_index))
+                while len(areas) <= material_index[key]:
+                    areas.append(0.0)
+            elif key not in material_index:
                 material_index[key] = len(materials)
                 materials.append(material)
                 areas.append(0.0)
@@ -358,7 +555,49 @@ def collect(meshes, armature, scale: float, kind: str):
     model = assets.GameModel(vertices, uvs, triangles, faces,
                              [m.name if m else "flat" for m in materials], bones,
                              weights if bones else [], parts)
-    return model, materials, areas
+    return model, materials, areas, material_index
+
+
+def reduce_closed(meshes, originals, budget: int, length: float) -> None:
+    """Reduce to *budget*, then close what reducing opened: push the surface out to cover the
+    original (gently) and grow the open borders back so shells overlap again."""
+    reduce(meshes, budget)
+    for obj in meshes:
+        cover(obj, originals[obj.name], length * 0.003)
+        extend_borders(obj, length * 0.015)
+
+
+def make_level(meshes, originals, budget: int, armature, scale: float, kind: str, material_index,
+               keep_pieces: bool = True):
+    # keep_pieces: the aiming model keeps every piece; distance models may drop the smallest.
+    """A lighter version of the model (a weapon's aiming or distance model), reduced from the
+    welded originals to *budget* triangles, with the main model's textures."""
+    scene = bpy.context.scene
+    temps = []
+    for obj in meshes:
+        temp = bpy.data.objects.new(f"{obj.name} level", originals[obj.name].copy())
+        for group in obj.vertex_groups:
+            temp.vertex_groups.new(name=group.name)
+        temp["boz_bone"] = obj.get("boz_bone", "")
+        scene.collection.objects.link(temp)
+        temps.append(temp)
+    try:
+        reduce(temps, budget, drop=not keep_pieces)
+        length = max(max(v.co[i] for t in temps for v in t.data.vertices) -
+                     min(v.co[i] for t in temps for v in t.data.vertices) for i in range(3))
+        for temp, obj in zip(temps, meshes):
+            cover(temp, originals[obj.name], length * 0.003)
+            extend_borders(temp, length * 0.015)
+        for temp, obj in zip(temps, meshes):
+            remap_uvs(temp, Surface(originals[obj.name]))
+        level, _materials, _areas, _index = collect(temps, armature, scale, kind, material_index)
+    finally:
+        for temp in temps:
+            data = temp.data
+            bpy.data.objects.remove(temp)
+            bpy.data.meshes.remove(data)
+    level.parts = {}
+    return level
 
 
 def main() -> None:
@@ -379,15 +618,42 @@ def main() -> None:
     log(f"{len(meshes)} meshes, {high} triangles, {length * assets.UNITS[unit]:.0f} cm long "
         f"(unit: {unit})")
     originals = {obj.name: prepare(obj, max(length * 1e-5, 1e-6)) for obj in meshes}
-    reduce(meshes, asset.budget())
+    budget, holes = asset.budget(), 0.0
+    for attempt in range(6):
+        if attempt:
+            budget = int(budget * 1.35)
+            for obj in meshes:
+                obj.data = originals[obj.name].copy()       # again from the original
+        reduce_closed(meshes, originals, budget, length)
+        holes = see_through(meshes, originals, length)
+        log(f"{sum(triangle_count(o) for o in meshes)} triangles: "
+            + (f"nothing see-through ({holes * 100:.3f}%)" if holes <= HOLE_LIMIT
+               else f"{holes * 100:.3f}% see-through, more triangles"))
+        if holes <= HOLE_LIMIT or budget >= max(high, 1):
+            break
     for obj in meshes:
         remap_uvs(obj, Surface(originals[obj.name]))
-    model, materials, areas = collect(meshes, armature, scale, asset.kind)
+    model, materials, areas, material_index = collect(meshes, armature, scale, asset.kind)
     log(f"reduced to {len(model.triangles)} triangles, {len(model.vertices)} vertices")
+    if asset.kind == "weapon":
+        # The aiming-down-the-sights and distance models, from the originals (not the view model).
+        for key, share in assets.WEAPON_LEVELS.items():
+            # The aiming model is seen close up: every piece stays. Distance models may drop
+            # the smallest when even a few triangles each is too many.
+            level = make_level(meshes, originals, int(budget * share), armature, scale,
+                               asset.kind, material_index, keep_pieces=key == "ads")
+            model.levels[key] = level
+        log("lighter models: " + ", ".join(f"{k} {len(l.triangles)}" for k, l in model.levels.items()))
     sides = assets.texture_sizes(areas, asset.max_texture())
     textures = [make_texture(m, side, asset.bake_normals) for m, side in zip(materials, sides)]
     errors, warnings = assets.check(asset, model, textures)
+    if holes > HOLE_LIMIT:
+        warnings.append(f"{holes * 100:.2f}% of it is still see-through: raise the triangle budget")
+    elif budget > asset.budget():
+        warnings.append(f"needed {budget} triangles to have no see-through parts "
+                        f"(the budget is {asset.budget()})")
     stats = assets.describe(model, textures)
+    stats["see_through"] = round(holes * 100, 3)
     stats.update({"high_triangles": high, "unit": unit, "length_cm": round(length * assets.UNITS[unit], 1),
                   "errors": errors, "warnings": warnings, "materials": model.texture_names})
     assets.write_game(source, name, model, textures, stats)

@@ -75,6 +75,7 @@
 local objects = require("boz.objects")
 local hash = require("boz.hash")
 local weapons = require("boz.weapons")
+local text = require("boz.text")
 
 local prefabs = {}
 
@@ -967,6 +968,10 @@ function prefabs.start(list, all_names, weapon_list)
     local weapon_names = {}
     for _, weapon in ipairs(weapon_list or {}) do
         table.insert(weapon_names, weapon.name)
+        if weapon.display and weapon.display ~= "" then
+            -- Wall buy prompts ask the game's text for "<weapon>_S_WEAPON" (UpdatePoiPrompt).
+            text.add(weapon.name .. "_S_WEAPON", weapon.display)
+        end
         if weapon.script and weapon.script ~= "" then
             instances[lower(weapon.name)] = load_script({name = weapon.name, kind = "weapon",
                                                          script = weapon.script,

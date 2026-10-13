@@ -453,6 +453,7 @@ def compile_map(project: Project, game, fixed=None):
     source = project.root / 'source'
     try:
         defs = weapons.load_defs(source)
+        weapons.attach_models(defs, source)
         index = weapons.load_index(source) or []
         start, reserve = weapons.load_start(source)
         files = world.compile_world(game, project.map_name,

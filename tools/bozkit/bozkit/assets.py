@@ -42,6 +42,9 @@ SOURCE_TYPES = ('.blend', '.fbx', '.glb', '.gltf', '.obj')
 MAX_BONES_PER_VERTEX = 4
 MAX_VERTICES = 65535
 MIN_PART_TRIANGLES = 24    # the budget never squeezes a mesh below this
+# A weapon's lighter models, as a share of its budget (the MP40: 1,066 view, 555 aiming down the
+# sights, 331 / 215 / 112 at a distance).
+WEAPON_LEVELS = {'ads': 0.52, 'lod0': 0.31, 'lod1': 0.2, 'lod2': 0.105}
 # Parts every weapon is expected to have: (tag bone, label). A missing one is a warning.
 WEAPON_PARTS = (('tag_clip', 'Magazine'),)
 NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{0,40}$')
@@ -90,6 +93,7 @@ class GameModel:
     bones: list[Bone] = field(default_factory=list)
     weights: list[list[tuple[int, float]]] = field(default_factory=list)   # per vertex
     parts: dict[str, list[int]] = field(default_factory=dict)   # part label -> triangle indices
+    levels: dict = field(default_factory=dict)    # weapons: 'ads', 'lod0'.. -> lighter GameModel
 
 
 # --- Files ----------------------------------------------------------------------------------
@@ -189,6 +193,14 @@ def write_game(source: Path, name: str, model: GameModel, textures: list[world.T
         data['weights'] = [[[b, round(w, 4)] for b, w in vertex] for vertex in model.weights]
     if model.parts:
         data['parts'] = model.parts
+    if model.levels:
+        data['levels'] = {key: {'vertices': [list(v) for v in level.vertices],
+                                'uvs': [[round(u, 6), round(v, 6)] for u, v in level.uvs],
+                                'triangles': [list(t) for t in level.triangles],
+                                'materials': list(level.materials),
+                                'weights': [[[b, round(w, 4)] for b, w in vertex]
+                                            for vertex in level.weights]}
+                          for key, level in model.levels.items()}
     (folder / 'model.json').write_text(json.dumps(data, separators=(',', ':')) + '\n',
                                        encoding='utf-8')
     for index, texture in enumerate(textures):
@@ -220,6 +232,13 @@ def load_game(source: Path, name: str) -> tuple[GameModel, list[world.Texture]]:
                        for b in data.get('bones', [])],
                       [[(int(b), float(w)) for b, w in vertex] for vertex in data.get('weights', [])],
                       {k: [int(i) for i in v] for k, v in data.get('parts', {}).items()})
+    for key, level in data.get('levels', {}).items():
+        model.levels[key] = GameModel(
+            [tuple(int(c) for c in v) for v in level['vertices']],
+            [tuple(map(float, uv)) for uv in level['uvs']],
+            [tuple(map(int, t)) for t in level['triangles']],
+            [int(m) for m in level.get('materials', [])], model.texture_names, model.bones,
+            [[(int(b), float(w)) for b, w in vertex] for vertex in level.get('weights', [])])
     return model, textures
 
 
@@ -340,7 +359,8 @@ def describe(model: GameModel, textures: list[world.Texture]) -> dict:
     return {'triangles': len(model.triangles), 'vertices': len(model.vertices),
             'textures': [[t.width, t.height] for t in textures],
             'texture_bytes': sum(t.width * t.height * 4 for t in textures),
-            'bones': len(model.bones), 'parts': sorted(model.parts)}
+            'bones': len(model.bones), 'parts': sorted(model.parts),
+            'levels': {key: len(level.triangles) for key, level in model.levels.items()}}
 
 
 def check(asset: AssetDef, model: GameModel, textures: list[world.Texture]) -> tuple[list[str], list[str]]:

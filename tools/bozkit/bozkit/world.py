@@ -1914,8 +1914,10 @@ class _Level:
         from . import reflect, resources
 
         name_hash = getattr(self, 'weapon_aliases', {}).get(name_hash, name_hash)
-        # A shipped wall buy of the same weapon shows exactly what the game expects.
-        for resource in self.by_class[levels.ENTITY_SPEC].resources + [
+        # A shipped wall buy of the same weapon shows exactly what the game expects (unless the
+        # weapon has a model of its own: then its own low-detail model, below).
+        own = name_hash in getattr(self, 'weapon_own_models', set())
+        for resource in [] if own else self.by_class[levels.ENTITY_SPEC].resources + [
                 r for t in self.game.group(self.base_statics).types()
                 if t.class_hash == levels.ENTITY_SPEC for r in t.resources]:
             try:
@@ -2093,7 +2095,8 @@ class _Level:
             weapon_key = weapon
             if isinstance(weapon, int):
                 weapon_key = getattr(self, 'weapon_aliases', {}).get(weapon, weapon)
-            decal = decals.get(weapon_key) if not entity.chalk_texture else None
+            own = weapon_key in getattr(self, 'weapon_own_models', set())
+            decal = decals.get(weapon_key) if not entity.chalk_texture and not own else None
             position, rotation, scale = chalk.compose(entity.position, entity.quaternion(),
                                                       tuple(entity.scale), decal or template)
             name = f'{self.name}_chalk_{number}'
@@ -2445,6 +2448,7 @@ def _apply_weapons(pack, files, name: str, base: str, level, defs) -> None:
         raise WorldError(str(exc)) from None
     level.weapon_group = groups['weapons']
     level.weapon_aliases = result['aliases']
+    level.weapon_own_models = result.get('own_models', set())
     level.runtime.setdefault('warnings', []).extend(result['warnings'])
 
 

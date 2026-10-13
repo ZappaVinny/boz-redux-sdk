@@ -192,6 +192,15 @@ class WeaponTests(unittest.TestCase):
                          [{'name': 'colt45', 'script': ''},
                           {'name': 'mp40_heavy', 'script': 'weapons.Heavy'}])
 
+    def test_in_game_name(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)
+            weapons.save_def(source, weapons.WeaponDef('idgun', 'thundergun', display='Apothicon'))
+            defs = weapons.load_defs(source)
+            self.assertEqual(defs[0].display, 'Apothicon')
+            self.assertEqual(weapons.runtime(defs, []),
+                             [{'name': 'idgun', 'script': '', 'display': 'Apothicon'}])
+
 
 if __name__ == '__main__':
     unittest.main()

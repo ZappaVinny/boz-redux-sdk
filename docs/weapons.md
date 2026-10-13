@@ -6,15 +6,22 @@ imported from other maps. Changes are saved as you make them and applied when th
 
 ## The tab
 
-- **The viewport** shows the selected weapon as the player sees it: the arms in their idle pose
-  holding the gun, through the game's eye (65 degrees of vertical view), with the game's
-  textures. It follows the weapon you select; a new weapon shows its base's gun, an imported one
-  its own map's. The viewport's header switches between **First person** and **Free view** (move
-  around the gun like any Blender view) and shows or hides the **Arms**.
-- **Animations** plays the weapon's animations in the viewport: pick one (raising, idle,
-  shooting, reloading, aiming, sprinting, ...), then Play, Loop or drag the Frame slider. They run
-  at the game's 24 frames a second. States whose names are not known yet are numbered. Viewing
-  only for now; replacing animations comes later.
+- **The viewport** shows the selected weapon as the player sees it, through the game's eye,
+  with the game's textures. The arms and the gun are one Blender armature with the game's
+  skeletons (the gun under the arms' `TAG_WEAPON` bone, called "gun position"), and their models
+  move with it the way the game skins them. The first-person view frames the gun exactly as the
+  game does: the game's camera setting (50 unless you changed it) becomes a horizontal angle
+  across a 16:9 screen the way its projection does it (about 71 degrees). **Field of view** takes
+  the same number as the game's setting (Redux's pause-menu slider): set it to what you play with.
+- **Placement** (panel):
+  - **First person** / **Free view**, **Arms** and **Bones** switch what the view shows.
+  - **Position on screen** (or click the arms): G moves and R turns the arms and gun together in
+    front of the camera; the arrow puts them back. It is the start of every animation, saved
+    with the weapon (`"arms"` in its file) and built into all its arm animations.
+  - **Model**: the stock gun or one of your assets (see [Your own model](#your-own-model)).
+- **Animation** (panel) plays the weapon's animations: pick one, then Play, step a frame or to a
+  change, Loop or drag the Frame slider. Change them in the Animation tab (see
+  [Animations](#animations)); one you changed is marked "(edited)".
 
 - **The list** shows the project's weapons. A map made from a whole shipped level lists its guns;
   an Empty or Debug map starts with the Colt alone. The list is what wall buys and the mystery
@@ -40,6 +47,64 @@ imported from other maps. Changes are saved as you make them and applied when th
 Wall buys pick from the project's list (World tab → the wall buy's **Choose…**); a mystery box's
 **Weapon pool** (its settings → **Edit…**) picks which listed weapons it rolls.
 
+## Your own model
+
+A weapon can show one of your **Weapon** assets (made in the Assets tab, see
+[assets.md](assets.md)) instead of its stock gun. It keeps the rest of the gun it is made from:
+the arms' animations, sounds and effects. Make a **New weapon** from a stock gun whose
+animations suit your model (a big two-handed one: the Thundergun), then in its **Model** panel
+pick your asset.
+
+- **Its own skeleton:** the gun becomes your asset's bones (`tag_weapon`, `tag_clip`,
+  `tag_flash`, ...) under a root at the origin like every stock gun's, so its parts sit where they belong. The stock gun's animations are moved
+  onto them: each of your bones moves the way a stock bone does (the list under **Original motion
+  of your bones comes from**:
+  `tag_clip` follows the gun's magazine bone, `J_Clip` or `tag_clip`, else the bone its reload
+  moves most; `tag_flash` its muzzle; everything else the root). Change any of them in the list.
+- **Fit model in hand** (or click your model) shows a copy of it on the gun position to move
+  (G), turn (R) and scale (S), with the stock gun see-through to line it up against; turn it off
+  to keep the fit. **Auto fit** lines it up with the stock gun again: its barrel (`tag_weapon` to
+  `tag_flash`) along the stock gun's, upright, as long as it and centred on it. **Position**,
+  **Rotation** and **Scale** change the fit by number (in the stock gun's model units).
+
+The build writes your model and its skin on its own skeleton, its textures and materials, the
+lighter models the game shows while aiming down the sights (on guns that have one) and at a
+distance (three levels, made with the asset; an asset made before these existed uses its full
+model for them: make it again), every animation of the gun on its skeleton, and the gun's state
+machine (a copy of the stock one: same timing, transitions and events) pointing at them.
+
+## Animations
+
+The **Animation** tab changes the selected weapon's animations, one at a time. Its small view is
+the game's eye, its big view is free to work in, and the rig is ready to pose: click a bone, R
+turns it, G moves it. Grab **gun position** to move the gun (the hands come with it: each arm
+reaches its grip with IK) and **hand L** / **hand R** to change a grip.
+
+Arms and gun each have their own timeline. Before a part's first change it plays the original.
+**When you change a pose and then go to another frame, the change is kept and holds from that
+frame on**, until your next change; earlier frames never move. So you can keep the original up
+to a point and go on frame by frame from there: change, step, adjust, step. The panel shows each
+part's timeline (for example "original 0-29, yours 30-59, original 60+").
+
+- The **arrow** next to Arms or Gun sends that part back to the original from the frame shown
+  (until your next change).
+- **Copy pose** / **Paste pose**: copy the arms, the gun or both at this frame, from the
+  **Original** or from **Yours**, and paste them at another frame or into another animation;
+  the pasted pose holds from there.
+- **Copy original frames here**: the original's frames From..To play from the frame shown, then
+  its last pose holds.
+- The arrows step a frame back or forward, or to the previous or next change; **Length** sets the
+  last frame (30 frames a second).
+- **Save animation** stores it (it is also stored when you save, switch animations or leave the
+  tab); **Reset this animation** throws every change away.
+
+Animations are stored in the project (`source/weapons/anims/<weapon>/<state>.json`: your changes
+to edit again, and the result at every frame with the IK worked out, which the build uses). The
+build writes your arms animations into a copy of the weapon's arms state machine and the gun's
+into its gun state machine, so only that weapon changes. The state machines keep their timing and
+events (when a reload refills the magazine, for example): an animation much longer or shorter
+than the stock one still has its events at the stock times.
+
 ## What a weapon is
 
 Each map has a weapons group (`ingame/weapons/weapons_<map>`): one entity per weapon with a
@@ -59,8 +124,11 @@ changed, new or imported weapon:
 ```
 
 `base` is the weapon it is made from (empty: itself), `level` the map it is imported from (empty:
-this map's own). The game names weapons in its prompts from its own text, which has no entry for
-a new weapon's name yet, so a wall buy selling one may show no name.
+this map's own), `display` its **In-game name** (Properties). The game names weapons in its
+prompts from its own text: a wall buy asks for the string id `<weapon>_S_WEAPON`
+(CIngameStatePlaying::UpdatePoiPrompt hashes the weapon's name on with `_S_WEAPON`). A new
+weapon has no entry there, so the prompt shows ">>Unknown Hash<<" until you give it an in-game
+name; boz.prefabs adds that text (boz.text) when the level starts. Empty keeps the game's own name.
 
 ## Weapon scripts and boz.weapons
 
