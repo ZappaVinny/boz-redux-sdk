@@ -22,8 +22,7 @@ TABS = [
     ("Effects", "Texture Paint", {}),
     ("Animation", "Animation", {}),
     ("Scripts", "Scripting", {"CONSOLE": "LOG", "INFO": "FILES"}),
-    ("Audio", "Compositing", {"NODE_EDITOR": "FORMS", "IMAGE_EDITOR": "VIEW_3D",
-                              "PROPERTIES": "OUTLINER", "DOPESHEET_EDITOR": "LOG"}),
+    ("Audio", "Compositing", {"NODE_EDITOR": "FORMS", "DOPESHEET_EDITOR": "LOG"}),
     ("UI / HUD", "Geometry Nodes", {"NODE_EDITOR": "IMAGE_EDITOR", "SPREADSHEET": "FORMS",
                                     "DOPESHEET_EDITOR": "LOG"}),
 ]
@@ -69,7 +68,7 @@ def space_of(area):
     return next((space for space in area.spaces if space.type == area.type), area.spaces.active)
 
 
-FORMS_TABS = ("Game", "Audio", "UI / HUD", "Weapons", "Assets", "Animation")
+FORMS_TABS = ("Game", "Audio", "Effects", "UI / HUD", "Weapons", "Assets", "Animation")
 WEAPONS_FORMS_KEY = "boz_weapons_forms"   # Weapons, Assets: the largest Properties area shows the forms
 
 
@@ -94,6 +93,9 @@ def setup_area(area, workspace_name: str, screen=None) -> None:
     if space.type == "VIEW_3D" and space.shading.type == "SOLID" and \
             space.shading.color_type == "TEXTURE" and space.clip_end == 200000.0:
         space.shading.type = "MATERIAL"   # maps saved before game materials were shown
+    if area.type == "IMAGE_EDITOR" and workspace_name == "Audio" and space.image is None:
+        from . import sounds_tab
+        space.image = sounds_tab.wave_image()     # the wave view
     if _configured(space):
         return
     if area.type == "VIEW_3D":
@@ -247,6 +249,70 @@ def _scripts_editors(window, screen) -> None:
     space.show_syntax_highlight = True
 
 
+AUDIO_KEY = "boz_audio_layout1"   # Audio, Effects: the next layout step, "done" or "failed"
+AUDIO_LAST = 3
+FORMS_LAYOUTS = {"Audio": True, "Effects": False}   # forms + log (+ the wave view)
+
+
+def _audio_step(window, step: int) -> None:
+    """One step of the Audio (and Effects) layout: the forms on the left, the Audio tab's wave
+    view on the right, the log along the bottom (no outliner, no viewport)."""
+    screen = window.screen
+    waves = FORMS_LAYOUTS.get(window.workspace.name, False)
+    if step == 2 and not waves:
+        return
+    if step == 0:       # only the forms stay
+        properties = [a for a in screen.areas if a.type == "PROPERTIES"]
+        keep = max(properties, key=lambda a: a.width * a.height) if properties else screen.areas[0]
+        for other in [a for a in screen.areas if a != keep]:
+            with _override(window, screen, other):
+                bpy.ops.screen.area_close()
+        if len(screen.areas) != 1:
+            raise RuntimeError("could not close the areas")
+    elif step == 1:     # the log along the whole bottom
+        _split(window, screen, screen.areas[0], "HORIZONTAL", 0.2)
+    elif step == 2:     # the wave view on the right
+        _split(window, screen, _top(screen)[0], "VERTICAL", 0.45)
+    elif step == AUDIO_LAST:
+        top = _top(screen)
+        log = next(a for a in screen.areas if a not in top)
+        columns = sorted(top, key=lambda a: a.x)
+        forms = columns[0]
+        editors = [(log, "TEXT_EDITOR"), (forms, "PROPERTIES")]
+        if waves:
+            editors.append((columns[-1], "IMAGE_EDITOR"))
+        for area, editor in editors:
+            with _override(window, screen, area):
+                area.ui_type = editor
+        space = space_of(log)
+        space.text = log_text()
+        space.show_word_wrap = True
+        space.show_line_numbers = False
+        setup_properties(space_of(forms), True)
+        if waves:
+            from . import sounds_tab
+            space_of(columns[-1]).image = sounds_tab.wave_image()
+
+
+def layout_audio(window) -> bool:
+    """Lay the Audio tab out, one step per call (like the Scripts tab). Returns whether it is
+    still going."""
+    workspace = window.workspace
+    step = workspace.get(AUDIO_KEY, 0)
+    if not isinstance(step, int):
+        return False
+    if any(a.width <= 1 or a.height <= 1 for a in window.screen.areas):
+        return True
+    try:
+        _audio_step(window, step)
+    except (RuntimeError, StopIteration, ValueError) as exc:
+        print(f"boz_suite: Audio layout step {step}: {exc}")
+        workspace[AUDIO_KEY] = "failed"
+        return False
+    workspace[AUDIO_KEY] = step + 1 if step < AUDIO_LAST else "done"
+    return step < AUDIO_LAST
+
+
 def layout_scripts(window) -> bool:
     """Lay the Scripts tab out, one step per call: the log along the whole bottom; above it the
     files on the left, the script editor in the middle, and the outliner over the properties on
@@ -295,6 +361,9 @@ def refresh_windows() -> float:
             if workspace.name == "Scripts" and layout_scripts(window):
                 busy = True
                 continue    # areas mid-layout are set up once it is done
+            if workspace.name in FORMS_LAYOUTS and layout_audio(window):
+                busy = True
+                continue
             setup_screen(window.screen, workspace.name)
         except (AttributeError, TypeError, RuntimeError) as exc:
             print(f"boz_suite: could not lay out {workspace.name}: {exc}")

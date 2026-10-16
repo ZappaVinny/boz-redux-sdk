@@ -95,6 +95,7 @@ local function start_state()
         for _, name in ipairs(data.blocked or {}) do
             objects.set_navmesh(name, false)
         end
+        require("boz.effects").know(data.effects)
         prefabs.start(data.objects or {}, data.names, data.weapons)
     end)
 end

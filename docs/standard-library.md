@@ -22,7 +22,7 @@ Functions that need a Zombies match return `nil` (or `false`) outside one instea
 - **Menus and text**: [boz.pause_settings](#bozpausesettings), [boz.text](#boztext)
 - **Game UI building blocks**: [boz.iwui](#boziwui), [boz.frontend](#bozfrontend), [boz.flash](#bozflash)
 - **Low-level helpers**: [boz.components](#bozcomponents), [boz.hash](#bozhash), [boz.swf](#bozswf), [boz.avm1](#bozavm1)
-- **Other**: [boz.levels](#bozlevels), [boz.objects](#bozobjects), [boz.prefabs](#bozprefabs), [boz.weapons](#bozweapons), [boz.world](#bozworld)
+- **Other**: [boz.effects](#bozeffects), [boz.levels](#bozlevels), [boz.objects](#bozobjects), [boz.prefabs](#bozprefabs), [boz.weapons](#bozweapons), [boz.world](#bozworld)
 
 ## Gameplay
 
@@ -365,6 +365,45 @@ A builder collects actions. Values are pushed with :push(...) (strings, numbers,
 | `Builder:trace(text, path)` | trace(text .. value-of-path): writes a line to the Flash log (see boz.flash.capture_log). |
 
 ## Other
+
+### boz.effects
+
+Spawning the game's effects and projectiles anywhere, for as long as you want.
+
+```lua
+local effects = require("boz.effects")
+effects.spawn("impactRayGun", {x = 0, y = 50, z = 0})            -- a one-off effect
+local hole = effects.projectile("gersch", effects.aim(), {trigger = "open", lifetime = 6})
+hole:remove()                                                    -- close it early
+```
+
+Names are the map's effects (the editor's Effects tab: "Use in this map", under the name you give them) or the game's own effect names every map has ("gersch_Effect", "impactRayGun", "iceShatter", ...), or "0x..." hashes.
+
+Effects are visual (particles); projectiles bring the game's behaviour with them: a Gersch device opens a black hole that pulls zombies in and kills them, a monkey bomb lures them, a bolt explodes where it hits. What a projectile answers to (its triggers) depends on what it is: "open" (black hole), "explode" (grenades, bolts).
+
+<details><summary>How it works</summary>
+
+Spawn_ByHash(CSpawnManager, spec hash, position, rotation xyzw) creates any entity spec a loaded group holds; a projectile's CProjectileEntity keeps its lifetime (ms) at +0xc0 (+0xc4 on), its open state at +0xc7, its owner at +0x88, its rigid body at +0x80 (Bullet body +0x34); events go to its subject at +0x28 (SUBJECT_SPAWN_GERSCH_EFFECT opens a Gersch device, SUBJECT_EXPLODE, SUBJECT_TERMINATE ends it with its own sounds); EntityDB_Destroy removes an entity. The crosshair point is the weapon manager's +0xcc (WeaponManager_UpdateAim ray-casts it every frame; +0xf0: a live zombie). A spawned entity's components are set up by the game a little later (CProjectileEntity::Init links its transform at +0x7c, subscribes to its events and finds its rigid body): a projectile gets its trigger and lifetime once that has happened; its owner (+0x88) right away, as the game's own launcher does (zombies turning to a device read it). Entities are objects (their id at +4); CIsEntityDB::GetEntity finds one by id, so a removed one is never touched.
+
+</details>
+
+| Function | Description |
+| --- | --- |
+| `effects.know(list)` | Tell boz.effects the map's effects: {name, hash, kind, behaviour, triggers} each (the map's world data does this at level start). |
+| `effects.known()` | The map's effects by name ({hash, kind, behaviour, triggers}). |
+| `Effect:alive()` | True while it is still in the world. |
+| `Effect:ready()` | True once the game has set it up (a projectile takes a frame or so after spawning; scripts need not wait: what was asked for happens then). |
+| `Effect:position()` | Its position {x, y, z} (game centimetres, y up), or nil once it is gone. |
+| `Effect:move(position)` | Moves it to a position. |
+| `Effect:trigger(name)` | Sends a trigger: "open" (a black hole opens now), "explode". A projectile still being set up gets it as soon as it is. Returns false when it does not answer that trigger or is gone. |
+| `Effect:set_visible(visible)` | Shows or hides its own model (a projectile's behaviour and the effects it spawns stay). |
+| `Effect:freeze()` | Stops a projectile where it is (it no longer falls or rolls), once the game has set it up. |
+| `Effect:lifetime(seconds)` | Removes it after this many seconds from now. A projectile ends the game's way (a black hole closes with its own sound and effect). |
+| `Effect:remove()` | Removes it now (a projectile ends the game's way). |
+| `effects.spawn(name, position, options)` | Spawns an effect at a position {x, y, z}. Options: rotation {x, y, z, w}, lifetime (seconds, then it is removed). Returns the effect, or nil and why. |
+| `effects.projectile(name, position, options)` | Spawns a projectile at a position and lets the game run it. Options: trigger (e.g. "open"), lifetime (seconds; after a trigger), raise (centimetres: it floats that far above the position, and a black hole's kill reach grows to match, so zombies walking under it still die; for one that "Stays where spawned"), hidden (its own model is not drawn), freeze (stay where spawned instead of settling on the floor), lift (centimetres up, default 10; raise replaces it), rotation. It is the player's (its kills too; zombies turning to a device ask for its owner, so it always has one). What it was asked for happens once the game has set it up (a frame or so). Returns the projectile, or nil and why. |
+| `effects.aim()` | The point the player's crosshair is on {x, y, z} (where a shot lands; up to 100 m away) and whether it is a live zombie; nil outside a match. |
+| `effects.sound(name, position)` | Plays a game sound (its name or hash) at a position. |
 
 ### boz.levels
 

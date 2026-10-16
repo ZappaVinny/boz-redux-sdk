@@ -158,7 +158,7 @@ def save(context, weapon) -> None:
         return
     is_new = weapon.base and weapon.base != weapon.name
     if not weapon.fields and not weapon.level and not is_new and not weapon.script \
-            and not weapon.model and not weapon.display:
+            and not weapon.model and not weapon.display and not weapon.sounds:
         wp.delete_def(source, weapon.name)
     else:
         wp.save_def(source, weapon)

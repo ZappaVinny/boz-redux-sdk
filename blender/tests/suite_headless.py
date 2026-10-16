@@ -553,6 +553,165 @@ def draw_panels(label):
     return len(seen)
 
 
+def sound_checks(label):
+    """Audio tab: import a recording, shape it, save it, put it in a game sound's slot."""
+    import math
+    import struct
+    import tempfile
+    import wave
+    tab = suite.sounds_tab
+    snd = tab.sound
+    recording = Path(tempfile.mkdtemp()) / "Roar Take 2.wav"
+    with wave.open(str(recording), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        frames = b"".join(struct.pack("<hh", int(9000 * math.sin(i / 9)), int(6000 * math.sin(i / 7)))
+                          for i in range(22050))
+        w.writeframes(frames)
+    bpy.ops.boz.sound_import("EXEC_DEFAULT", filepath=str(recording))
+    item = tab.selected_sound(scene)
+    check(item is not None and item.name == "roar_take_2" and not item.saved,
+          f"{label}: an imported recording waits to be saved ({item and item.name})")
+    settings = scene.boz_sound_settings
+    settings.rate, settings.fade_out = "11025", 0.1
+    values, rate = snd.preview(tab.source_dir(), item.name, tab._from_settings(settings))
+    check(rate == 11025 and abs(len(values) - 5512) < 4, f"{label}: the preview is the game's ({len(values)})")
+    check(bpy.ops.boz.sound_preview("EXEC_DEFAULT") == {"FINISHED"}, f"{label}: Preview runs")
+    bpy.ops.boz.sound_save("EXEC_DEFAULT")
+    item = tab.selected_sound(scene)
+    check(item.saved and snd.is_saved(tab.source_dir(), item.name), f"{label}: Save makes the game version")
+    settings.trim_start = 0.1
+    tab._wave_of_sound(item.name)
+    image = bpy.data.images.get(tab.WAVE_IMAGE)
+    pixels = list(image.pixels[:]) if image else []
+    orange = sum(1 for i in range(0, len(pixels), 4) if pixels[i] > 0.9 and 0.5 < pixels[i + 1] < 0.7)
+    grey = sum(1 for i in range(0, len(pixels), 4) if 0.6 < pixels[i] < 0.64 and pixels[i + 2] > 0.7)
+    check(orange > 1000 and grey > 1000, f"{label}: the wave view draws the recording and the game version ({grey}, {orange})")
+    if os.environ.get("BOZ_TEST_WAVE"):
+        image.filepath_raw = os.environ["BOZ_TEST_WAVE"]
+        image.file_format = "PNG"
+        image.save()
+    settings.trim_start = 0.0
+    if not LIBRARY:
+        return None
+    bpy.ops.boz.sounds_refresh("EXEC_DEFAULT")
+    slots = tab.catalog(bpy.context)
+    categories = {s.category for s in slots}
+    check(len(slots) > 200 and {"shared", "map"} <= categories,
+          f"{label}: the map's sounds are slots ({len(slots)}, {sorted(categories)})")
+    check(any(": Fire" in s.label for s in slots), f"{label}: weapon sounds are named after the weapon")
+    scene.boz_sound_category = "weapons"
+    check(len(scene.boz_sound_slots) and all(": " in i.users for i in scene.boz_sound_slots),
+          f"{label}: the Weapons filter shows weapon sounds")
+    scene.boz_sound_category = "all"
+    target = next(s for s in slots if s.category == "shared")
+    bpy.ops.boz.sound_slot_replace("EXEC_DEFAULT", key=target.key, sound=item.name)
+    check(snd.load_slots(tab.source_dir()) == {target.key: item.name}, f"{label}: Replace with fills the slot")
+    shown = next(i for i in scene.boz_sound_slots if i.key == target.key)
+    check(shown.replaced == item.name, f"{label}: the slot shows its replacement")
+    # A weapon's own reload sound (its own sequence; the weapon it is made from keeps its sounds).
+    wt = suite.weapons_tab
+    own_weapon = sorted(wt.defs())[0]
+    scene.boz_weapon_index = [i.name for i in scene.boz_weapons].index(own_weapon)
+    bpy.ops.boz.weapon_sound_set("EXEC_DEFAULT", field="reloadSoundSequence", sound=item.name)
+    check(wt.weapon_def(bpy.context, own_weapon).sounds == {"reloadSoundSequence": item.name},
+          f"{label}: Use one sound gives {own_weapon} its own reload sound")
+    target.weapon = own_weapon
+    for panel, workspace in ((tab.BOZ_PT_sound_slots, "Audio"), (tab.BOZ_PT_sound_processor, "Audio"),
+                             (tab.BOZ_PT_weapon_sounds, "Weapons")):
+        fake = type("Panel", (), {"layout": FakeLayout()})()
+        try:
+            panel.draw(fake, FakeContext(None, workspace))
+        except Exception as exc:   # noqa: BLE001
+            check(False, f"{label}: {panel.__name__} fails: {exc!r}")
+    return target
+
+
+def effect_checks(label):
+    """Effects tab: find the Gersch device, use it in this map under a name, get its script line."""
+    tab = suite.effects_tab
+    fx = tab.effects
+    if not LIBRARY:
+        return None
+    bpy.ops.boz.effects_refresh("EXEC_DEFAULT")
+    check(len(tab.catalog()) > 50, f"{label}: the game's effects are listed ({len(tab.catalog())})")
+    scene.boz_effect_kind = "projectile"
+    check(all(i.kind == "projectile" for i in scene.boz_effect_entries), f"{label}: the Projectiles filter")
+    names = [i.label for i in scene.boz_effect_entries]
+    gersch = next(i for i, e in enumerate(scene.boz_effect_entries) if e.label.startswith("bh_bomb"))
+    scene.boz_effect_index = gersch
+    scene.boz_effect_new_name = "gersch"
+    bpy.ops.boz.effect_use("EXEC_DEFAULT")
+    stored = fx.load(tab.source_dir())
+    check([(u.name, u.level, u.behaviour) for u in stored] == [("gersch", "ascension", 6)],
+          f"{label}: Use in this map stores the black hole ({stored})")
+    scene.boz_effect_rename = "black_hole"
+    check([u.name for u in fx.load(tab.source_dir())] == ["black_hole"], f"{label}: renaming it")
+    scene.boz_effect_rename = "gersch"
+    scene.boz_effect_hidden = True
+    scene.boz_effect_anchored = True
+    stored = fx.load(tab.source_dir())
+    check(stored[0].hidden and stored[0].anchored, f"{label}: Hide its model and Stays where spawned are stored")
+    item = tab.selected(scene.boz_effects_used, scene.boz_effect_used_index)
+    check(tab.snippet(item) == 'effects.projectile("gersch", effects.aim(), {trigger = "open", lifetime = 6, raise = 200})',
+          f"{label}: its script line ({tab.snippet(item)})")
+    for panel in (tab.BOZ_PT_effects_game, tab.BOZ_PT_effects_used):
+        fake = type("Panel", (), {"layout": FakeLayout()})()
+        try:
+            panel.draw(fake, FakeContext(None, "Effects"))
+        except Exception as exc:   # noqa: BLE001
+            check(False, f"{label}: {panel.__name__} fails: {exc!r}")
+    scene.boz_effect_kind = "all"
+    return stored[0]
+
+
+def effect_build_checks(label, used, data):
+    """The built map carries the black hole and tells boz.effects its name."""
+    snd = suite.sounds_tab.sound
+    from importlib import import_module
+    package = snd.__name__.rsplit(".", 1)[0]
+    group = import_module(package + ".group")
+    output = next((project / "build").glob("*/assets"))
+    projectiles = group.parse(next(output.glob("weapon_projectiles_*.group.bin")).read_bytes())
+    held = {r.in_group_hash for t in projectiles.types() for r in t.resources}
+    check(used.hash in held and world.iw_hash("gersch_opens") in held,
+          f"{label}: the black hole and its sounds are carried into the map")
+    check(used.spawn_hash in held, f"{label}: the map's own copy without the model and physics is built")
+    check('name = "gersch"' in data and str(used.spawn_hash) in data, f"{label}: boz.effects knows it")
+    scripts = output.parent / "scripts" / "boz"
+    check((scripts / "effects.lua").is_file(), f"{label}: boz.effects is installed")
+
+
+def sound_build_checks(label, target):
+    """The built mod carries the replaced sound in a patched copy of its game group."""
+    tab = suite.sounds_tab
+    snd = tab.sound
+    output = next((project / "build").glob("*/assets"))
+    patched = output / target.group.rsplit("/", 1)[-1]
+    check(patched.is_file(), f"{label}: the replaced sound's group is in the mod ({patched.name})")
+    from importlib import import_module
+    group = import_module(snd.__name__.rsplit(".", 1)[0] + ".group")
+    body = snd._resources(group.parse(patched.read_bytes()), snd.DATA)[target.data]
+    count = snd.decode_data(body).count
+    check(abs(count - 5512) < 4, f"{label}: the slot plays the saved sound ({count} samples)")
+    sources = [d.name for d in suite.assets_tab.defs() if (output / d.name).exists()]
+    check(not sources, f"{label}: asset sources stay out of the mod ({sources})")
+    print(f"BOZ_SUITE_INFO sounds: {target.label} replaced in {patched.name} ({count} samples)")
+    weapons_file = next(output.glob("weapons_*.group.bin"))
+    parsed = group.parse(weapons_file.read_bytes())
+    sequence = world.iw_hash(f"{target.weapon}_reloadSoundSequence_seq")
+    own = world.iw_hash(f"{target.weapon}_reloadSoundSequence")
+    sequences = snd._resources(parsed, snd.SEQUENCE)
+    check(sequence in sequences and snd.decode_sequence(sequences[sequence]) == [("play", own)],
+          f"{label}: the weapon's own reload sequence is built")
+    check(abs(snd.decode_data(snd._resources(parsed, snd.DATA)[own]).count - 5512) < 4,
+          f"{label}: it plays the saved sound")
+    wp = import_module(snd.__name__.rsplit(".", 1)[0] + ".weapons")
+    found = next(w for w in wp.read_group(parsed) if w.name == target.weapon)
+    check(found.values.get("reloadSoundSequence") == sequence, f"{label}: the weapon's Reload points at it")
+
+
 def prefab_checks(anchor):
     """Make prefab, a script with properties, Save as new prefab, place an independent copy."""
     bpy.ops.boz.add_shape(kind="wall")
@@ -712,7 +871,13 @@ if source.inherit:
     weapon_checks("inherited")
     asset_name = asset_checks("inherited")
     own = own_model_checks("inherited", asset_name)
+    replaced_sound = sound_checks("inherited")
+    used_effect = effect_checks("inherited")
     saved, data = build_and_compile("inherited")
+    if replaced_sound is not None:
+        sound_build_checks("inherited", replaced_sound)
+    if used_effect is not None:
+        effect_build_checks("inherited", used_effect, data)
     if own:
         built_group = next((project / "build").glob(f"*/assets/weapons_*.group.bin")).read_bytes()
         for name in ("hq_wonder_model", "hq_wonder_skel", "hq_wonder_gun"):

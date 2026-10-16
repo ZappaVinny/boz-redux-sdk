@@ -129,6 +129,9 @@ prompts from its own text: a wall buy asks for the string id `<weapon>_S_WEAPON`
 (CIngameStatePlaying::UpdatePoiPrompt hashes the weapon's name on with `_S_WEAPON`). A new
 weapon has no entry there, so the prompt shows ">>Unknown Hash<<" until you give it an in-game
 name; boz.prefabs adds that text (boz.text) when the level starts. Empty keeps the game's own name.
+`sounds` maps sound fields to the weapon's own sounds (`{"reloadSoundSequence": "my_reload"}`,
+the Audio tab's saved sounds): the build adds a sequence `<weapon>_<field>_seq` playing it and
+points the field there ([sounds.md](sounds.md#a-weapons-own-sounds)).
 
 ## Weapon scripts and boz.weapons
 

@@ -24,17 +24,18 @@ PLACEHOLDERS = [
     ("Characters", "Model replacement", "Replace player arms, characters and zombies with your models", "RE"),
     ("Characters", "Skeleton and preview", "Map bones to the game skeleton and preview animations", "RE"),
     ("Assets", "Lightmaps", "Bake lighting into the game's lightmap textures", "later"),
-    ("Effects", "Effects", "Browse, preview, edit and add particle effects", "RE"),
+    ("Effects", "Edit effects", "Change particle effects: colours, sizes, timing, new emitters", "RE"),
     ("Animation", "Map and character animations", "Animate map objects and characters in the game's "
      "format (weapons are done: pick a weapon in the Weapons tab)", "RE"),
     ("Scripts", "Lua completions", "boz.* suggestions while typing in the script editor", "UI"),
     ("Scripts", "Object scripts", "Every object with a script stub; jump between the object and its script", "UI"),
     ("Scripts", "Reload in game", "Reload the project's scripts in the running game", "client"),
-    ("Audio", "Sounds", "Replace the game's sounds and place ambient sound emitters", "later"),
+    ("Audio", "Ambient sounds", "Place sound emitters (ambience, loops) in the map", "later"),
+    ("Audio", "Music", "Replace the streamed music and stings", "later"),
     ("UI / HUD", "Loading screen", "Design the level's loading screen", "later"),
     ("UI / HUD", "HUD", "Change the in-game HUD", "later"),
 ]
-FORMS_TABS = ("Game", "Audio", "UI / HUD")  # their panels go in the tab's big Properties area
+FORMS_TABS = ("Game", "Audio", "Effects", "UI / HUD")  # their panels go in the big Properties area
 BLOCKERS = {"UI": "Coming in a later SDK update", "RE": "Needs more reverse engineering first",
             "client": "Needs a client update first", "stdlib": "Grows with the standard library",
             "later": "Planned for later"}

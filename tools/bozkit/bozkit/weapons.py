@@ -371,6 +371,8 @@ class WeaponDef:
     model: dict = field(default_factory=dict)    # your own model (bozkit.weapon_model)
     arms: dict = field(default_factory=dict)     # where the arms sit: {"location", "rotation"}
     display: str = ''                            # its name in game prompts ('' = the game's own)
+    sounds: dict = field(default_factory=dict)   # {sound field: project sound}: its own sounds
+    sound_data: dict = field(default_factory=dict, compare=False, repr=False)  # attach_models
     model_data: tuple | None = field(default=None, compare=False, repr=False)   # attach_models
     clips: dict = field(default_factory=dict, compare=False, repr=False)      # attach_models
 
@@ -446,7 +448,8 @@ def load_defs(source: Path) -> list[WeaponDef]:
         out.append(WeaponDef(str(data.get('name') or path.stem), str(data.get('base', '')),
                              str(data.get('level', '')), dict(data.get('fields', {})),
                              str(data.get('script', '')), dict(data.get('model', {})),
-                             dict(data.get('arms', {})), str(data.get('display', ''))))
+                             dict(data.get('arms', {})), str(data.get('display', '')),
+                             dict(data.get('sounds', {}))))
     return out
 
 
@@ -468,6 +471,8 @@ def save_def(source: Path, weapon: WeaponDef) -> Path:
         data['arms'] = weapon.arms
     if weapon.display:
         data['display'] = weapon.display
+    if weapon.sounds:
+        data['sounds'] = dict(sorted(weapon.sounds.items()))
     path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8', newline='\n')
     return path
 
@@ -656,6 +661,25 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef]) -> dict:
         if resource is None:
             raise WeaponError(f'weapon {weapon.name} is not in the level')
         apply_model(groups, weapon, resource)
+    # 5. Sounds of their own: each in its own sequence (the base weapon keeps its sounds).
+    shared = None
+    for weapon in defs:
+        if not weapon.sound_data:
+            continue
+        from . import group as group_module, sound
+        if shared is None:
+            raw = game.read(sound.SHARED_GROUP)
+            shared = group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+        resource = by_hash.get(_hash_of(weapon.name))
+        if resource is None:
+            raise WeaponError(f'weapon {weapon.name} is not in the level')
+        spec = resources.decode_entity_spec(resource.body)
+        blob = _weapon_blob(spec)
+        for key, body in sorted(weapon.sound_data.items()):
+            sequence = sound.add_weapon_sound(groups['weapons'], shared, weapon.name, key,
+                                              int(value_or_default(blob, key) or 0), body)
+            set_value(blob, key, sequence)
+        resource.body = resources.encode_entity_spec(spec)
     # Weapons with a model of their own show it on wall buys (not their base's).
     own_models = {_hash_of(w.name) for w in defs if w.model and w.model.get('asset')}
     for name_hash in own_models:
@@ -666,12 +690,20 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef]) -> dict:
 def attach_models(defs: list[WeaponDef], source: Path) -> None:
     """Load the assets the weapons use as their model (WeaponDef.model_data) and their own
     animations (WeaponDef.clips, bozkit.weapon_anim)."""
-    from . import assets, weapon_anim
+    from . import assets, sound, weapon_anim
     for weapon in defs:
         try:
             weapon.clips = weapon_anim.load_clips(source, weapon.name)
         except weapon_anim.WeaponAnimError as exc:
             raise WeaponError(f'weapon {weapon.name}: {exc}') from None
+        weapon.sound_data = {}
+        for key, name in weapon.sounds.items():
+            if FIELD_BY_KEY.get(key) is None or FIELD_BY_KEY[key].kind != 'sound':
+                raise WeaponError(f'weapon {weapon.name}: {key} is not a sound field')
+            try:
+                weapon.sound_data[key] = sound.encoded(source, name)
+            except sound.SoundError as exc:
+                raise WeaponError(f'weapon {weapon.name}: {exc}') from None
         name = weapon.model.get('asset') if weapon.model else None
         if not name:
             continue

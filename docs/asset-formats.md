@@ -425,3 +425,30 @@ bind pose; `bozkit/weapon_model.py` puts your own model on a weapon that way. A 
 flags are 0x30000 (rigid: 0x20000); a weapon's spec points at its model and skin (same hash) in
 renderableAsset, renderableAssetADS (aiming down the sights, on some guns) and LODS (three
 distance models).
+
+## Sounds (CIwSoundData, CIwSoundSpec, CSoundSequence)
+
+About 730 sounds, in `ingame/ingame.group.bin` (the shared ones: weapons, zombies, power-ups,
+rounds, buying), each map's statics group, `ingame/sound/snd_player_<character>.group.bin`
+(voices) and `fixed`/`shared` (interface). Layouts from the Serialise methods in Ghidra:
+
+- **CIwSoundData:** u32 data bytes, u32 sample count, the data, u32 sample rate, u16 format
+  (2 = ADPCM); the ADPCM class (CIwSoundDataADPCM) adds u32 samples per block and u32 block
+  bytes. Every shipped sound is mono Microsoft IMA ADPCM: 512-byte blocks of 1017 samples at
+  22050 Hz (206 sounds) or 256-byte blocks of 505 samples at 11025 Hz (521). A block starts with
+  s16 predictor, u8 step index, u8 0, then two 4-bit samples a byte, low nibble first. All 727
+  round-trip through `sound.decode_data` / `encode_data`.
+- **CIwSoundSpec** (CIwSoundSpecSound, 48 bytes): u16 flags; s16 volume min/max, pan min/max,
+  pitch min/max (4096 = 1.0); s32 100; s32 0x1800; u32 1; u32 0; u8; u16 max polyphony (the
+  `DefaultSoundSpecMaxPolyphony` cvar, 3); u8; u16 priority (100); u32 sound group
+  (CIwSoundGroup); u32; u32 the CIwSoundData it plays. In the shared group a spec and its data
+  share one hash. CIwSoundSpecAudio streams mp3 through s3eAudio (music).
+- **CSoundSequence:** u8, u32 command count, then per command u32 class hash, u32 0 and its
+  fields: CSoundSequenceCommandPlay / PlayAsync u32 sound (a spec or a CSoundVariation), u32,
+  u8; CSoundSequenceCommandDelay s32 milliseconds. CSoundSequenceManager::Play(hash) plays one;
+  weapon fields (fireSoundSequence, reloadSoundSequence, ...) name them.
+- **CSoundVariation:** a reflected resource (`LFER`) listing the specs it picks from.
+
+`bozkit/sound.py` reads all of these, encodes ADPCM, lists a level's sounds as slots and
+replaces a slot by swapping its CIwSoundData (the spec, its settings and every sequence stay).
+

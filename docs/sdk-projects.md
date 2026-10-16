@@ -81,6 +81,12 @@ A map project also has a `[map]` table with the level's internal `name` (the mod
 turned into `_`; it cannot be one of the game's own level names) and the `template` it started
 from (`empty`, `debug`, `kino`, `callofthedead`, `ascension` or `tutorial`).
 
+A map project keeps what the editor makes under `source/`: the world, weapons
+(`source/weapons/`, [weapons.md](weapons.md)), assets (`source/assets/`, with their high-quality
+sources in `assets/<name>/`, which the build never ships, [assets.md](assets.md)) and sounds
+(`source/sounds/`, [sounds.md](sounds.md)) and the effects it uses (`source/effects.json`,
+[effects.md](effects.md)).
+
 ### Map worlds
 
 A map project's world is source the compiler reads, in `source/`. The editor writes it on every

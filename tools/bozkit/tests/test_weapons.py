@@ -198,6 +198,11 @@ class WeaponTests(unittest.TestCase):
             weapons.save_def(source, weapons.WeaponDef('idgun', 'thundergun', display='Apothicon'))
             defs = weapons.load_defs(source)
             self.assertEqual(defs[0].display, 'Apothicon')
+            defs[0].sounds = {'reloadSoundSequence': 'my_reload'}
+            weapons.save_def(source, defs[0])
+            self.assertEqual(weapons.load_defs(source)[0].sounds, {'reloadSoundSequence': 'my_reload'})
+            with self.assertRaises(weapons.WeaponError):        # not saved in the Audio tab
+                weapons.attach_models(weapons.load_defs(source), source)
             self.assertEqual(weapons.runtime(defs, []),
                              [{'name': 'idgun', 'script': '', 'display': 'Apothicon'}])
 

@@ -24,6 +24,13 @@ Two parts live here:
   normal map baked into the colour), Game checks with fixes, Save edits, Refresh from source,
   Place in map (also Add → My assets and the palette's My assets). See
   [docs/assets.md](../docs/assets.md).
+- **Audio tab:** the map's sounds as slots (Play the original, Replace with one of your sounds,
+  Reset), and the processor: Import a recording, trim, level, fades and rate, Preview as the
+  game plays it, Save. The Weapons tab's Sounds panel shows a weapon's slots. See
+  [docs/sounds.md](../docs/sounds.md).
+- **Effects tab:** every effect and projectile of the game (each map's grenades, bolts, lures and
+  the Gersch device's black hole); Use in this map under a name scripts spawn with boz.effects
+  (carried in from other maps when the map builds). See [docs/effects.md](../docs/effects.md).
 - **Tabs:** Game, World, Weapons, Characters, Assets, Effects, Animation, Scripts, Audio,
   UI / HUD, drawn in the top bar in that order. **Build & Run** (and its ⚙ settings) is at the
   right of the top bar on every tab. The menus are Project, Edit and Help.
