@@ -31,7 +31,7 @@ def projectile_spec(behaviour):
 
 
 def effect_spec():
-    return resources.encode_entity_spec(resources.EntitySpec([component('CIsRenderableGFXEmitter')]))
+    return resources.encode_entity_spec(resources.EntitySpec([component('CIsTransform'), component('CIsRenderableGFXEmitter', [prop('CIsRenderableGFXEmitter', 'unsigned int', 'emitterSpec', struct.pack('<I', 7))])]))
 
 
 def make_group(types):

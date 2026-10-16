@@ -37,6 +37,9 @@ def build(output: Path) -> str:
     for helper in NAVMESH_HELPERS:
         if helper.is_file():
             files[f'boz_redux/_vendor/bozkit/{helper.name}'] = helper.read_bytes()
+    runtime = ROOT / 'gamedef' / 'runtime' / 'boz-1.0.11.toml'
+    if runtime.is_file():     # bozkit.bundle's runtime names
+        files['boz_redux/_vendor/bozkit/runtime_names.toml'] = runtime.read_bytes()
     # A content hash identifies the build in Blender's sidebar while keeping the ZIP reproducible.
     digest = hashlib.sha256()
     for name in sorted(files):

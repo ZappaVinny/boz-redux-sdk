@@ -23,9 +23,30 @@ function components.local_player()
     return entity, game.read("u32", entity + 4)
 end
 
---- The component of an entity id in a table (by gamedef name, e.g. "CPerkManager::s_table").
+--- The address of a component table by its gamedef name ("CPerkManager::s_table") or class
+--- ("CPerkManager"), or nil when the game has no such table.
+function components.table(name)
+    if type(name) == "number" then
+        return name
+    end
+    local full = name:find("::s_table", 1, true) and name or name .. "::s_table"
+    local address = game.symbol(full)
+    if address then
+        return address
+    end
+    local ok, data = pcall(require, "boz.symbol_data")
+    local offset = ok and data.tables[full:gsub("::s_table$", "")]
+    return offset and game.base() + offset or nil
+end
+
+--- The component of an entity id in a table (by gamedef name, e.g. "CPerkManager::s_table",
+--- or class name).
 function components.find(table_name, id)
-    local component = game.call("CIsComponentTableBase::Find", game.symbol(table_name), id)
+    local address = components.table(table_name)
+    if not address then
+        return nil
+    end
+    local component = game.call("CIsComponentTableBase::Find", address, id)
     return component ~= 0 and component or nil
 end
 
@@ -58,7 +79,7 @@ end
 --- Iterates the components in a table (its gamedef name, or its address):
 --- for component, id in components.each(name) do ... end
 function components.each(table_name)
-    local address = type(table_name) == "number" and table_name or game.symbol(table_name)
+    local address = components.table(table_name)
     if not address then
         return function() return nil end
     end

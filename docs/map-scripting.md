@@ -81,6 +81,13 @@ Developer console (` or F1) and in `boz-log.txt`. Every handler is optional:
 | `zombie_killed` | `position` ({x, y, z}), `entity` (the zombie, the same as `who.entity` in `on_enter`), `by_player`, `headshot` |
 | `player_downed`, `player_revived` | |
 | `weapon_given`, `weapon_equipped`, `weapon_reloaded` | `weapon` (its name); `weapon_fired` reaches `boz.on` only. Weapon scripts: [weapons.md](weapons.md) |
+| `round_ended` | `round`: the round that ended (once per round) |
+| `points_earned`, `points_spent` | `points`, `player` (true for the local player) |
+| `player_hit` | `damage`: what the zombie's hit took |
+| `box_weapon` | `weapon`: what the mystery box picked |
+| `pack_a_punch` | `weapon`: the weapon that went in |
+| `powerup_grabbed` | `powerup` ("nuke", "max_ammo", "insta_kill", ...), `player` |
+| `nuke`, `carpenter`, `trap_activated`, `teleporter_activated` | |
 
 "Killed near something" needs no event of its own: compare `data.position` with an object
 (`self:part("Altar"):near(data.position, 200)`), or put a Trigger volume around the spot and
@@ -161,6 +168,12 @@ found by their `CIsNamed` name, and the events are hooks on the game's own funct
 - the power switch's flag for `power_on`;
 - `CPerkManager::GainPerk` for `perk_bought`, `CDoor::OnEvent` for `door_opened`, the zombie's
   dead state for `zombie_killed`, the player's stance for `player_downed` / `player_revived`;
+- `CScoreManager::AddScore` for `points_earned`, `CPickupManager::ApplyPickup` for
+  `powerup_grabbed`, and the game's own events for the rest (`SUBJECT_WAVE_ENDED`,
+  `SUBJECT_CHARGE_POINTS`, `SUBJECT_ENEMY_ATTACK_DAMAGE`, `SUBJECT_MB_CHOOSE_WEAPON`,
+  `SUBJECT_PACKAPUNCH_START`, `SUBJECT_NUKE_NOW`, `SUBJECT_CARPENTER_ACTIVATED`,
+  `SUBJECT_ON_TRAP_ACTIVATED`, `SUBJECT_ON_TELEPORTER_ACTIVATED`), once each (they reach several
+  subjects);
 - `CSaveManager::SaveGame` and `CSaveManager::NotifyLoad` for saved globals, kept in the map
   mod's settings (`saves/mods/<map>.cfg`), next to the game's own save, which is never changed.
 

@@ -93,6 +93,19 @@ check(select(1, gun:damage()) == 900, "set_damage")
 check(weapons.give("mp40_heavy") and weapons.current().name == "mp40_heavy", "give")
 check(not weapons.give("nothing"), "giving an unknown weapon fails")
 
+-- Upgrading and taking.
+memory[HEAVY + 0x60] = hash.name("mp40")              -- the heavy one "upgrades" to the mp40
+functions["CWeaponManager::EquipWeapon"] = function(manager, weapon, slot)
+    memory[manager + 0x1e0 + 4 * slot] = weapon
+end
+check(weapons.current():upgrade_name() == "mp40" and weapons.slot_of("mp40_heavy") == "primary", "its upgrade and slot")
+check(weapons.upgrade("mp40_heavy") and weapons.current().name == "mp40", "upgrade replaces it")
+check(not weapons.upgrade("mp40"), "no upgrade")
+check(not weapons.take("mp40"), "the only gun stays")
+memory[MANAGER + 0x1e4] = HEAVY
+check(weapons.take("mp40") and weapons.current().name == "mp40_heavy" and memory[MANAGER + 0x1e4] == 0, "take: the other gun comes up")
+memory[MANAGER + 0x1e0] = MP40
+
 -- Weapon scripts through boz.prefabs.
 local dir = os.tmpname()
 os.remove(dir)

@@ -93,9 +93,8 @@ def setup_area(area, workspace_name: str, screen=None) -> None:
     if space.type == "VIEW_3D" and space.shading.type == "SOLID" and \
             space.shading.color_type == "TEXTURE" and space.clip_end == 200000.0:
         space.shading.type = "MATERIAL"   # maps saved before game materials were shown
-    if area.type == "IMAGE_EDITOR" and workspace_name == "Audio" and space.image is None:
-        from . import sounds_tab
-        space.image = sounds_tab.wave_image()     # the wave view
+    if area.type == "IMAGE_EDITOR" and workspace_name in ("Audio", "Game") and space.image is None:
+        space.image = view_image(workspace_name)     # the wave view / the rounds graph
     if _configured(space):
         return
     if area.type == "VIEW_3D":
@@ -251,7 +250,16 @@ def _scripts_editors(window, screen) -> None:
 
 AUDIO_KEY = "boz_audio_layout1"   # Audio, Effects: the next layout step, "done" or "failed"
 AUDIO_LAST = 3
-FORMS_LAYOUTS = {"Audio": True, "Effects": False}   # forms + log (+ the wave view)
+FORMS_LAYOUTS = {"Audio": True, "Effects": False, "Game": True}   # forms + log (+ the wave/graph view)
+
+
+def view_image(workspace_name: str):
+    """The image a forms tab shows on its right: the Audio tab's wave, the Game tab's rounds graph."""
+    if workspace_name == "Game":
+        from . import game_tab
+        return game_tab.graph_image()
+    from . import sounds_tab
+    return sounds_tab.wave_image()
 
 
 def _audio_step(window, step: int) -> None:
@@ -290,8 +298,7 @@ def _audio_step(window, step: int) -> None:
         space.show_line_numbers = False
         setup_properties(space_of(forms), True)
         if waves:
-            from . import sounds_tab
-            space_of(columns[-1]).image = sounds_tab.wave_image()
+            space_of(columns[-1]).image = view_image(window.workspace.name)
 
 
 def layout_audio(window) -> bool:

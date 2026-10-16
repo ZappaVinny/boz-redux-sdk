@@ -84,8 +84,8 @@ from (`empty`, `debug`, `kino`, `callofthedead`, `ascension` or `tutorial`).
 A map project keeps what the editor makes under `source/`: the world, weapons
 (`source/weapons/`, [weapons.md](weapons.md)), assets (`source/assets/`, with their high-quality
 sources in `assets/<name>/`, which the build never ships, [assets.md](assets.md)) and sounds
-(`source/sounds/`, [sounds.md](sounds.md)) and the effects it uses (`source/effects.json`,
-[effects.md](effects.md)).
+(`source/sounds/`, [sounds.md](sounds.md)), the effects it uses (`source/effects.json`,
+[effects.md](effects.md)) and its rules (`source/game.json`, [game.md](game.md)).
 
 ### Map worlds
 

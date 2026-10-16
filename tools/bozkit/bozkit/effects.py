@@ -39,6 +39,9 @@ from .hashing import iw_hash
 ENTITY_SPEC = iw_hash('CIsEntitySpec')
 PROJECTILE = iw_hash('CProjectileEntity')
 EMITTER = iw_hash('CIsRenderableGFXEmitter')
+TRANSFORM = iw_hash('CIsTransform')
+BONE_ATTACHMENT = iw_hash('CIsBoneAttachment')
+CHARACTERS = {iw_hash(n) for n in ('CHealth', 'CAIControllerZombie', 'CPlayerController', 'CIsAnimator')}
 SHARED_EFFECT_GROUPS = ('ingame/effects/visualeffects.group.bin', 'ingame/ingame.group.bin')
 BEHAVIOURS = {0: 'Plain', 1: 'Thrown (lifetime)', 2: 'Bolt (explodes on impact)',
               3: 'Projectile', 4: 'Lure (zombies drawn to it)', 5: 'Projectile',
@@ -76,6 +79,16 @@ def _types_of(spec) -> set:
     for _cls, _reserved, child in spec.children:
         found |= _types_of(child)
     return found
+
+
+def _has_emitter_spec(spec) -> bool:
+    """Whether the spec's particle emitter names what it draws (CIwGFXEmitterSpec)."""
+    for component in spec.components:
+        if component.type_hash == EMITTER and component.blob is not None:
+            for prop in component.blob.properties:
+                if prop.name_hash == iw_hash('emitterSpec') and prop.raw and prop.raw != bytes(4):
+                    return True
+    return False
 
 
 def behaviour_of(spec) -> int:
@@ -117,6 +130,14 @@ def catalog(read, names, known: dict | None = None) -> list[Entry]:
         mixed = path == 'ingame/ingame.group.bin'      # also players, spawners, ...: emitters only
         for h, spec in specs(_parsed(read, path)):
             types = _types_of(spec)
+            if TRANSFORM not in {c.type_hash for c in spec.components} or \
+                    BONE_ATTACHMENT in {c.type_hash for c in spec.components}:
+                continue         # a part of another effect (or of a bone): not on its own
+            top = {c.type_hash for c in spec.components}
+            if EMITTER in top and not _has_emitter_spec(spec):
+                continue         # an emitter template (base_emitter): nothing to draw, it crashes
+            if mixed and (EMITTER not in top or top & CHARACTERS):
+                continue         # ingame also holds zombies, players and pickups
             if PROJECTILE not in types and (EMITTER in types or not mixed):
                 out.append(Entry('effect', level, path, h, known.get(h, f'0x{h:08x}')))
     for path in names:
@@ -334,21 +355,64 @@ def _safe(read, path):
         return None
 
 
-def apply(read, source: Path, groups: dict, map_name: str, base: str) -> list[dict]:
-    """Carry the project's effects into the map (those of another map than *base*; shared ones
-    are everywhere) and return the runtime list for boz.effects."""
+def _source_group(used: Used) -> str | None:
+    """The group an effect of the catalog is taken from first."""
+    if not used.level:
+        return None
+    if used.kind == 'projectile':
+        return f'ingame/weapons/weapon_projectiles_{used.level}.group.bin'
+    return f'levels/{used.level}/effects.group.bin'
+
+
+def apply(read, source: Path, groups: dict, map_name: str, base: str, pack=None,
+          scripts: Path | None = None) -> list[dict]:
+    """Put the project's effects in the map and return the runtime list for boz.effects.
+
+    With the game *pack*, everything goes through bozkit.bundle: each effect (from any map) and
+    every effect or projectile the project's *scripts* name ("0x..." or its game name) comes
+    with everything it uses, so scripts can spawn anything; changed ones (hidden, anchored) get
+    the map's own copy. Without it, effects of other maps than *base* are carried (carry)."""
     used = load(source)
-    if not used:
-        return []
-    target = groups.get(f'weapon_projectiles_{map_name}.group.bin')
     from . import levels
-    gear = levels.GEAR.get(base, base) if hasattr(levels, 'GEAR') else base
-    for item in used:
-        if not item.level or item.level in (base, gear):
-            continue
-        if target is None:
-            raise EffectError(f'{item.name}: the map has no projectiles group to carry it into')
-        carry(read, item, target, groups)
+    target = groups.get(f'weapon_projectiles_{map_name}.group.bin')
+    extra: list[dict] = []
+    if pack is not None:
+        from . import bundle as bundle_module, weapons
+        registry = bundle_module.Registry.of(pack)
+        bundle = bundle_module.Bundle(registry, groups, map_name)
+        for item in used:
+            bundle.add([item.hash], prefer=_source_group(item))
+            spawned = next((v for (_path, h), v in bundle.renamed.items() if h == item.hash), None)
+            if spawned and not item.changed:
+                item.hash = spawned            # the map holds it under a name of its own
+        known = {u.hash for u in used}
+        names = weapons._names()
+        for value in bundle_module.script_names(scripts, registry) if scripts else []:
+            if value in known:
+                continue
+            bundle.add([value])
+            entry = next((e for e in registry.entries(value) if e.cls == ENTITY_SPEC), None)
+            if entry is None:
+                continue          # a sound, sequence, screen effect or fog: bundled, not an effect
+            behaviour, kind = 0, 'effect'
+            if entry is not None:
+                from . import resources
+                try:
+                    spec = resources.decode_entity_spec(entry.resource.body)
+                    if PROJECTILE in _types_of(spec):
+                        kind, behaviour = 'projectile', behaviour_of(spec)
+                except (ValueError, struct.error):
+                    pass
+            extra.append({'name': names.get(value, f'0x{value:08x}'), 'hash': value, 'kind': kind,
+                          'behaviour': behaviour, 'triggers': list(TRIGGERS.get(behaviour, ()))})
+    else:
+        gear = levels.GEAR.get(base, base) if hasattr(levels, 'GEAR') else base
+        for item in used:
+            if not item.level or item.level in (base, gear):
+                continue
+            if target is None:
+                raise EffectError(f'{item.name}: the map has no projectiles group to carry it into')
+            carry(read, item, target, groups)
     for item in used:            # changed ones: the map's own copy of the spec, under its name
         if not item.changed:
             continue
@@ -367,4 +431,4 @@ def apply(read, source: Path, groups: dict, map_name: str, base: str) -> list[di
             if t.class_hash == ENTITY_SPEC:
                 t.resources = [r for r in t.resources if r.in_group_hash != item.spawn_hash]
         _add_like(target, source_type, copy_of)
-    return runtime(used)
+    return runtime(used) + extra

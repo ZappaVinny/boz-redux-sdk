@@ -1,10 +1,10 @@
-"""The Effects tab: every effect and projectile of the game, and the ones this map uses.
+"""The Effects tab: every effect and projectile of the game, and the names this map gives them.
 
-Game effects lists what the game can spawn (bozkit.effects.catalog): the shared effects every map
-has and each map's own, and each map's projectiles (grenades, bolts, monkey bombs, the Gersch
-device) with what they do. Use in this map puts one in the map under a name scripts use
-(source/effects.json); one from another map is carried into the map when it builds. Scripts
-spawn them with boz.effects (docs/effects.md).
+Game effects lists what the game can spawn (bozkit.effects.catalog): the shared effects and each
+map's own, and each map's projectiles (grenades, bolts, monkey bombs, the Gersch device) with
+what they do. Every one works on any map: the build bundles what a map uses (bozkit.bundle).
+Name it gives one a name scripts use (source/effects.json), and the changes a projectile can have
+(Hide its model, Stays where spawned). Scripts spawn them with boz.effects (docs/effects.md).
 """
 from __future__ import annotations
 
@@ -228,9 +228,9 @@ class BOZ_OT_effects_refresh(Operator):
 
 class BOZ_OT_effect_use(Operator):
     bl_idname = "boz.effect_use"
-    bl_label = "Use in this map"
-    bl_description = ("Put this effect in the map under the name below (one from another map is "
-                      "carried in when the map builds); scripts spawn it with boz.effects")
+    bl_label = "Name it"
+    bl_description = ("Give this effect the name below: scripts spawn it with boz.effects (it works "
+                      "on any map; the build brings what it needs)")
 
     def execute(self, context):
         scene = link.map_scene()
@@ -254,14 +254,14 @@ class BOZ_OT_effect_use(Operator):
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
         refresh_used(context, keep=name)
-        self.report({"INFO"}, f"{name}: in this map (scripts: boz.effects)")
+        self.report({"INFO"}, f"{name}: scripts spawn it with boz.effects")
         return {"FINISHED"}
 
 
 class BOZ_OT_effect_remove(Operator):
     bl_idname = "boz.effect_remove"
-    bl_label = "Remove from this map"
-    bl_description = "Take this effect out of the map (scripts spawning it get nothing)"
+    bl_label = "Forget the name"
+    bl_description = "Forget this name (scripts can still spawn the effect by its game name or 0x hash)"
 
     def execute(self, context):
         scene = link.map_scene()
@@ -350,8 +350,8 @@ class BOZ_PT_effects_game(_EffectsPanel, Panel):
         box = layout.box()
         box.label(text=item.label, icon="PARTICLES" if item.kind == "effect" else "PHYSICS")
         box.label(text=item.detail)
-        box.label(text="Every map has it" if not item.level else
-                  f"From {item.level}: carried into your map when it builds")
+        box.label(text="From the shared effects" if not item.level else
+                  f"From {item.level}: works on any map")
         row = box.row(align=True)
         row.prop(scene, "boz_effect_new_name", text="Name")
         row.operator(BOZ_OT_effect_use.bl_idname, icon="ADD")
@@ -359,7 +359,7 @@ class BOZ_PT_effects_game(_EffectsPanel, Panel):
 
 class BOZ_PT_effects_used(_EffectsPanel, Panel):
     bl_idname = "BOZ_PT_effects_used"
-    bl_label = "This map's effects"
+    bl_label = "Named effects"
     bl_order = 1
 
     def draw(self, context):
@@ -370,7 +370,7 @@ class BOZ_PT_effects_used(_EffectsPanel, Panel):
         if not len(scene.boz_effects_used) and used():
             refresh_used(context)
         if not len(scene.boz_effects_used):
-            layout.label(text="Pick one in Game effects, then Use in this map", icon="INFO")
+            layout.label(text="Pick one in Game effects, then Name it", icon="INFO")
             return
         row = layout.row()
         row.template_list("BOZ_UL_effects_used", "", scene, "boz_effects_used", scene,

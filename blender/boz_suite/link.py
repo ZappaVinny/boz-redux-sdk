@@ -259,6 +259,7 @@ def on_load(_dummy):
         from . import assets_tab, weapons_tab
         weapons_tab.on_load()
         assets_tab.on_load()
+        bpy.app.timers.register(_game_tab_refresh, first_interval=0.5)
         return
     blend = project.root / "map.blend"
     if blend.exists() or map_scene().objects:  # both startup handlers run; build once
@@ -271,6 +272,16 @@ def on_load(_dummy):
         return
     world_to_scene(source_world, project.root / "source", map_scene())
     bpy.app.timers.register(lambda: _first_save(blend), first_interval=0.2)
+
+
+def _game_tab_refresh():
+    """The Game tab's forms from the project (after the editor is up: needs the asset library)."""
+    from . import game_tab
+    try:
+        game_tab.refresh(bpy.context)
+    except Exception as exc:  # the tab still offers its refresh button
+        print(f"boz_suite: game tab: {exc}")
+    return None
 
 
 def _first_save(blend: Path):

@@ -351,6 +351,43 @@ models, materials, portals, occluders and light boxes, while many of its texture
 groups. Editors must resolve references across all of a level's groups plus `ingame`, and write
 each edit back to the group that owns the resource.
 
+### Map-agnostic assets (bozkit.bundle)
+
+Nothing in the game's data ties a resource to a map: `CIwResManager` finds a name in whatever
+groups are loaded. So a map can use anything from any map, provided its own groups carry it.
+`bozkit.bundle` does that for every build:
+
+- **The registry** indexes every resource of every group (class, name, group, body) and what it
+  refers to: an entity spec's hash-typed properties, a model's materials, a material's textures, a
+  reflected resource's hashes, and for other binary resources (skins, skeletons, animations, state
+  machines, sound specs and sequences) any word that names a game resource. Code references come
+  from the game definition's runtime names (`gamedef/runtime`, made by
+  `tools/ghidra/ExportBozRuntimeNames.java`): per class, the names its functions hash or play at
+  run time. A spec with a `CProjectileEntity` brings `gersch_Effect`, the Gersch sounds and
+  `matr_pop_00`, which no data names.
+- **A bundle** walks the closure from what a map uses (placed entities and models, weapons and
+  their projectiles, named effects, every spec a script names by game name or `"0x..."` hash,
+  zombie looks of the Game tab, what "behaves like" plays) and copies what the map's loaded groups
+  (the shared groups and the children of the map's groups) do not already hold.
+- **Where it goes:** projectile specs and any other entity spec go into
+  `weapon_projectiles_<map>` (never the statics group: the level makes an entity of every spec
+  there), weapon specs into `weapons_<map>` (the game reads those groups' own resources), what a
+  spec uses with it, everything else into the statics group.
+- **Clashing names:** names are not unique across groups (every weapon has models named `Base`
+  and `LOD1`). A resource whose name the map already holds with a different body is copied as
+  `boz_<group>_<name>`, and the copied resources that use it are changed to point at that name.
+- **Not copied:** level structure (`CLevel`, `CArea`, navmeshes, portals, occluders, `CWave`, the
+  score table, loading strings): every map has its own.
+- Specs that cannot stand alone are not in the Effects catalog: no `CIsTransform` (parts of other
+  effects), a `CIsBoneAttachment` (they need a bone), an emitter without an `emitterSpec`
+  (`base_emitter`). Spawned anyway, the first two crash the game in `CIsRenderable::UpdateTransform`
+  and the last in `CIsRenderableGFXEmitter::Init`; boz.effects removes a spawned spec without a
+  transform at once.
+
+Verified in the game: every one of the 228 effects and projectiles of every map spawns on a map
+built from Kino (Call of the Dead's draw there too); no reference of another map's effect is
+missing from the built map.
+
 ## Saves (`.i3d`)
 
 Saves are written with IwSerialise (`CSaveManager::Serialise`). Every file begins:

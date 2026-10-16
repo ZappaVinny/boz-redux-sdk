@@ -70,7 +70,7 @@ functions["Spawn_ByHash"] = function(manager, h, at, rot, name, parent)
     local e = 0xa0000000 + next_id * 0x10000          -- heap addresses above 0x80000000
     memory[e + 4] = next_id
     alive[next_id] = e
-    spawned[e] = {hash = h, x = memory[at], y = memory[at + 4], z = memory[at + 8], w = memory[rot + 12]}
+    spawned[e] = {hash = h, x = memory[at], y = memory[at + 4], z = memory[at + 8], w = memory[rot]}
     for i = 0, 2 do memory[transform(e) + 0xa8 + 4 * i] = memory[at + 4 * i] end
     if h == GERSCH then unset[e] = true end
     return e
@@ -87,7 +87,9 @@ end
 functions["CIsEntityDB::GetEntity"] = function(lookup)      -- the record: not the spawn handle
     return alive[memory[lookup + 4]] and alive[memory[lookup + 4]] + 0x8000 or 0
 end
-functions["CIsTransform::FromEntity"] = function(e) return transform(e) end
+functions["CIsTransform::FromEntity"] = function(e)
+    return spawned[e] and spawned[e].hash == hash.name("a_part") and 0 or transform(e)
+end
 functions["CIsRigidBody::FromEntity"] = function(e) return rigid(e) end
 functions["CIsTransform::UpdateWorld"] = function(t)
     for i = 0, 2 do memory[t + 0x5c + 4 * i] = memory[t + 0xa8 + 4 * i] end
@@ -133,6 +135,10 @@ frame(0.3)
 check(not spark:alive() and #called("EntityDB_Destroy") == 1, "removed after its lifetime")
 local missing, why = effects.spawn("nothing", {0, 0, 0})
 check(missing == nil and why:find("Effects tab"), "an effect the map does not have says so")
+local destroyed = #called("EntityDB_Destroy")
+local part, part_why = effects.spawn("a_part", {0, 0, 0})
+check(part == nil and part_why:find("part of another") and #called("EntityDB_Destroy") == destroyed + 1,
+      "a part of another effect is removed at once (drawing it would crash)")
 
 -- The map's black hole by its project name: set up only once the game has set it up.
 effects.know({{name = "gersch", hash = GERSCH, kind = "projectile", behaviour = 6, triggers = {"open"}}})

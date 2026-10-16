@@ -53,6 +53,15 @@ Round sizes, zombie speeds and health are data, so they can be changed by editin
 definitions (bozkit) or by hooks at run time. The standard lib has `boz.rounds` for starting
 rounds and spawning or killing zombies.
 
+**Spawning.** Every zombie, dog and monkey is spawned from a spawn description
+(`ZombieSpawnInfo`: what spawns, a new name, a spawn point, a look, a position) through
+`CWaveManager::OnSpawnZombie`: its health is the round's (times the difficulty's multiplier), its
+speed tier is picked from the round's walk / run / sprint shares, and it counts toward the round
+when it is tracked. A plain zombie's spec comes from its look (`CZombieConfiguration`, the level
+lists the ones it picks from). George (Call of the Dead) spawns through the wave manager's boss
+spawn, which keeps him. An AI spawned off the navmesh dies within seconds.
+`boz.zombies.spawn` / `spawn_george` / `spawn_at_point` do this.
+
 ## Points and purchases
 
 `CScoreManager` keeps each player's points:
@@ -71,7 +80,13 @@ The cheat `UnlimitedScore` makes purchases free; `StartingScore` sets the starti
   cast, and what it hits gets `SUBJECT_WEAPON_HIT` with the body part. The knife does the same
   for a target in front of the player.
 - **Health:** `CHealth` clamps damage, regenerates after a delay and sends `SUBJECT_DIED` below
-  1 health. `CHealth::Damage` is where damage arrives.
+  1 health. `CHealth::Damage` is where damage arrives. The most health can be (+0x44) is set at
+  spawn (the round's health for a zombie) and doubled by Juggernog; the reflected
+  `m_MaxHealth` is only the spec's base.
+- **What weapons do to zombies:** a zombie's controller gets the hit as an event and reacts:
+  ice (the freeze ray: frozen, then shattered), fire, the full-body explosion, chain lightning,
+  the black hole and the Thundergun each have their own death. `boz.zombies` sends these
+  directly (`z:freeze()`, `z:burn()`, `z:explode()`, ...).
 - **Kills:** a dying zombie sends a kill-score event by how it died (head, torso, limb, knife,
   grenade); the killer's score handler looks up the points (doubled during Double Points) and adds
   them. `zombieHeadshotBonus` is extra for headshots.
@@ -88,7 +103,11 @@ readable and editable with bozkit. `WeaponsUnlimitedAmmo` stops ammo use.
 - **Usable objects** (perk machines, the mystery box, Pack-a-Punch, doors, barricades, traps,
   turrets) all have an `Interact`: check the cost, charge points, act.
 - **Perks** (`CPerkManager` on the player): Deadshot, Double Tap, Juggernog, Stamin-Up, PHD
-  Flopper, Quick Revive, Speed Cola. `boz.player.give_perk` / `give_all_perks` grant them.
+  Flopper, Quick Revive, Speed Cola, kept as bits with a HUD icon each.
+  `boz.player.give_perk` / `give_all_perks` grant them, `take_perk` / `take_all_perks` take them.
+- **Using something** only works when the player's points cover it as of the last frame (the
+  score updates a frame later); `piece:use_free()` credits the cost, uses it a frame later and
+  takes back a credit nothing charged.
 - **Power-ups** drop from zombies based on points earned since the last drop; the last dog or
   monkey of a round drops Max Ammo.
 - **The box** rolls a weapon and hands it over through `CWeaponManager::GiveWeapon`.
@@ -98,7 +117,11 @@ readable and editable with bozkit. `WeaponsUnlimitedAmmo` stops ammo use.
 The local player's controller is `CPlayerController`; its weapon manager (`CWeaponManager`)
 also owns the view's field of view: it eases between the map's default and the weapon's
 aim-down-sights zoom each frame. `boz.player.set_fov` changes it properly. `boz.fly` turns on
-the game's developer fly mode (noclip).
+the game's developer fly mode (noclip). Camera shakes are data (`CCameraShakeConfig`: duration,
+how far, how often it changes); one plays at a time (`boz.camera.shake`).
+
+Rotations are quaternions stored scalar first (s, x, y, z) everywhere: transforms, spawns,
+spawn descriptions. `boz.entities` takes and gives `{x, y, z, w}`.
 
 ## Menus
 

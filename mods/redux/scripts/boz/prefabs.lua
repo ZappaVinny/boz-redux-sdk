@@ -36,7 +36,12 @@
 --                                                 by_player = true, headshot = true},
 --                                "player_downed", "player_revived",
 --                                "weapon_given", "weapon_equipped", "weapon_reloaded"
---                                {weapon = "mp40"} ("weapon_fired" only reaches boz.on)
+--                                {weapon = "mp40"} ("weapon_fired" only reaches boz.on),
+--                                "round_ended" {round = n}, "points_earned" / "points_spent"
+--                                {points = n, player = true}, "player_hit" {damage = n},
+--                                "box_weapon" / "pack_a_punch" {weapon = "mp40"},
+--                                "powerup_grabbed" {powerup = "nuke", player = true}, "nuke",
+--                                "carpenter", "trap_activated", "teleporter_activated"
 --
 -- Weapon scripts (Weapons tab → Add script): self is the weapon (self.name, and the boz.weapons
 -- handle's methods on the live weapon: self:clip(), self:set_damage(...), ...). Handlers:
@@ -98,6 +103,8 @@ local FALLBACK = {
     ["CWaveManager::StartWave"] = 0x217c1c + 1,
     ["Entity_GetNameHash"] = 0x104218 + 1,
     ["CPowerSwitch::s_table"] = 0x46d188,
+    ["CPickupManager::ApplyPickup"] = 0x1d2c98 + 1,
+    ["CWaveManager::s_instance"] = 0x460834,
 }
 local LEVEL_PLAYER = 0x1a0
 local WAVE_ROUND = 0x78
@@ -475,7 +482,8 @@ end
 
 -- Timers on game time
 
-local clock = {now = 0, stepped = false, timers = {}}
+local clock = {now = 0, stepped = false, timers = {}, frame = 0}
+local start_count = 0         -- levels started (keys once-per-level events)
 
 local Timer = {}
 Timer.__index = Timer
@@ -505,6 +513,7 @@ function prefabs.every(seconds, fn)
 end
 
 local function run_timers(dt)
+    clock.frame = clock.frame + 1
     if clock.stepped then
         clock.now = clock.now + dt
     end
@@ -786,6 +795,56 @@ local function bridge_more_events()
             headshot = (how < 0 or how > 2) and game.read("u32", controller + ZOMBIE_HIT_LOCATION) == 0,
         })
     end})
+    -- Game events that become bus events. Each reaches several subjects (the sender's, then the
+    -- managers' that pass it on), so one per frame per arguments.
+    local relayed = {}
+    local game_events = require("boz.game_events")
+    local function relay(event, name, data_of, key_of)
+        game_events.on(event, function(e)
+            local key = name .. ":" .. (key_of and tostring(key_of(e)) or (tostring(e.a) .. ":" .. tostring(e.b)))
+            if (relayed[key] and (key_of or clock.frame - relayed[key] <= 3)) or loading then
+                return
+            end
+            relayed[key] = clock.frame
+            prefabs.send(name, data_of and data_of(e) or {})
+        end)
+    end
+    local function player_hash()
+        local player = local_player()
+        local id = player ~= 0 and require("boz.entities").name_hash(player)
+        return id and id & 0xffffffff or nil
+    end
+    local function points(e) return {points = e.a, player = (e.b or 0) & 0xffffffff == player_hash()} end
+    local function round()
+        local manager = game.read("ptr", sym("CWaveManager::s_instance"))
+        return manager ~= 0 and game.read("u32", manager + WAVE_ROUND) or 0
+    end
+    -- Once per round (the wave manager and the level manager both pass it on).
+    relay("SUBJECT_WAVE_ENDED", "round_ended", function() return {round = round()} end,
+          function() return tostring(start_count) .. ":" .. round() end)
+    relay("SUBJECT_CHARGE_POINTS", "points_spent", points)
+    relay("SUBJECT_ENEMY_ATTACK_DAMAGE", "player_hit", function(e) return {damage = e.a} end)
+    relay("SUBJECT_MB_CHOOSE_WEAPON", "box_weapon", function(e) return {weapon = weapons.name(e.a)} end)
+    relay("SUBJECT_PACKAPUNCH_START", "pack_a_punch", function(e) return {weapon = weapons.name(e.a)} end)
+    relay("SUBJECT_NUKE_NOW", "nuke")
+    relay("SUBJECT_CARPENTER_ACTIVATED", "carpenter")
+    relay("SUBJECT_ON_TRAP_ACTIVATED", "trap_activated")
+    relay("SUBJECT_ON_TELEPORTER_ACTIVATED", "teleporter_activated")
+    hook.add(sym("CScoreManager::AddScore"), {before = function(info)
+        local delta = info:arg(3) & 0xffffffff
+        if loading or delta == 0 or delta >= 0x80000000 then
+            return
+        end
+        prefabs.send("points_earned", {points = delta, player = info:arg(2) & 0xffffffff == player_hash()})
+    end})
+    hook.add(sym("CPickupManager::ApplyPickup"), {before = function(info)
+        if loading then
+            return
+        end
+        local player = info:arg(2)
+        prefabs.send("powerup_grabbed", {powerup = require("boz.pickups").TYPES[info:arg(3) + 1] or info:arg(3),
+                                         player = player ~= 0 and player == local_player()})
+    end})
     local WEAPON_HANDLERS = {given = "on_given", equipped = "on_equip", fired = "on_fire",
                              reloaded = "on_reload"}
     weapons.listen(function(event, name, data)
@@ -955,6 +1014,7 @@ end
 --- Starts the level's objects (boz.world calls this when a level has started, with the map's
 --- world_data objects, the names of all its objects and its weapons).
 function prefabs.start(list, all_names, weapon_list)
+    start_count = start_count + 1
     instances, volumes, names = {}, {}, {}
     power_was_on, downed, loading = false, false, false
     door_states = {}

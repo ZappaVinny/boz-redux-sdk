@@ -629,7 +629,7 @@ def sound_checks(label):
 
 
 def effect_checks(label):
-    """Effects tab: find the Gersch device, use it in this map under a name, get its script line."""
+    """Effects tab: find the Gersch device, name it, get its script line."""
     tab = suite.effects_tab
     fx = tab.effects
     if not LIBRARY:
@@ -645,7 +645,7 @@ def effect_checks(label):
     bpy.ops.boz.effect_use("EXEC_DEFAULT")
     stored = fx.load(tab.source_dir())
     check([(u.name, u.level, u.behaviour) for u in stored] == [("gersch", "ascension", 6)],
-          f"{label}: Use in this map stores the black hole ({stored})")
+          f"{label}: Name it stores the black hole ({stored})")
     scene.boz_effect_rename = "black_hole"
     check([u.name for u in fx.load(tab.source_dir())] == ["black_hole"], f"{label}: renaming it")
     scene.boz_effect_rename = "gersch"
@@ -666,6 +666,85 @@ def effect_checks(label):
     return stored[0]
 
 
+def game_checks(label):
+    """Game tab: the base level's rounds show, a change makes them the map's own, every game can
+    share them, a dog round, a zombie look, the economy and a hook stub."""
+    tab = suite.game_tab
+    gm = tab.game
+    if not LIBRARY:
+        return False
+    bpy.ops.boz.game_refresh("EXEC_DEFAULT")
+    check(len(scene.boz_game_rounds) >= 2, f"{label}: the base level's rounds show ({len(scene.boz_game_rounds)})")
+    check(not gm.load(tab.source_dir()).get("rounds"), f"{label}: nothing stored before a change")
+    scene.boz_game_round_index = 0
+    scene.boz_game_round.m_ZombieCount = 3
+    stored = gm.load(tab.source_dir())["rounds"]
+    check(stored["chains"]["normal"][0]["m_ZombieCount"] == 3, f"{label}: a changed round is stored")
+    bpy.ops.boz.game_rounds_copy("EXEC_DEFAULT")
+    stored = gm.load(tab.source_dir())["rounds"]
+    check(all(stored["chains"][k][0]["m_ZombieCount"] == 3 for k in gm.CHAIN_KEYS),
+          f"{label}: Use these rounds in every game")
+    before = len(stored["chains"]["normal"])
+    bpy.ops.boz.game_round_add("EXEC_DEFAULT")
+    check(len(gm.load(tab.source_dir())["rounds"]["chains"]["normal"]) == before + 1, f"{label}: a round is added")
+    bpy.ops.boz.game_round_remove("EXEC_DEFAULT")
+    check(len(gm.load(tab.source_dir())["rounds"]["chains"]["normal"]) == before, f"{label}: and removed")
+    specials = len(gm.load(tab.source_dir())["rounds"].get("specials") or [])
+    bpy.ops.boz.game_special_add("EXEC_DEFAULT")
+    check(len(gm.load(tab.source_dir())["rounds"]["specials"]) == specials + 1, f"{label}: a special round is added")
+    scene.boz_game_repeat_health = "grow"
+    check(gm.load(tab.source_dir())["rounds"]["repeat_health"] == "grow", f"{label}: repeating health")
+    check(len(scene.boz_game_looks) >= 1, f"{label}: the zombie looks show")
+    scene.boz_game_looks[0].used = False
+    if len(scene.boz_game_looks) > 1:
+        check(scene.boz_game_looks[0].hash & 0xffffffff not in gm.load(tab.source_dir())["zombies"]["used"],
+              f"{label}: an unticked look is left out")
+    scene.boz_game_looks[0].used = True
+    form = scene.boz_game_economy
+    form.set_StartingScore = True
+    form.StartingScore = 2500
+    form.set_scores = True
+    form.set_box = True
+    form.box_m_Cost = 1200
+    economy = gm.load(tab.source_dir())["economy"]
+    check(economy["cvars"] == {"StartingScore": 2500} and economy["box"]["m_Cost"] == 1200
+          and economy["scores"]["SUBJECT_ZOMBIE_SCORE_HIT"] == 10, f"{label}: the economy is stored ({economy})")
+    scene.boz_game_power_on = True
+    check(gm.load(tab.source_dir())["level"]["power_on"], f"{label}: power on at the start")
+    bpy.ops.boz.game_hook("EXEC_DEFAULT", event="round_started")
+    check((project / "scripts" / "hooks" / "round_started.lua").is_file(), f"{label}: a hook stub is made")
+    tab.draw_graph()
+    check(bpy.data.images.get(tab.GRAPH_IMAGE) is not None, f"{label}: the rounds graph is drawn")
+    for panel in (tab.BOZ_PT_game_level, tab.BOZ_PT_game_rounds, tab.BOZ_PT_game_specials,
+                  tab.BOZ_PT_game_zombies, tab.BOZ_PT_game_economy, tab.BOZ_PT_game_hooks):
+        fake = type("Panel", (), {"layout": FakeLayout()})()
+        try:
+            panel.draw(fake, FakeContext(None, "Game"))
+        except Exception as exc:   # noqa: BLE001
+            check(False, f"{label}: {panel.__name__} fails: {exc!r}")
+    return True
+
+
+def game_build_checks(label, data):
+    """The built map has its own rounds, score table, and boz.game gets its rules and hooks."""
+    tab = suite.game_tab
+    gm = tab.game
+    built_project = link.sdk_project.load_project(project)
+    output = next((project / "build").glob("*/assets"))
+    statics = tab.group.parse((output / f"{built_project.map_name}_statics.group.bin").read_bytes())
+    rounds = gm.read_rounds(statics)
+    check(all(rounds["chains"][k][0]["m_ZombieCount"] == 3 for k in gm.CHAIN_KEYS),
+          f"{label}: the built level starts every game with the map's first round")
+    names = {r.in_group_hash for t in statics.types() for r in t.resources}
+    check(world.iw_hash(gm.score_table_name(built_project.map_name)) in names, f"{label}: the map's score table")
+    check("StartingScore = 2500" in data and "power_on = true" in data and "grow_health = true" in data,
+          f"{label}: boz.game gets the rules")
+    check('"round_started"' in data, f"{label}: the hook is started")
+    scripts = output.parent / "scripts"
+    check((scripts / "boz" / "game.lua").is_file() and (scripts / "boz" / "hooks.lua").is_file()
+          and (scripts / "hooks" / "round_started.lua").is_file(), f"{label}: boz.game, boz.hooks and the hook ship")
+
+
 def effect_build_checks(label, used, data):
     """The built map carries the black hole and tells boz.effects its name."""
     snd = suite.sounds_tab.sound
@@ -675,8 +754,14 @@ def effect_build_checks(label, used, data):
     output = next((project / "build").glob("*/assets"))
     projectiles = group.parse(next(output.glob("weapon_projectiles_*.group.bin")).read_bytes())
     held = {r.in_group_hash for t in projectiles.types() for r in t.resources}
+    everything = {}
+    for built_file in output.glob("*.group.bin"):
+        for t in group.parse(built_file.read_bytes()).types():
+            for r in t.resources:
+                everything.setdefault(r.in_group_hash, set()).add(built_file.name)
     check(used.hash in held and world.iw_hash("gersch_opens") in held,
-          f"{label}: the black hole and its sounds are carried into the map")
+          f"{label}: the black hole and its sounds are carried into the map "
+          f"(spec in {everything.get(used.hash)}, gersch_opens in {everything.get(world.iw_hash('gersch_opens'))})")
     check(used.spawn_hash in held, f"{label}: the map's own copy without the model and physics is built")
     check('name = "gersch"' in data and str(used.spawn_hash) in data, f"{label}: boz.effects knows it")
     scripts = output.parent / "scripts" / "boz"
@@ -873,7 +958,10 @@ if source.inherit:
     own = own_model_checks("inherited", asset_name)
     replaced_sound = sound_checks("inherited")
     used_effect = effect_checks("inherited")
+    game_rules = game_checks("inherited")
     saved, data = build_and_compile("inherited")
+    if game_rules:
+        game_build_checks("inherited", data)
     if replaced_sound is not None:
         sound_build_checks("inherited", replaced_sound)
     if used_effect is not None:

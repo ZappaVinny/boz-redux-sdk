@@ -12,12 +12,6 @@ from bpy.types import Operator, Panel
 
 # (tab, title, what it will do, blocker)
 PLACEHOLDERS = [
-    ("Game", "Level info", "Display name, loading screen image, starting weapon, power at start", "UI"),
-    ("Game", "Rounds", "Zombies per round, health and speed scaling, with a round-by-round graph", "UI"),
-    ("Game", "Special rounds", "Dog rounds and their frequency; custom special rounds as a hook", "UI"),
-    ("Game", "Zombie types", "Zombie configurations and which spawn types they use", "UI"),
-    ("Game", "Pickups and economy", "Drop rates, allowed pickups, points, perk and box costs", "RE"),
-    ("Game", "Hooks", "Every standard library event, with a button that creates or opens its Lua stub", "stdlib"),
     ("World", "Palettes", "Drag props, models, textures, effects and triggers from the game into the world", "UI"),
     ("World", "Make prop", "Turn a model into a prop with its own textures, collision and script stub", "UI"),
     ("World", "Rooms", "Rooms as collections and portals in doorways, for big maps", "UI"),

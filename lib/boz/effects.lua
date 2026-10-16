@@ -4,10 +4,11 @@
 --   effects.spawn("impactRayGun", {x = 0, y = 50, z = 0})            -- a one-off effect
 --   local hole = effects.projectile("gersch", effects.aim(), {trigger = "open", lifetime = 6})
 --   hole:remove()                                                    -- close it early
+--   effects.explode(position, {radius = 400, damage = 2000})          -- a grenade's blast
 --
--- Names are the map's effects (the editor's Effects tab: "Use in this map", under the name you
--- give them) or the game's own effect names every map has ("gersch_Effect", "impactRayGun",
--- "iceShatter", ...), or "0x..." hashes.
+-- Names are the game's effect and projectile names ("gersch_Effect", "impactRayGun",
+-- "iceShatter", ...; any map's: the build bundles what scripts name, and the editor's Effects tab
+-- lists them and can give them your own names), or "0x..." hashes.
 --
 -- Effects are visual (particles); projectiles bring the game's behaviour with them: a Gersch
 -- device opens a black hole that pulls zombies in and kills them, a monkey bomb lures them, a
@@ -15,7 +16,7 @@
 -- is: "open" (black hole), "explode" (grenades, bolts).
 --
 -- How it works (Ghidra names in the game definition): Spawn_ByHash(CSpawnManager, spec hash,
--- position, rotation xyzw) creates any entity spec a loaded group holds; a projectile's
+-- position, rotation s x y z) creates any entity spec a loaded group holds; a projectile's
 -- CProjectileEntity keeps its lifetime (ms) at +0xc0 (+0xc4 on), its open state at +0xc7, its
 -- owner at +0x88, its rigid body at +0x80 (Bullet body +0x34); events go to its subject at +0x28
 -- (SUBJECT_SPAWN_GERSCH_EFFECT opens a Gersch device, SUBJECT_EXPLODE, SUBJECT_TERMINATE ends
@@ -30,6 +31,10 @@
 local hash = require("boz.hash")
 
 local effects = {}
+
+-- Projectiles that explode (every map's weapon projectiles group has them).
+local EXPLOSIONS = {frag = "projectile_frag_grenade", raygun = "projectile_raygun",
+                    claymore = "projectile_claymore", monkey = "projectile_monkeyBomb"}
 
 local FALLBACK = {
     ["Spawn_ByHash"] = 0x1fa9c6 + 1,
@@ -337,14 +342,24 @@ local function spawn_entity(name, position, options)
     for i, value in ipairs({x, y + (options.lift or 0), z, 0}) do
         game.write("f32", at + 4 * (i - 1), value)
     end
-    for i = 1, 4 do
-        game.write("f32", at + 16 + 4 * (i - 1), rotation[i] or rotation[({"x", "y", "z", "w"})[i]] or 0)
+    -- The game's quaternions keep the scalar first (s, x, y, z).
+    local values = {rotation.w or rotation[4] or 1, rotation.x or rotation[1] or 0,
+                    rotation.y or rotation[2] or 0, rotation.z or rotation[3] or 0}
+    for i, value in ipairs(values) do
+        game.write("f32", at + 16 + 4 * (i - 1), value)
     end
     -- Spawn_ByHash(manager, hash, position, rotation, name, parent, named): name 0 makes up a
     -- unique one, parent 0 puts it in the world on its own (the 7th only matters with a name).
     local entity = call(sym("Spawn_ByHash"), manager, hash_of(name), at, at + 16, 0, 0)
     if entity == 0 then
-        return nil, "the map has no effect " .. tostring(name) .. " (Effects tab: Use in this map)"
+        return nil, "the map has no effect " .. tostring(name) ..
+            " (name it in the Effects tab, or name it in a script so the build brings it)"
+    end
+    if call(sym("CIsTransform::FromEntity"), entity) == 0 then
+        -- A part of another effect (no position of its own): drawing it would crash the game.
+        local db = game.read("u32", sym("CIsEntityDB::s_instance"))
+        call(sym("EntityDB_Destroy"), db, entity, 0)
+        return nil, tostring(name) .. " is a part of another effect and cannot be spawned on its own"
     end
     return make(entity, name)
 end
@@ -409,6 +424,41 @@ function effects.projectile(name, position, options)
         waiting[effect] = SETUP_FRAMES
     end
     return effect
+end
+
+--- An explosion at a position, the player's (its kills count; it hurts the player too, at
+--- OwnExplosionDamageModifier percent, like their own grenade). Options: radius (centimetres;
+--- default the grenade's), inner (full damage within it), damage (the most, at the centre),
+--- min_damage (at the edge), kind ("frag", the default, "raygun", "claymore", "monkey"),
+--- quiet (no explosion effect). Returns the explosion's projectile, or nil and why.
+function effects.explode(position, options)
+    options = options or {}
+    local spec = EXPLOSIONS[options.kind or "frag"] or options.kind
+    local blast, err = effects.projectile(spec, position, {hidden = true, freeze = true, lift = 0})
+    if not blast then
+        return nil, err
+    end
+    local explosion = require("boz.entities").component(blast.entity, "CExplosion")
+    if not explosion then
+        blast:remove()
+        return nil, tostring(spec) .. " does not explode"
+    end
+    local reflect = require("boz.reflect")
+    local fields = {m_Radius = options.radius, m_InnerRadius = options.inner, m_MaxDamage = options.damage,
+                    m_MinDamage = options.min_damage}
+    for field, value in pairs(fields) do
+        reflect.set(explosion, "CExplosion", field, value)
+    end
+    if options.quiet then
+        reflect.set(explosion, "CExplosion", "m_DoExplosionVFX", false)
+    end
+    blast.wanted_trigger = "explode"
+    if blast:ready() then
+        set_up(blast)
+    else
+        waiting[blast] = waiting[blast] or SETUP_FRAMES
+    end
+    return blast
 end
 
 --- The point the player's crosshair is on {x, y, z} (where a shot lands; up to 100 m away) and

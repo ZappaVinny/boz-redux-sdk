@@ -36,7 +36,8 @@ bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1], compress=True)
 
 
 def sources() -> list[Path]:
-    files = [*TEMPLATE.glob('*.py'), *ADDON.glob('*.py'), *BOZKIT.glob('*.py'), Path(__file__)]
+    files = [*TEMPLATE.glob('*.py'), *ADDON.glob('*.py'), *BOZKIT.glob('*.py'), Path(__file__),
+             *(ROOT / 'gamedef' / 'runtime').glob('*.toml')]
     return [path for path in files if path.name != '_build.py']
 
 
@@ -57,6 +58,10 @@ def _vendor(target: Path) -> None:
     for helper in NAVMESH_HELPERS:
         if helper.is_file():
             shutil.copy2(helper, target / '_vendor' / 'bozkit' / helper.name)
+    # The game definition's runtime names (bozkit.bundle: what classes play or spawn by name).
+    runtime = ROOT / 'gamedef' / 'runtime' / 'boz-1.0.11.toml'
+    if runtime.is_file():
+        shutil.copy2(runtime, target / '_vendor' / 'bozkit' / 'runtime_names.toml')
 
 
 def build(blender: str | Path, output: Path = OUTPUT) -> Path:

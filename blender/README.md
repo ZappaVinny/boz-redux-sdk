@@ -31,6 +31,9 @@ Two parts live here:
 - **Effects tab:** every effect and projectile of the game (each map's grenades, bolts, lures and
   the Gersch device's black hole); Use in this map under a name scripts spawn with boz.effects
   (carried in from other maps when the map builds). See [docs/effects.md](../docs/effects.md).
+- **Game tab:** the map's rules: name, loading screen, power at the start; each game's rounds
+  (with a graph of zombies and health), special rounds, zombie looks, points, power-ups and the
+  box; hook scripts for every event. See [docs/game.md](../docs/game.md).
 - **Tabs:** Game, World, Weapons, Characters, Assets, Effects, Animation, Scripts, Audio,
   UI / HUD, drawn in the top bar in that order. **Build & Run** (and its ⚙ settings) is at the
   right of the top bar on every tab. The menus are Project, Edit and Help.

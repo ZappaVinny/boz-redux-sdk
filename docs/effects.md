@@ -9,16 +9,17 @@ hits.
 
 **Game effects** lists everything the game can spawn. **Show** filters it:
 
-- **Effects:** particles and visual effects. The shared ones (impacts, ice, the Gersch device's
-  swirl, ...) are on every map; a map's own effects come from that map.
+- **Effects:** particles and visual effects (the shared ones, and each map's own).
 - **Projectiles:** each map's grenades, bolts, lures and devices, with what they do and which
   weapons fire them (Ascension's `bh_bomb projectile` is the Gersch device: "Black hole").
 
-Search by name, map or behaviour. Pick one, give it a **Name** (what scripts call it) and **Use in
-this map**. One from another map is carried into your map when it builds, with everything it
-needs (its models, materials, textures, and the sounds its behaviour plays).
+Every one works on any map: the build brings whatever a map uses with everything it needs (its
+models, materials, textures, and the sounds its code plays by name), from whichever map it comes
+from. Search by name, map or behaviour. Pick one, give it a **Name** (what scripts call it) and
+**Name it**. Scripts can also spawn any of them by the game's name or `"0x..."` hash without a
+name: the build finds those in the scripts.
 
-**This map's effects** lists the ones the map uses: rename or remove them, and **Copy script line**
+**Named effects** lists the names: rename or forget them, and **Copy script line**
 copies a line of Lua that spawns the selected one where the player aims. A projectile has two
 switches, and the build gives the map its own copy of it without what they leave out:
 
@@ -56,8 +57,8 @@ hole:remove()               -- or close it early (with its own sound)
 - What they return: `:alive()`, `:ready()`, `:position()`, `:move(position)`,
   `:trigger(name)`, `:hide()`, `:show()`, `:freeze()`, `:lifetime(seconds)`, `:remove()`.
 
-Names are the map's effects (the Effects tab), or the game's own names of the shared effects
-(`"gersch_Effect"`, `"impactRayGun"`, `"iceShatter"`, ...), or `"0x..."` hashes.
+Names are the Effects tab's names, or the game's own names (`"gersch_Effect"`, `"impactRayGun"`,
+`"iceShatter"`, ...), or `"0x..."` hashes; the build bundles every one a script names.
 
 ### What projectiles do
 
@@ -79,7 +80,7 @@ opens it at once and `lifetime` sets how long it stays open.
 
 ## Example: the idgun opens a black hole where it fires
 
-In the Effects tab, use Ascension's `bh_bomb projectile` as `gersch` and tick **Hide its model** and
+In the Effects tab, name Ascension's `bh_bomb projectile` `gersch` and tick **Hide its model** and
 **Stays where spawned**. In the Weapons tab, set the
 weapon's **Fire mode** to **Single shot** (a Thundergun-based weapon would otherwise still fire its
 own blast; the Thundergun's bullets do no damage, so the black hole does the killing), and give it
@@ -115,4 +116,5 @@ sqrt(r² + raise²)). The swirl (`gersch_Effect`, a billboard model) spawns at t
 position and rotation and draws from 22 to 205 units below it.
 `WeaponManager_UpdateAim` ray-casts the crosshair every frame into the weapon manager's +0xcc.
 
-The catalog and carrying are `bozkit/effects.py`; the map's effects are `source/effects.json`.
+The catalog is `bozkit/effects.py`, the bundling `bozkit/bundle.py` ([assets](asset-formats.md));
+the names are `source/effects.json`.

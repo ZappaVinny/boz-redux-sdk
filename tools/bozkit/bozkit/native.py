@@ -144,6 +144,63 @@ def _decode_etc1(data: bytes, width: int, height: int) -> bytes:
     return bytes(out)
 
 
+def encode_etc1(rgb, width: int, height: int) -> bytes:
+    """ETC1 blocks for RGB texels (bytes, width x height x 3; sides multiples of 4), the way
+    _decode_etc1 reads them: individual mode, left/right halves, each half's 4-bit colour and
+    the modifier table with the least error. Needs numpy."""
+    import numpy
+    pixels = numpy.frombuffer(bytes(rgb), dtype=numpy.uint8).reshape(height, width, 3).astype(numpy.int32)
+    # (block row, block col, y, x, c) -> blocks of 4 x 4, halves x < 2 and x >= 2
+    blocks = pixels.reshape(height // 4, 4, width // 4, 4, 3).transpose(0, 2, 1, 3, 4).reshape(-1, 4, 4, 3)
+    halves = numpy.stack([blocks[:, :, :2, :], blocks[:, :, 2:, :]], axis=1)   # (n, 2, y, x2, c)
+    modifiers = numpy.array(_ETC_MODIFIERS, dtype=numpy.int32)                 # (8, 4)
+    out = bytearray()
+    chunk = 2048
+    for start in range(0, len(halves), chunk):
+        part = halves[start:start + chunk]                                     # (k, 2, 4, 2, 3)
+        flat = part.reshape(part.shape[0], 2, 8, 3)
+        base = numpy.clip(numpy.rint(flat.mean(axis=2) / 17.0), 0, 15).astype(numpy.int32)  # (k, 2, 3)
+        colour = base * 17
+        candidates = numpy.clip(colour[:, :, None, None, :] + modifiers[None, None, :, :, None], 0, 255)
+        error = ((flat[:, :, :, None, None, :] - candidates[:, :, None, :, :]) ** 2).sum(axis=-1)
+        best_index = error.argmin(axis=-1)                                     # (k, 2, 8, tables)
+        best_error = error.min(axis=-1).sum(axis=2)                            # (k, 2, tables)
+        table = best_error.argmin(axis=-1)                                     # (k, 2)
+        k = part.shape[0]
+        chosen = numpy.take_along_axis(best_index, table[:, :, None, None], axis=3)[..., 0]  # (k, 2, 8)
+        for i in range(k):
+            r, g, b = base[i, 0]
+            r2, g2, b2 = base[i, 1]
+            high = (int(r) << 28) | (int(r2) << 24) | (int(g) << 20) | (int(g2) << 16) | \
+                (int(b) << 12) | (int(b2) << 8) | (int(table[i, 0]) << 5) | (int(table[i, 1]) << 2)
+            low = 0
+            for half in range(2):
+                for n in range(8):
+                    y, x = divmod(n, 2)
+                    x += half * 2
+                    index = int(chosen[i, half, n])
+                    bit = x * 4 + y
+                    low |= (index & 1) << bit
+                    low |= ((index >> 1) & 1) << (bit + 16)
+            out += ((high << 32) | low).to_bytes(8, 'big')
+    return bytes(out)
+
+
+def replace_cooked_etc1(body: bytes, image) -> bytes:
+    """A cooked ETC1 CIwTexture (one level of detail) with its picture replaced by *image* (PIL,
+    resized to the texture's size); the header and trailer stay byte for byte."""
+    mip_count, width, height = struct.unpack_from('<III', body, 35)
+    if body[23] != 0x27 or mip_count != 1:
+        raise ValueError('not a single-level cooked ETC1 texture')
+    size = struct.unpack_from('<I', body, 47)[0]
+    data_offset = 23 + 0x48
+    rgb = image.convert('RGB').resize((width, height)).tobytes()
+    blocks = encode_etc1(rgb, width, height)
+    if len(blocks) != size:
+        raise ValueError('ETC1 size mismatch')
+    return body[:data_offset] + blocks + body[data_offset + size:]
+
+
 def decode_texture_rgba(body: bytes) -> DecodedTexture:
     """Decode raw, DXT1, or ETC1 texture data without a third-party image library."""
     try:

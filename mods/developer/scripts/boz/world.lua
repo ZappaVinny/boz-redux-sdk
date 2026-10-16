@@ -74,6 +74,8 @@ local function start_state()
         return
     end
     start_weapon(data)
+    require("boz.game").start(data.game)
+    require("boz.hooks").start(data.hooks)
     local objects = require("boz.objects")
     local prefabs = require("boz.prefabs")
     events.on("frame", function()

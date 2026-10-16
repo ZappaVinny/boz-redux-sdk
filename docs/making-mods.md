@@ -133,17 +133,26 @@ What is in it (full list in [standard-library.md](standard-library.md)):
 
 | Module | For |
 | --- | --- |
-| `boz.player` | Perks, field of view |
+| `boz.player` | Health, god mode, position, stance, speeds, perks (give and take), field of view |
+| `boz.weapons` | The player's weapons: give, take, Pack-a-Punch, ammo, damage, fire rate, events |
+| `boz.zombies` | Zombies, dogs, monkeys and George: spawn, kill, teleport, speed, freeze/burn/explode, ... |
+| `boz.rounds` | The round: next round, go to a round, counts, spawning on or off, time |
+| `boz.score` | Points: add, spend, set, what actions are worth |
+| `boz.pickups` | Power-ups: spawn, give, timers |
+| `boz.pieces` | Mystery boxes, perk machines, doors, traps, Pack-a-Punch, ...: use (or use for free), move the box, costs |
+| `boz.effects` | The game's effects and projectiles anywhere (black holes, explosions, ...) |
+| `boz.hud`, `boz.camera`, `boz.screen`, `boz.audio` | HUD elements and messages; camera shakes; full-screen effects and fog; sounds and music |
+| `boz.map`, `boz.spawns`, `boz.stats` | The level (power, map events), spawn points, achievements and stats |
 | `boz.input` | Watch, block or send the game's actions (shoot, aim, reload, ...) |
 | `boz.fly` | Noclip |
-| `boz.rounds` | Next round, spawn or kill zombies, power, time |
-| `boz.console` | Console variables and commands |
+| `boz.console`, `boz.cvars` | Console variables and commands |
+| `boz.reflect`, `boz.entities`, `boz.game_events` | Anything else: every reflected field, every entity and component, every game event |
 | `boz.pause_settings` | Sliders and checkboxes in the pause menu's Settings page |
 | `boz.text` | Your own text for the game's menus |
 | `boz.iwui`, `boz.frontend` | Building blocks for menu changes |
 
-Functions that only make sense in a match (perks, field of view, fly) return `nil` or `false`
-outside one, so you can call them any time.
+Functions that only make sense in a match (perks, zombies, field of view, fly) return `nil` or
+`false` outside one, so you can call them any time.
 
 ## Recipes
 

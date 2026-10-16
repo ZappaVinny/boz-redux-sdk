@@ -1,17 +1,178 @@
 -- boz.rounds: rounds and the match (Zombies mode).
 --
---   rounds.start_next()   rounds.spawn_zombie()   rounds.kill_all()
+--   rounds.current()            the round number          rounds.zombies_left()
+--   rounds.start_next()         rounds.go_to(10)          rounds.kill_all()
+--   rounds.wave()               the round's settings (zombies, health, speeds, ...)
+--   rounds.on_start(fn)         rounds.on_end(fn)
 --
--- How it works: these run the game's developer commands (StartWave, SpawnZombie, ...) through
--- boz.console.
+-- How it works: CWaveManager (singleton) runs the rounds: +0x50 the round's CWave, +0x70 zombies
+-- alive, +0x78 the round number, +0x7c spawned and +0x84 killed this round (the round ends when
+-- killed reaches the wave's zombie count: vtable +0x50 GetZombieCount(round, powerOn)), +0x88 the
+-- next round's wave, timers +0x8c (next spawn), +0x90 (next round), +0x94 (spawning starts),
+-- +0xb8 power on. A round starts with SUBJECT_NEW_WAVE (CWaveManager::StartWave: the next wave,
+-- round + 1) and ends with SUBJECT_WAVE_ENDED. Developer commands (StartWave, SpawnZombie,
+-- KillAllZombies, SwitchPowerOn, TimeFactor) run through boz.console. The Game tab sets a map's
+-- rounds (docs/game.md).
 
 local console = require("boz.console")
 
 local rounds = {}
 
+local FALLBACK = {["CWaveManager::s_instance"] = 0x460834, ["CWaveManager::QueueWave"] = 0x215318 + 1}
+local WAVE, ALIVE, ROUND, SPAWNED, KILLED, NEXT_WAVE = 0x50, 0x70, 0x78, 0x7c, 0x84, 0x88
+local SPAWN_TIMER, NEXT_ROUND_TIMER, START_TIMER, POWER = 0x8c, 0x90, 0x94, 0xb8
+local SPECIAL_ROUND, SPECIAL_COUNT = 0x54, 0x58
+local GET_ZOMBIE_COUNT, GET_CLASS_NAME, IS_SPECIAL = 0x50, 0x4c, 0x88
+
+local function sym(name)
+    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
+end
+
+--- The round manager (CWaveManager), or nil outside a match.
+function rounds.manager()
+    local address = sym("CWaveManager::s_instance")
+    local manager = address and game.read("ptr", address) or 0
+    return manager ~= 0 and manager or nil
+end
+
+local function read(offset, kind)
+    local manager = rounds.manager()
+    return manager and game.read(kind or "u32", manager + offset) or nil
+end
+
+--- The round number (0 before the first round), or nil outside a match.
+function rounds.current()
+    return read(ROUND)
+end
+
+--- Zombies alive now.
+function rounds.alive()
+    return read(ALIVE)
+end
+
+--- Zombies spawned and killed this round.
+function rounds.spawned() return read(SPAWNED) end
+function rounds.killed() return read(KILLED) end
+
+--- True once the power is on.
+function rounds.powered()
+    local value = read(POWER, "u8")
+    return value ~= nil and value ~= 0
+end
+
+--- The round's wave (a CWave resource: boz.reflect fields of its class), or nil.
+function rounds.wave_pointer()
+    local wave = read(WAVE)
+    return wave ~= nil and wave ~= 0 and wave or nil
+end
+
+local function virtual(object, slot, ...)
+    local vtable = game.read("ptr", object)
+    return (game.call(game.read("ptr", vtable + slot), object, ...) or 0) & 0xffffffff
+end
+
+--- The round's wave class ("CWave", "CWaveRepeatable", "CWaveSpeciality", "CWaveMonkey").
+function rounds.wave_class()
+    local wave = rounds.wave_pointer()
+    if not wave then
+        return nil
+    end
+    local name = virtual(wave, GET_CLASS_NAME)
+    return name ~= 0 and game.read("string", name, 32) or nil
+end
+
+--- True during a special round (dogs, monkeys).
+function rounds.special()
+    local wave = rounds.wave_pointer()
+    return wave ~= nil and virtual(wave, IS_SPECIAL) ~= 0
+end
+
+--- How many zombies the round has in all (as the game counts it, with the power's extra ones).
+function rounds.total()
+    local wave = rounds.wave_pointer()
+    if not wave then
+        return nil
+    end
+    return virtual(wave, GET_ZOMBIE_COUNT, rounds.current() or 0, rounds.powered() and 1 or 0)
+end
+
+--- Zombies still to kill this round.
+function rounds.zombies_left()
+    local total, killed = rounds.total(), rounds.killed()
+    return total and killed and math.max(0, total - killed) or nil
+end
+
+--- The round's settings: every field of its wave class by name (boz.reflect), plus "class".
+function rounds.wave()
+    local wave, class_name = rounds.wave_pointer(), rounds.wave_class()
+    if not wave or not class_name then
+        return nil
+    end
+    local values = require("boz.reflect").dump(wave, class_name)
+    values.class = class_name
+    return values
+end
+
+--- Changes a setting of the running round's wave (e.g. "m_ZombieHealth"); it lasts until the
+--- level loads again. Returns true, or false and why.
+function rounds.set_wave(field, value)
+    local wave, class_name = rounds.wave_pointer(), rounds.wave_class()
+    if not wave then
+        return false, "no round running"
+    end
+    return require("boz.reflect").set(wave, class_name, field, value)
+end
+
+--- Milliseconds until the next spawn, until the next round starts, and until spawning starts.
+function rounds.timers()
+    return read(SPAWN_TIMER, "i32"), read(NEXT_ROUND_TIMER, "i32"), read(START_TIMER, "i32")
+end
+
+--- The round the last special round ran in, and how many have run.
+function rounds.special_history()
+    return read(SPECIAL_ROUND), read(SPECIAL_COUNT)
+end
+
 --- Starts the next round now.
 function rounds.start_next()
     return console.exec("StartWave")
+end
+
+--- Makes the next round started be round `number` (its wave stays the chain's next one; the
+--- repeating round's growth and the game's health use the number).
+function rounds.go_to(number)
+    local manager = rounds.manager()
+    if not manager then
+        return false
+    end
+    game.write("u32", manager + ROUND, math.max(0, number - 1))
+    return true
+end
+
+--- Queues a wave by name or hash (one of the level's CWave resources: "wave1", "boz_normal_3",
+--- ...) as the next round.
+function rounds.queue(wave)
+    local manager = rounds.manager()
+    if not manager then
+        return false
+    end
+    local id = type(wave) == "number" and wave or require("boz.hash").name(wave)
+    game.call(sym("CWaveManager::QueueWave"), manager, id)
+    return true
+end
+
+--- Calls fn(round) when a round starts. Returns a handle (boz.game_events.off).
+function rounds.on_start(fn)
+    return require("boz.game_events").on("SUBJECT_NEW_WAVE", function()
+        fn((rounds.current() or 0) + 1)
+    end)
+end
+
+--- Calls fn(round) when a round's last zombie dies.
+function rounds.on_end(fn)
+    return require("boz.game_events").on("SUBJECT_WAVE_ENDED", function()
+        fn(rounds.current() or 0)
+    end)
 end
 
 --- Spawns one zombie.
@@ -37,6 +198,17 @@ end
 --- Game speed multiplier (1 = normal).
 function rounds.set_time_scale(factor)
     return console.exec("TimeFactor " .. tostring(factor))
+end
+
+--- Stops (false) or resumes (true) zombie spawning: no new zombie appears, the round waits
+--- (DisableZombieSpawning; CWaveManager::CreateZombie checks it).
+function rounds.set_spawning(on)
+    return console.exec("DisableZombieSpawning " .. (on and "false" or "true"))
+end
+
+--- Makes zombies and the other AI unhurtable (true) or normal again (AIGodmode).
+function rounds.set_zombies_invulnerable(on)
+    return console.exec("AIGodmode " .. (on and "true" or "false"))
 end
 
 return rounds

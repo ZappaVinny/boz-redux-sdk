@@ -1404,9 +1404,7 @@ class _Level:
         self.zombie_spawns: list[int] = []
         self.used: set[int] = set()       # entity names already placed
         self.copies = 0
-        self._by_hash = None
         self._loaded = None
-        self._material_ids = None
         self.inherited = False
         self.moved: list[group.Resource] = []   # an inherited level's own entities, moved
         self.wall_buys: list = []                  # (placement, spec) of placed wall buys
@@ -1429,165 +1427,38 @@ class _Level:
         if cls == levels.MODEL:
             self.models[key] = body
 
-    def copy_model(self, path: str, value: int) -> None:
+    def copy_model(self, path: str, value: int) -> int:
+        """Bring a game model (and what it uses) into the map; returns its name there (its own,
+        unless the map already had a different model of that name)."""
         self.repack([value], path)
+        name = self._bundle.name_of(path, value) if path else value
+        if name not in self.models:
+            body = self._bundle.present().get((levels.MODEL, name))
+            if body is None and path:
+                entry = next((e for e in self._bundle.registry.entries(value)
+                              if e.cls == levels.MODEL and e.path == path), None)
+                body = entry.resource.body if entry else None
+            if body is not None:
+                self.models[name] = body
+        return name
 
     # Repacking: whatever a placed entity or model uses comes with it from its own map.
 
-    NOT_COPIED = {levels.ENTITY_SPEC, levels.LEVEL, levels.AREA, levels.NAVMESH,
-                  iw_hash('CIsPortal'), iw_hash('CIsOccluder'), iw_hash('CWave'),
-                  iw_hash('CZombieConfiguration')}
-
-    def _index(self) -> dict[int, list[tuple[int, str, group.Resource, group.ResourceType]]]:
-        """Every resource of the game's Zombies level groups and the ingame groups (pickups,
-        props, ...), by name hash. Weapon groups are left out: their models share names such as
-        Base and LOD1. Levels and ingame itself come first, so their resources win a clash."""
-        if self._by_hash is None:
-            self._by_hash = {}
-            names = self.pack.names() if hasattr(self.pack, 'names') else []
-            groups = [path for path in names if path.endswith('.group.bin')]
-            paths = [path for path in groups if path.startswith('levels/') or path == INGAME]
-            paths += sorted(path for path in groups if path.startswith('ingame/')
-                            and path != INGAME and not path.startswith('ingame/weapons/'))
-            for path in paths:
-                for resource_type in self.game.group(path).types():
-                    for resource in resource_type.resources:
-                        self._by_hash.setdefault(resource.in_group_hash, []).append(
-                            (resource_type.class_hash, path, resource, resource_type))
-        return self._by_hash
-
-    def _own_groups(self, source: str, index) -> dict:
-        """Resources of a source group the index leaves out (weapon groups), with the weapon
-        group's textures and materials (weapon_projectiles_<level>): what a dropped weapon or
-        projectile model uses comes from its own groups."""
-        if not source or not source.startswith('ingame/weapons/'):
-            return {}
-        paths = [source]
-        folder, _, file_name = source.rpartition('/')
-        for prefix, other in (('weapons_', 'weapon_projectiles_'), ('weapon_projectiles_', 'weapons_')):
-            if file_name.startswith(prefix):
-                paths.append(f'{folder}/{other}{file_name[len(prefix):]}')
-        own: dict = {}
-        for path in paths:
-            try:
-                parsed = self.game.group(path)
-            except (WorldError, KeyError):
-                continue
-            for resource_type in parsed.types():
-                for resource in resource_type.resources:
-                    own.setdefault(resource.in_group_hash, []).append(
-                        (resource_type.class_hash, path, resource, resource_type))
-        return own
-
-    def _present(self, cls: int, value: int) -> bool:
-        if self._loaded is None:
-            self._loaded = set()
-            for path in self.loaded - {self.base_statics}:
-                try:
-                    for resource_type in self.game.group(path).types():
-                        self._loaded.update((resource_type.class_hash, r.in_group_hash)
-                                            for r in resource_type.resources)
-                except WorldError:
-                    pass
-        if (cls, value) in self._loaded:
-            return True
-        resource_type = self.by_class.get(cls)
-        return resource_type is not None and any(r.in_group_hash == value
-                                                 for r in resource_type.resources)
-
-    # Resources load in group order and some resolve others by name while loading (a skin its
-    # skeleton and model), so types keep the shipped order.
-    LOAD_ORDER = [levels.TEXTURE, levels.MATERIAL, levels.MODEL, iw_hash('CIwAnimSkel'),
-                  iw_hash('CIwAnimSkin'), iw_hash('CIwAnim'), iw_hash('CIsAnimStateMachine')]
-
-    def _type(self, cls: int, like: group.ResourceType) -> group.ResourceType:
-        resource_type = self.by_class.get(cls)
-        if resource_type is None:
-            resource_type = self.by_class[cls] = group.ResourceType(cls, like.names_omitted,
-                                                                    like.has_size)
-            types = self.statics.sections[[x.hash for x in self.statics.sections]
-                                          .index(group.RESOURCES)].types
-            if cls in self.LOAD_ORDER:
-                rank = self.LOAD_ORDER.index(cls)
-                earlier = [i for i, t in enumerate(types) if t.class_hash in self.LOAD_ORDER
-                           and self.LOAD_ORDER.index(t.class_hash) < rank]
-                later = [i for i, t in enumerate(types) if t.class_hash in self.LOAD_ORDER
-                         and self.LOAD_ORDER.index(t.class_hash) > rank]
-                index = earlier[-1] + 1 if earlier else (later[0] if later else len(types))
-                types.insert(index, resource_type)
-            else:
-                types.insert(types.index(self.by_class[levels.ENTITY_SPEC]), resource_type)
-        return resource_type
-
     def repack(self, hashes, source: str) -> int:
         """Copy the resources *hashes* name (and what they use, transitively) from the game's
-        groups into the level, unless the level already has them. Returns how many."""
-        from . import blender_scene as scene
-        from . import native, reflect as reflection, resources
-
-        index = self._index()
-        own = self._own_groups(source, index)
-        queue, seen, copied = list(hashes), set(), 0
-        while queue:
-            value = queue.pop()
-            if value in seen or not value:
-                continue
-            seen.add(value)
-            candidates = [c for c in own.get(value, []) + index.get(value, [])
-                          if c[0] not in self.NOT_COPIED]
-            if not candidates:
-                continue
-            same_map = library_map(source)
-            candidates.sort(key=lambda c: (c[1] != source, library_map(c[1]) != same_map,
-                                           c[1] != INGAME))
-            # One name can hold several resources of different classes (a door's texture,
-            # model, skeleton, skin and state machine): each class comes along.
-            chosen = {}
-            for candidate in candidates:
-                chosen.setdefault(candidate[0], candidate)
-            for cls, _path, resource, like in chosen.values():
-                if self._present(cls, value):
-                    continue
-                copied += self._copy_one(cls, value, resource, like, queue, index)
-        return copied
-
-    def _copy_one(self, cls, value, resource, like, queue, index) -> int:
-        """Copy one resource into the level and queue the names it uses."""
-        from . import blender_scene as scene
-        from . import native, reflect as reflection, resources
-
-        if True:
-            body = resource.body
-            resource_type = self._type(cls, like)
-            resource_type.resources.append(group.Resource(
-                None if resource_type.names_omitted else value, value, body))
+        groups into the map, unless it already has them (bozkit.bundle: any map's, weapon groups
+        too; clashing names get names of their own). Returns how many."""
+        from . import bundle
+        if getattr(self, '_bundle', None) is None:
+            groups = dict(getattr(self, 'groups', None) or {})
+            groups[f'{self.name}_statics.group.bin'] = self.statics
+            self._bundle = bundle.Bundle(bundle.Registry.of(self.pack), groups, self.name)
+        copied = self._bundle.add(hashes, prefer=source)
+        for cls, name, _path, target in self._bundle.copied[-copied:] if copied else []:
             if cls == levels.MODEL:
-                self.models[value] = body
-                if self._material_ids is None:
-                    self._material_ids = {h for h, items in index.items()
-                                          if any(c[0] == levels.MATERIAL for c in items)}
-                queue.extend(scene._model_materials(body, self._material_ids))
-            elif cls == levels.MATERIAL:
-                try:
-                    queue.extend(native.decode_material(body).textures)
-                except ValueError:
-                    pass
-            elif cls == levels.TEXTURE:
-                return 1
-            elif reflection.is_blob(body):
-                blob = resources.decode_reflected(body)
-                queue.extend(_blob_hashes(blob) if blob else [])
-            else:
-                # Binary resources (state machines, skins, skeletons, animations, sounds): any word
-                # that names a game resource. Small ones (state machines) store names unaligned.
-                if len(body) <= 0x10000:
-                    queue.extend(word for word in (struct.unpack_from('<I', body, offset)[0]
-                                                   for offset in range(len(body) - 3))
-                                 if word in index)
-                else:
-                    queue.extend(word for (word,) in
-                                 struct.iter_unpack('<I', body[:len(body) // 4 * 4]) if word in index)
-            return 1
+                self.models[name] = self._bundle.present()[(cls, name)]
+        self._loaded = None
+        return copied
 
     def _mark(self, points) -> None:
         if points:
@@ -1823,7 +1694,7 @@ class _Level:
             self._draw_model(spec, iw_hash(f'{self.name}_prop_{entity.prop}'))
         elif entity.model:
             path, model_hash = Instance((0.0, 0.0, 0.0), model=entity.model).model_ref()
-            self.copy_model(path, model_hash)
+            model_hash = self.copy_model(path, model_hash)
             self._draw_model(spec, model_hash)
         for key, value in entity.fields.items():
             if key == WEAPON_FIELD:
@@ -2201,7 +2072,7 @@ class _Level:
                                       padding=instance.padding)
             else:
                 path, model_hash = instance.model_ref()
-                self.copy_model(path, model_hash)
+                model_hash = self.copy_model(path, model_hash)
                 self.place(script or f'{name}_model_{number}', model_hash, instance.position,
                            rotation, scale, named=bool(script))
                 decoded = native.decode_model(self.models[model_hash])
@@ -2383,6 +2254,7 @@ def _compile_layout(pack, name: str, world: Layout,
     statics = levels._read(pack, f'levels/{base}/{base}_statics')
     levels.rename_level_resource(statics, base, name)
     level = _Level(pack, name, base, statics)
+    level.groups = files.groups
     _apply_weapons(pack, files, name, base, level, world.weapons)
     by_class = level.by_class
     for resource in by_class[levels.ENTITY_SPEC].resources:  # cameras: intro and main
@@ -2460,6 +2332,7 @@ def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFil
     files = levels.clone_level(pack, name, base, fixed)
     statics = files.groups[f'{name}_statics.group.bin']
     level = _Level(pack, name, base, statics)
+    level.groups = files.groups
     _apply_weapons(pack, files, name, base, level, world.weapons)
     level.inherited = True
     removed = {int(value, 16) if value.startswith('0x') else iw_hash(value) for value in world.removed}

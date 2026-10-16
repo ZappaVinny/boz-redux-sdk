@@ -1,0 +1,55 @@
+# What the arguments of game events mean (boz.game_events handlers get subject, sender, a, b).
+# Kept by hand from reverse engineering; tools/events_doc.py merges it into docs/game-events.md.
+
+[SUBJECT_NEW_WAVE]
+note = "A round starts (CWaveManager::StartWave). a: StartWaveInfo* (+4 wave name hash, +8 health and +0xc zombie count for a special round, +0x10 next wave, +0x14 round number when set)."
+[SUBJECT_WAVE_ENDED]
+note = "The round's last zombie died (killed reached the wave's zombie count)."
+[SUBJECT_ZOMBIE_DEATH]
+note = "A zombie died (from the level manager). b: the zombie's name hash (CIsEntityDB::FindEntity finds it while it lingers). Several subjects pass it on: once per subject."
+[SUBJECT_DIED]
+note = "A CHealth fell below 1 (CHealth::CheckDeath, host). b: the last attacker (m_LastDamagerEnt)."
+[SUBJECT_HEALTH_MODIFY]
+note = "CHealth::SetHealth: a: the new health (whole number), b: the source."
+[SUBJECT_HEALTH_DECREASE]
+note = "CHealth::Damage sends it to the damaged health component; its OnEvent applies the damage."
+[SUBJECT_ON_PICKUP]
+note = "A power-up was collected. a: struct* (+4 player id, +8 type 0-8: double_points, insta_kill, max_ammo, nuke, carpenter, firesale, deathmachine, perkbottle, lightningbolt, +0xc sound sequence)."
+[SUBJECT_SPAWN_PICKUP]
+note = "Spawns a power-up entity. a: struct* (+4 spec hash, +8 position, +0x14 rotation, +0x24 name hash, +0x28 flags)."
+[SUBJECT_NUKE_NOW]
+note = "The nuke goes off. a: SpawnInfo* for nuke_effect_kill (spec, name, position, rotation)."
+[SUBJECT_ADD_SCORE]
+note = "Points earned (CScoreHandler, CPlayerController for revives): a: points, b: the player's name hash. The pickup manager counts them toward the next drop."
+[SUBJECT_CHARGE_POINTS]
+note = "A purchase: points taken from the player (skipped with UnlimitedScore)."
+[SUBJECT_ON_POWER_SWITCH_ACTIVATE]
+note = "The power was turned on."
+[SUBJECT_SPAWN_GERSCH_EFFECT]
+note = "A Gersch device opens its black hole (CProjectileEntity::OnEvent: gersch_Effect, gersch_opens, gersch_loop; lifetime 8000 ms)."
+[SUBJECT_TERMINATE]
+note = "A projectile ends (a black hole closes: gersch_shuts)."
+[SUBJECT_REVIVE_PLAYER]
+note = "a: the reviving player's entity id, b: nonzero while reviving (CPlayerController keeps them)."
+[SUBJECT_PLAYER_REVIVING]
+note = "a: the downed player's name hash, b: the reviver's entity id; sets the revive time (PlayerReviveTime, PlayerQuickReviveTime with Quick Revive)."
+[SUBJECT_ENEMY_ATTACK_DAMAGE]
+note = "A zombie hit the player. a: damage info* (first word: amount)."
+[SUBJECT_EXPLOSION_HIT]
+note = "An explosion hit the player. a: info* (+4 position for the tinnitus sound)."
+[SUBJECT_WEAPON_HIT]
+note = "A bullet or knife hit an entity (Weapon_FireBullets, CWeaponManager::MeleeAttack: to the entity's CIsBroadcaster) with the body part."
+[SUBJECT_POI_TRIGGER]
+note = "A point of interest came into reach (the use prompt: CIngameStatePlaying::UpdatePoiPrompt)."
+[SUBJECT_TRANSFORM_UPDATED]
+note = "Engine: a transform moved (every frame for moving things; not in SubjectId_Register)."
+[SUBJECT_SPAWN_ZOMBIE]
+note = "CWaveManager::SpawnZombies asks to spawn one: a: ZombieSpawnInfo* (spec, configuration, position, speed, spawn point)."
+[SUBJECT_CARPENTER_ACTIVATED]
+note = "The carpenter power-up: every barricade is rebuilt."
+[SUBJECT_SAVE]
+note = "Every system writes its state into the save (CSaveManager)."
+[SUBJECT_LOAD]
+note = "Every system reads its state back from the save."
+[SUBJECT_RESTART_LEVEL]
+note = "The level restarts: managers reset (rounds to 0, power off)."
