@@ -1,0 +1,70 @@
+name: Release
+
+# A v* tag publishes the SDK: source with the gamedef, the prebuilt editor and the navmesh
+# helpers for Linux and Windows (tools/package_release.sh).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BLENDER_VERSION: 5.2.1
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++-mingw-w64-x86-64 zip lua5.4 \
+            libxi6 libxxf86vm1 libxfixes3 libxrender1 libxkbcommon0 libsm6 libgl1 libegl1
+      - name: Test
+        run: |
+          python3 -m pip install -e .
+          python3 -m unittest discover tools/bozkit/tests
+          lua5.4 lib/tests/run.lua
+      - name: Build the navmesh helpers
+        run: |
+          cmake -S tools/navmesh -B tools/navmesh/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools/navmesh/build -j
+          cmake -S tools/navmesh -B tools/navmesh/build-windows -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+            -DCMAKE_EXE_LINKER_FLAGS=-static
+          cmake --build tools/navmesh/build-windows -j
+          cp tools/navmesh/build-windows/boz-navmesh.exe tools/navmesh/build/
+      - uses: actions/cache@v4
+        with:
+          path: .blender-ci
+          key: blender-${{ env.BLENDER_VERSION }}
+      - name: Get Blender
+        run: |
+          if [ ! -x .blender-ci/blender ]; then
+            mkdir -p .blender-ci
+            curl -fL "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+              | tar -xJ --strip-components=1 -C .blender-ci
+          fi
+      - name: Build the editor
+        run: python3 tools/build_suite.py --blender .blender-ci/blender
+      - name: Package
+        run: tools/package_release.sh "${GITHUB_REF_NAME}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BOZ-Redux-SDK
+          path: build/release/*.zip
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/release/*.zip \
+            --repo "$GITHUB_REPOSITORY" --title "BOZ Redux SDK $GITHUB_REF_NAME" --generate-notes
