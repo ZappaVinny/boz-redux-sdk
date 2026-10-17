@@ -51,8 +51,6 @@ class EffectError(ValueError):
     pass
 
 
-# --- What the game has ------------------------------------------------------------------------
-
 @dataclass
 class Entry:
     kind: str           # "effect" or "projectile"
@@ -162,8 +160,6 @@ class _LevelReader:
         self.read = read
 
 
-# --- The project's effects --------------------------------------------------------------------
-
 @dataclass
 class Used:
     name: str           # what scripts call it
@@ -227,8 +223,6 @@ def runtime(used: list[Used]) -> list[dict]:
     return [{'name': u.name, 'hash': u.spawn_hash, 'kind': u.kind, 'behaviour': u.behaviour,
              'triggers': list(TRIGGERS.get(u.behaviour, ()))} for u in used]
 
-
-# --- Building ---------------------------------------------------------------------------------
 
 def _add_like(target, source_type, resource) -> None:
     """Add *resource* to *target* in a resource type made like *source_type* (the same class,

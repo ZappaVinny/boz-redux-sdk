@@ -157,11 +157,8 @@ def suggest_id(name: str) -> str:
     return text if text[0].isalpha() else 'mod_' + text
 
 
-# Project operations
-
-
 def _manifest_data(project: sdk_project.Project) -> dict:
-    data = json.loads(json.dumps(project.data))  # deep copy
+    data = json.loads(json.dumps(project.data))
     data['schema'] = sdk_project.PROJECT_SCHEMA
     data.setdefault('project', {})['kind'] = project.kind
     return data
@@ -220,9 +217,6 @@ def external_editor_command(folder: Path) -> list[str] | None:
         if found:
             return [found, str(folder)]
     return None
-
-
-# The client
 
 
 @dataclass
@@ -511,9 +505,6 @@ def run_in_game(project: sdk_project.Project, root: str | Path,
         message = f'built {project.map_name}; the game starts it after the main menu'
     start_detached(command, root, root / 'boz-log.txt')
     return message
-
-
-# The editor
 
 
 def find_blender(settings: Settings) -> Path | None:

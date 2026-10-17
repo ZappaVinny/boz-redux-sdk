@@ -50,8 +50,6 @@ class SoundError(ValueError):
     pass
 
 
-# --- Formats ----------------------------------------------------------------------------------
-
 @dataclass
 class SoundData:
     rate: int
@@ -138,7 +136,7 @@ def variation_specs(body: bytes, specs) -> list[int]:
     return list(dict.fromkeys(found + [w for w in shifted if w in specs]))
 
 
-# --- The codec (Microsoft IMA ADPCM, mono) -----------------------------------------------------
+# The codec (Microsoft IMA ADPCM, mono)
 
 STEPS = (7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55,
          60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337,
@@ -228,8 +226,6 @@ def game_quality(values: list[int], rate: int) -> list[int]:
     """*values* as the game will play them: through its ADPCM and back."""
     return samples(encode_adpcm(values, rate))
 
-
-# --- WAV and processing ------------------------------------------------------------------------
 
 def read_wav(path: Path) -> tuple[list[list[float]], int]:
     """(channels of samples in -1..1, rate) of a PCM WAV file."""
@@ -357,7 +353,6 @@ def process(channels: list[list[float]], rate: int, settings: Settings) -> list[
     return out
 
 
-# --- Project sounds ----------------------------------------------------------------------------
 # source/sounds/<name>.json   {"format": 1, "name", "original", "settings": Settings}
 # source/sounds/<name>/source.wav   the imported recording (as Blender read it)
 # source/sounds/<name>/game.wav     the processed sound (mono, 16-bit, the game's rate)
@@ -488,8 +483,6 @@ def save_slots(source: Path, slots: dict) -> None:
     path.write_text(json.dumps(dict(sorted(slots.items())), indent=2) + '\n', encoding='utf-8',
                     newline='\n')
 
-
-# --- Slots -------------------------------------------------------------------------------------
 
 @dataclass
 class Slot:
@@ -634,8 +627,6 @@ def original_samples(read, key: str) -> tuple[list[int], int]:
     decoded = decode_data(body)
     return samples(decoded), decoded.rate
 
-
-# --- Building ----------------------------------------------------------------------------------
 
 DATA_ADPCM = iw_hash('CIwSoundDataADPCM')
 SPEC_SOUND = iw_hash('CIwSoundSpecSound')

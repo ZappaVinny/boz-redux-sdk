@@ -575,12 +575,12 @@ def sound_checks(label):
           f"{label}: an imported recording waits to be saved ({item and item.name})")
     settings = scene.boz_sound_settings
     settings.rate, settings.fade_out = "11025", 0.1
-    values, rate = snd.preview(tab.source_dir(), item.name, tab._from_settings(settings))
+    values, rate = snd.preview(suite.link.source_dir(), item.name, tab._from_settings(settings))
     check(rate == 11025 and abs(len(values) - 5512) < 4, f"{label}: the preview is the game's ({len(values)})")
     check(bpy.ops.boz.sound_preview("EXEC_DEFAULT") == {"FINISHED"}, f"{label}: Preview runs")
     bpy.ops.boz.sound_save("EXEC_DEFAULT")
     item = tab.selected_sound(scene)
-    check(item.saved and snd.is_saved(tab.source_dir(), item.name), f"{label}: Save makes the game version")
+    check(item.saved and snd.is_saved(suite.link.source_dir(), item.name), f"{label}: Save makes the game version")
     settings.trim_start = 0.1
     tab._wave_of_sound(item.name)
     image = bpy.data.images.get(tab.WAVE_IMAGE)
@@ -607,7 +607,7 @@ def sound_checks(label):
     scene.boz_sound_category = "all"
     target = next(s for s in slots if s.category == "shared")
     bpy.ops.boz.sound_slot_replace("EXEC_DEFAULT", key=target.key, sound=item.name)
-    check(snd.load_slots(tab.source_dir()) == {target.key: item.name}, f"{label}: Replace with fills the slot")
+    check(snd.load_slots(suite.link.source_dir()) == {target.key: item.name}, f"{label}: Replace with fills the slot")
     shown = next(i for i in scene.boz_sound_slots if i.key == target.key)
     check(shown.replaced == item.name, f"{label}: the slot shows its replacement")
     # A weapon's own reload sound (its own sequence; the weapon it is made from keeps its sounds).
@@ -643,15 +643,15 @@ def effect_checks(label):
     scene.boz_effect_index = gersch
     scene.boz_effect_new_name = "gersch"
     bpy.ops.boz.effect_use("EXEC_DEFAULT")
-    stored = fx.load(tab.source_dir())
+    stored = fx.load(suite.link.source_dir())
     check([(u.name, u.level, u.behaviour) for u in stored] == [("gersch", "ascension", 6)],
           f"{label}: Name it stores the black hole ({stored})")
     scene.boz_effect_rename = "black_hole"
-    check([u.name for u in fx.load(tab.source_dir())] == ["black_hole"], f"{label}: renaming it")
+    check([u.name for u in fx.load(suite.link.source_dir())] == ["black_hole"], f"{label}: renaming it")
     scene.boz_effect_rename = "gersch"
     scene.boz_effect_hidden = True
     scene.boz_effect_anchored = True
-    stored = fx.load(tab.source_dir())
+    stored = fx.load(suite.link.source_dir())
     check(stored[0].hidden and stored[0].anchored, f"{label}: Hide its model and Stays where spawned are stored")
     item = tab.selected(scene.boz_effects_used, scene.boz_effect_used_index)
     check(tab.snippet(item) == 'effects.projectile("gersch", effects.aim(), {trigger = "open", lifetime = 6, raise = 200})',
@@ -675,29 +675,29 @@ def game_checks(label):
         return False
     bpy.ops.boz.game_refresh("EXEC_DEFAULT")
     check(len(scene.boz_game_rounds) >= 2, f"{label}: the base level's rounds show ({len(scene.boz_game_rounds)})")
-    check(not gm.load(tab.source_dir()).get("rounds"), f"{label}: nothing stored before a change")
+    check(not gm.load(suite.link.source_dir()).get("rounds"), f"{label}: nothing stored before a change")
     scene.boz_game_round_index = 0
     scene.boz_game_round.m_ZombieCount = 3
-    stored = gm.load(tab.source_dir())["rounds"]
+    stored = gm.load(suite.link.source_dir())["rounds"]
     check(stored["chains"]["normal"][0]["m_ZombieCount"] == 3, f"{label}: a changed round is stored")
     bpy.ops.boz.game_rounds_copy("EXEC_DEFAULT")
-    stored = gm.load(tab.source_dir())["rounds"]
+    stored = gm.load(suite.link.source_dir())["rounds"]
     check(all(stored["chains"][k][0]["m_ZombieCount"] == 3 for k in gm.CHAIN_KEYS),
           f"{label}: Use these rounds in every game")
     before = len(stored["chains"]["normal"])
     bpy.ops.boz.game_round_add("EXEC_DEFAULT")
-    check(len(gm.load(tab.source_dir())["rounds"]["chains"]["normal"]) == before + 1, f"{label}: a round is added")
+    check(len(gm.load(suite.link.source_dir())["rounds"]["chains"]["normal"]) == before + 1, f"{label}: a round is added")
     bpy.ops.boz.game_round_remove("EXEC_DEFAULT")
-    check(len(gm.load(tab.source_dir())["rounds"]["chains"]["normal"]) == before, f"{label}: and removed")
-    specials = len(gm.load(tab.source_dir())["rounds"].get("specials") or [])
+    check(len(gm.load(suite.link.source_dir())["rounds"]["chains"]["normal"]) == before, f"{label}: and removed")
+    specials = len(gm.load(suite.link.source_dir())["rounds"].get("specials") or [])
     bpy.ops.boz.game_special_add("EXEC_DEFAULT")
-    check(len(gm.load(tab.source_dir())["rounds"]["specials"]) == specials + 1, f"{label}: a special round is added")
+    check(len(gm.load(suite.link.source_dir())["rounds"]["specials"]) == specials + 1, f"{label}: a special round is added")
     scene.boz_game_repeat_health = "grow"
-    check(gm.load(tab.source_dir())["rounds"]["repeat_health"] == "grow", f"{label}: repeating health")
+    check(gm.load(suite.link.source_dir())["rounds"]["repeat_health"] == "grow", f"{label}: repeating health")
     check(len(scene.boz_game_looks) >= 1, f"{label}: the zombie looks show")
     scene.boz_game_looks[0].used = False
     if len(scene.boz_game_looks) > 1:
-        check(scene.boz_game_looks[0].hash & 0xffffffff not in gm.load(tab.source_dir())["zombies"]["used"],
+        check(scene.boz_game_looks[0].hash & 0xffffffff not in gm.load(suite.link.source_dir())["zombies"]["used"],
               f"{label}: an unticked look is left out")
     scene.boz_game_looks[0].used = True
     form = scene.boz_game_economy
@@ -706,11 +706,11 @@ def game_checks(label):
     form.set_scores = True
     form.set_box = True
     form.box_m_Cost = 1200
-    economy = gm.load(tab.source_dir())["economy"]
+    economy = gm.load(suite.link.source_dir())["economy"]
     check(economy["cvars"] == {"StartingScore": 2500} and economy["box"]["m_Cost"] == 1200
           and economy["scores"]["SUBJECT_ZOMBIE_SCORE_HIT"] == 10, f"{label}: the economy is stored ({economy})")
     scene.boz_game_power_on = True
-    check(gm.load(tab.source_dir())["level"]["power_on"], f"{label}: power on at the start")
+    check(gm.load(suite.link.source_dir())["level"]["power_on"], f"{label}: power on at the start")
     bpy.ops.boz.game_hook("EXEC_DEFAULT", event="round_started")
     check((project / "scripts" / "hooks" / "round_started.lua").is_file(), f"{label}: a hook stub is made")
     tab.draw_graph()

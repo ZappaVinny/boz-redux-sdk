@@ -9,7 +9,7 @@ from __future__ import annotations
 import bpy
 
 from ._bozkit import blender_scene, chalk, levels, library, maps, native, resources, toolkit, world
-from ._bozkit import spec_fields
+from ._bozkit import spec_fields, world_compile
 from ._bozkit import hashing
 from . import meshes
 iw_hash = hashing.iw_hash
@@ -20,13 +20,19 @@ _state: dict = {}
 
 
 def game_models():
-    """world._GameModels over the asset library, or None when there is no library."""
+    """world_compile.GameModels over the asset library, or None when there is no library."""
     if "models" not in _state:
         try:
-            _state["models"] = world._GameModels(library.LibraryPack())
+            _state["models"] = world_compile.GameModels(library.LibraryPack())
         except library.LibraryError:
             _state["models"] = None
     return _state["models"]
+
+
+def game_pack():
+    """The game's groups (the asset library), or None without it."""
+    models = game_models()
+    return models.pack if models is not None else None
 
 
 class _Found:
@@ -107,7 +113,7 @@ def _drawn_model(spec):
         renderable = spec_fields.component(child, "CIsRenderableModel")
         if renderable is None or renderable.blob is None:
             continue
-        assets = world.blob_assets(renderable.blob)
+        assets = world_compile.blob_assets(renderable.blob)
         if assets:
             return assets[0][1][0], [spec_fields.local_transform(child),
                                      ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), own_scale)]
@@ -203,7 +209,7 @@ def weapon_model(base: str, weapon: str):
             found = []
             for prop in blob.properties:
                 if prop.nested is not None:
-                    found += world.blob_assets(prop.nested)
+                    found += world_compile.blob_assets(prop.nested)
             low = next((pair for name, pair in found if name == iw_hash("LOD1")), None)
             pair = low or (found[-1][1] if found else None)
             return (path, pair[0]) if pair else None

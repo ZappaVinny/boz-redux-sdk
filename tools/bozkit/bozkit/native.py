@@ -28,7 +28,7 @@ _TEXTURE_SCAN = range(4, 40)
 # (2026-10-10); and the tutorial's graffiti sign, 0x0e in one level and 0x05 in another, has the
 # same alpha-0 background in both (00 00 ff 00 and 0x0f00; transparent, so its colour proves
 # nothing). Older bozkit read B, G, R, A.
-_TEXTURE_FORMATS = {0x05: (2, 'ABGR4444'), 0x0E: (4, 'ABGR8888')}
+_TEXTURE_FORMATS = {0x05: (2, 'RGBA4444'), 0x0E: (4, 'ABGR8888')}
 _DECODE_ONLY_FORMATS = {0x0A: (3, 'BGR888')}
 _VERTS = iw_hash('CIwModelBlockVerts')
 _UVS = iw_hash('CIwModelBlockGLUVs')
@@ -224,7 +224,7 @@ def decode_texture_rgba(body: bytes) -> DecodedTexture:
         for (value,) in struct.iter_unpack('<H', raw):
             rgba += bytes(((value >> 12) * 17, (value >> 8 & 15) * 17, (value >> 4 & 15) * 17,
                            (value & 15) * 17))
-        return DecodedTexture(layout.width, layout.height, bytes(rgba), 'ABGR4444')
+        return DecodedTexture(layout.width, layout.height, bytes(rgba), 'RGBA4444')
     if len(body) < 95:
         raise ValueError('unsupported CIwTexture layout')
     mip_count, width, height = struct.unpack_from('<III', body, 35)
@@ -283,7 +283,7 @@ def decode_texture(body: bytes) -> Image.Image:
     raise ValueError(f'unsupported CIwImage pixel format {layout.pixel_format:#04x}')
 
 
-def _abgr4444(image: Image.Image) -> bytes:
+def _rgba4444(image: Image.Image) -> bytes:
     out = bytearray()
     raw = image.convert('RGBA').tobytes()
     for index in range(0, len(raw), 4):
@@ -303,12 +303,12 @@ def encode_texture(image: Image.Image, source: bytes | None = None,
     layout = texture_layout(source) if source is not None else None
     bpp = bytes_per_pixel or (layout.bytes_per_pixel if layout else 4)
     if bpp not in (2, 4):
-        raise ValueError('texture bytes_per_pixel must be 2 (ABGR4444) or 4 (ABGR8888)')
+        raise ValueError('texture bytes_per_pixel must be 2 (RGBA4444) or 4 (ABGR8888)')
     width, height = image.size
     if not 0 < width <= 8192 or not 0 < height <= 8192:
         raise ValueError('texture dimensions must be between 1 and 8192')
     if bpp == 2:
-        texels = _abgr4444(image)
+        texels = _rgba4444(image)
     else:
         texels = image.convert('RGBA').tobytes()
     if source is None:

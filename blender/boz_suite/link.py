@@ -62,6 +62,12 @@ def project_root() -> Path | None:
     return Path(value) if value else None
 
 
+def source_dir() -> Path | None:
+    """The open project's source folder, or None."""
+    root = project_root()
+    return root / "source" if root else None
+
+
 def current_project():
     root = project_root()
     if root is None:
@@ -70,9 +76,6 @@ def current_project():
         return sdk_project.load_project(root)
     except sdk_project.ProjectError:
         return None
-
-
-# Properties
 
 
 def _part_name_changed(self, context):
@@ -145,9 +148,6 @@ class BOZ_SceneSettings(PropertyGroup):
     starting_points: IntProperty(name="Starting points", default=500, min=0, max=1000000)
 
 
-# Log
-
-
 def append_log(lines) -> None:
     text = tabs.log_text()
     if isinstance(lines, str):
@@ -212,9 +212,6 @@ def write_source(scene) -> list:
         convert.tidy_removed(scene, result.removed)
     scene["boz_problems"] = [f"{message}\t{name}" for message, name in problems]
     return problems
-
-
-# Handlers
 
 
 @persistent
@@ -304,9 +301,6 @@ def on_save(_dummy):
     problems = write_source(map_scene())
     if problems:
         append_log([f"check {message}" for message, _ in problems])
-
-
-# Operators
 
 
 def problems_of(scene) -> list[tuple[str, str]]:
@@ -766,9 +760,6 @@ class BOZ_OT_reset_base(Operator):
     def execute(self, context):
         convert.reset_base(context.object)
         return {"FINISHED"}
-
-
-# Panels
 
 
 class BOZ_PT_problems(Panel):

@@ -36,6 +36,7 @@ from pathlib import Path
 
 from . import collision, corpus, gltf, group, map_resources, native, navigation, reflect, resources, save
 from . import project as sdk_project
+from . import spec_fields
 from .schema import Names
 
 
@@ -95,13 +96,6 @@ def cmd_dump(args) -> int:
     return 0
 
 
-def _find_property(blob: reflect.Blob, field_hash: int) -> reflect.Property | None:
-    for p in blob.properties:
-        if p.name_hash == field_hash:
-            return p
-    return None
-
-
 def cmd_set(args) -> int:
     if not args.output:
         print('give -o NEW.group.bin (the input is never overwritten)', file=sys.stderr)
@@ -122,14 +116,14 @@ def cmd_set(args) -> int:
                     if args.component and names.name(c.type_hash) != args.component:
                         continue
                     for b in c.blobs:
-                        p = _find_property(b, field_hash)
+                        p = spec_fields.field(b, field_hash)
                         if p is not None:
                             reflect.set_typed_value(p, value)
                             changed += 1
                 r.body = resources.encode_entity_spec(spec)
             else:
                 blob = resources.decode_reflected(r.body)
-                p = blob and _find_property(blob, field_hash)
+                p = blob and spec_fields.field(blob, field_hash)
                 if p is not None:
                     reflect.set_typed_value(p, value)
                     r.body = resources.encode_reflected(blob)
@@ -327,16 +321,6 @@ def cmd_extract(args) -> int:
     return 0
 
 
-def _find_resource(g: group.Group, class_hash: int, resource_hash: int) -> group.Resource | None:
-    for kind in g.types():
-        if kind.class_hash != class_hash:
-            continue
-        for item in kind.resources:
-            if resource_hash in (item.name_hash, item.in_group_hash):
-                return item
-    return None
-
-
 def cmd_texture(args) -> int:
     if not args.experimental_raw:
         print('error: PNG texture import is experimental; cooked/swizzled layouts are not yet '
@@ -348,7 +332,7 @@ def cmd_texture(args) -> int:
     names = Names()
     source = Path(args.group)
     g = group.parse(source.read_bytes())
-    item = _find_resource(g, names.hash('CIwTexture'), names.hash(args.resource))
+    item = group.find_resource(g, names.hash('CIwTexture'), names.hash(args.resource))
     if item is None:
         print(f'no CIwTexture resource {args.resource}', file=sys.stderr)
         return 1
@@ -386,7 +370,7 @@ def cmd_corpus(args) -> int:
 def _load_group_resource(path: str, class_name: str, resource_name: str):
     names = Names()
     g = group.parse(Path(path).read_bytes())
-    item = _find_resource(g, names.hash(class_name), names.hash(resource_name))
+    item = group.find_resource(g, names.hash(class_name), names.hash(resource_name))
     if item is None:
         raise ValueError(f'no {class_name} resource {resource_name}')
     return g, item

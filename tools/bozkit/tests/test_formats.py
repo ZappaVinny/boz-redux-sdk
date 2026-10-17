@@ -144,7 +144,7 @@ class FormatTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             native.encode_texture(Image.new('RGB', (1, 1)), body)
 
-    def test_abgr4444_native_channel_order(self):
+    def test_rgba4444_native_channel_order(self):
         # Red in the top nibble, alpha in the bottom (uploaded as GL RGBA4444): hud_icons shows
         # its grey weapon icons in game only read this way round.
         header = bytearray(17)
@@ -152,7 +152,7 @@ class FormatTests(unittest.TestCase):
         struct.pack_into('<HHH', header, 7, 2, 1, 4)
         decoded = native.decode_texture_rgba(bytes(header) + struct.pack('<HH', 0x0F00, 0xFC84)
                                              + b'\0')
-        self.assertEqual(decoded.format, 'ABGR4444')
+        self.assertEqual(decoded.format, 'RGBA4444')
         self.assertEqual(decoded.rgba, bytes((0, 255, 0, 0, 255, 204, 136, 68)))
         image = Image.frombytes('RGBA', (2, 1), decoded.rgba)
         self.assertEqual(native.encode_texture(image, bytes(header) + bytes(4) + b'\0')[17:21],

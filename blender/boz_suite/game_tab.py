@@ -24,7 +24,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from bpy.types import Operator, Panel, PropertyGroup, UIList
 
-from . import link
+from . import game as editor_game, link
 
 from ._bozkit import game, group, weapons as wp, world as bworld
 from ._bozkit import project as sdk_project
@@ -48,18 +48,6 @@ SPECIAL_CLASS_ITEMS = [("CWaveSpeciality", "Special round", "Dogs or any zombie 
 HEALTH_ITEMS = [("game", "The game's", "Repeating rounds: 10 x round x round - 150 (the game's own)"),
                 ("grow", "Grows by the multiplier", "Repeating rounds: the round's health times "
                                                     "its health multiplier each round")]
-
-
-# --- Data --------------------------------------------------------------------------------------
-
-def source_dir() -> Path | None:
-    root = link.project_root()
-    return root / "source" if root else None
-
-
-def _pack():
-    from . import weapons_tab
-    return weapons_tab.game_pack()
 
 
 def names() -> dict:
@@ -90,7 +78,7 @@ def hash_of(text: str) -> int:
 
 
 def load() -> dict:
-    source = source_dir()
+    source = link.source_dir()
     try:
         return game.load(source) if source else {}
     except game.GameError as exc:
@@ -99,13 +87,13 @@ def load() -> dict:
 
 
 def save(data: dict) -> None:
-    source = source_dir()
+    source = link.source_dir()
     if source is not None:
         game.save(source, data)
 
 
 def base_level() -> str:
-    source = source_dir()
+    source = link.source_dir()
     try:
         return bworld.load(source).base if source else "kino"
     except Exception:
@@ -116,7 +104,7 @@ def base_statics():
     """The base level's statics group (rounds, zombie looks), or None without the game data."""
     level = base_level()
     if level not in _state["base"]:
-        pack = _pack()
+        pack = editor_game.game_pack()
         statics = None
         if pack is not None:
             for name in (level, "kino"):
@@ -142,6 +130,23 @@ def rounds_of(data: dict) -> dict | None:
         return None
 
 
+def dog_round() -> dict | None:
+    """A dog round as the game has one: the base level's, else Kino's."""
+    pack = editor_game.game_pack()
+    for statics in (base_statics(), *([group.parse(pack.read("levels/kino/kino_statics.group.bin"))]
+                                      if pack is not None else [])):
+        if statics is None:
+            continue
+        try:
+            specials = game.read_rounds(statics).get("specials") or []
+        except game.GameError:
+            continue
+        found = next((w for w in specials if w.get("m_HellhoundWave")), None)
+        if found is not None:
+            return copy.deepcopy(found)
+    return None
+
+
 def own_rounds(data: dict) -> dict | None:
     """The map's own rounds, copied from the base level on the first change."""
     if not data.get("rounds"):
@@ -156,8 +161,6 @@ def own_rounds(data: dict) -> dict | None:
 def selected(collection, index):
     return collection[index] if 0 <= index < len(collection) else None
 
-
-# --- The round form ----------------------------------------------------------------------------
 
 def _is_name_field(field) -> bool:
     return field.unit in ("entity name", "fog config name")
@@ -187,8 +190,6 @@ def _wave_props() -> dict:
     annotations["special_class"] = EnumProperty(name="Kind", items=SPECIAL_CLASS_ITEMS,
                                                 update=_wave_changed)
     return annotations
-
-
 
 
 def _to_form(form, wave: dict) -> None:
@@ -270,8 +271,6 @@ def _wave_changed(self, context):
 BOZ_GameWave = type("BOZ_GameWave", (PropertyGroup,), {"__annotations__": _wave_props()})
 
 
-# --- Lists -------------------------------------------------------------------------------------
-
 class BOZ_GameRound(PropertyGroup):
     detail: StringProperty()
 
@@ -287,7 +286,6 @@ def _look_changed(self, context):
     else:
         data.pop("zombies", None)       # none ticked: the base level's own
     save(data)
-
 
 
 class BOZ_GameLook(PropertyGroup):
@@ -364,7 +362,7 @@ def refresh_looks(context) -> None:
     """Every map's zombie looks (any works on any map), the base level's first."""
     scene = link.map_scene()
     statics = base_statics()
-    pack = _pack()
+    pack = editor_game.game_pack()
     _state["loading"] = True
     try:
         scene.boz_game_looks.clear()
@@ -404,8 +402,6 @@ def refresh(context) -> None:
     load_economy(context)
     load_level(context)
 
-
-# --- The graph ---------------------------------------------------------------------------------
 
 def graph_image():
     image = bpy.data.images.get(GRAPH_IMAGE)
@@ -459,8 +455,6 @@ def draw_graph() -> None:
                 area.spaces.active.image = image
                 area.tag_redraw()
 
-
-# --- Level info and economy ----------------------------------------------------------------------
 
 def _manifest() -> dict | None:
     root = link.project_root()
@@ -554,8 +548,6 @@ def _economy_props() -> dict:
     return annotations
 
 
-
-
 def load_economy(context) -> None:
     scene = link.map_scene()
     form = scene.boz_game_economy
@@ -612,8 +604,6 @@ def _economy_changed(self, context):
 BOZ_GameEconomy = type("BOZ_GameEconomy", (PropertyGroup,), {"__annotations__": _economy_props()})
 
 
-# --- Updates -----------------------------------------------------------------------------------
-
 def _chain_changed(self, context):
     if _state["loading"]:
         return
@@ -637,8 +627,6 @@ def _repeat_health_changed(self, context):
     save(data)
     draw_graph()
 
-
-# --- Operators ---------------------------------------------------------------------------------
 
 class BOZ_OT_game_refresh(Operator):
     bl_idname = "boz.game_refresh"
@@ -753,12 +741,10 @@ class BOZ_OT_game_special_add(Operator):
             return {"CANCELLED"}
         specials = rounds.setdefault("specials", [])
         current = selected(specials, scene.boz_game_special_index)
-        wave = dict(current) if current else {
-            "class": "CWaveSpeciality", "m_HellhoundWave": True, "m_waveType": 1,
-            "m_ZombieTypes": [iw_hash("zombie_dog"), iw_hash("zombie_dog_flaming")],
-            "m_healthBase": [300], "m_players2ZombieNumber": [6, 12, 16, 18], "m_MaxActive": 3,
-            "m_StartingZombies": 2, "m_TimeOut": 3000, "m_WaveTimeout": 3000, "m_StartingTimer": 7000,
-            "m_minNormalWavesInterval": 4, "m_maxNormalWavesInterval": 6, "m_chance": 50}
+        wave = dict(current) if current else dog_round()
+        if wave is None:
+            self.report({"ERROR"}, "No dog round to copy: the asset library is missing")
+            return {"CANCELLED"}
         specials.append(wave)
         save(data)
         scene.boz_game_special_index = len(specials) - 1
@@ -847,8 +833,6 @@ class BOZ_OT_game_hook(Operator):
         return {"FINISHED"}
 
 
-# --- Panels ------------------------------------------------------------------------------------
-
 class BOZ_UL_game_rounds(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index=0):
         row = layout.row(align=True)
@@ -883,7 +867,7 @@ class _GamePanel:
 
 
 def _no_project(layout) -> bool:
-    if source_dir() is None:
+    if link.source_dir() is None:
         layout.label(text="Open a map project to set its rules", icon="INFO")
         return True
     return False

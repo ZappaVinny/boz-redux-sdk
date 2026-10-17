@@ -150,7 +150,6 @@ def decode_skin(body: bytes) -> Skin:
     return skin
 
 
-
 BONE_CLASS = iw_hash('CIwAnimBone')
 SKEL_VALUE = 0x4000     # the s32 after a skeleton's last bone (every shipped skeleton)
 
@@ -419,8 +418,6 @@ def state_anim(states: list[State], name: str) -> int | None:
             return state.anim
     return None
 
-
-# --- Posing ---------------------------------------------------------------------------------
 
 def quat_mul(a, b):
     aw, ax, ay, az = a

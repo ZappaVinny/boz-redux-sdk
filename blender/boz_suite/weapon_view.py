@@ -28,7 +28,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        FloatVectorProperty, IntProperty, StringProperty)
 from bpy.types import Operator, Panel, PropertyGroup
 
-from . import link
+from . import game, link
 
 from ._bozkit import anim, assets, viewmodel, weapon_anim, weapon_model
 from ._bozkit import hashing
@@ -97,8 +97,6 @@ def _inverse(t):
     return (tuple(-c for c in anim.quat_rotate(inverse, position)), inverse)
 
 
-# --- The weapon's data ---------------------------------------------------------------------
-
 def _weapon():
     item = wt().selected(link.map_scene())
     return (item, wt().weapon_def(bpy.context, item.name)) if item else (None, None)
@@ -159,17 +157,17 @@ def load(context) -> bool:
     """Read the selected weapon's skeletons and animations (cached by weapon)."""
     import json
     item, weapon = _weapon()
-    if item is None or wt().game_pack() is None:
+    if item is None or game.game_pack() is None:
         return False
     level = weapon.level or wt().base_level(context)
     key = (item.name, level, weapon.source, json.dumps(weapon.model, sort_keys=True))
     if editor_state["key"] == key and editor_state["rig"] is not None:
         return True
-    rig = viewmodel.Rig(wt().game_pack().read, level, weapon.source)
+    rig = viewmodel.Rig(game.game_pack().read, level, weapon.source)
     asset, error = None, ""
     if weapon.model.get("asset"):
         try:
-            asset, _textures = assets.load_game(wt().source_dir(), weapon.model["asset"])
+            asset, _textures = assets.load_game(link.source_dir(), weapon.model["asset"])
             if not asset.bones:
                 asset, error = None, f"{weapon.model['asset']} has no bones: make it as a Weapon"
         except (assets.AssetError, KeyError, ValueError) as exc:
@@ -298,8 +296,6 @@ def frame_locals(state: int, frame: int, entry: dict | None = None, edits: dict 
     ik = weapon_anim.is_yours(edits["arms"], frame) or weapon_anim.is_yours(edits["gun"], frame)
     return out, grips, ik
 
-
-# --- Building the view ---------------------------------------------------------------------
 
 def view_scene():
     scene = bpy.data.scenes.get(link.VIEW_SCENE)
@@ -578,24 +574,22 @@ def _camera(view):
     view.camera = camera
 
 
-# --- The animation shown -------------------------------------------------------------------
-
 def _entry(state: int) -> dict:
     item, _weapon_ = _weapon()
-    if item is None or wt().source_dir() is None:
+    if item is None or link.source_dir() is None:
         return {}
     try:
-        return weapon_anim.load_clips(wt().source_dir(), item.name).get(state, {})
+        return weapon_anim.load_clips(link.source_dir(), item.name).get(state, {})
     except weapon_anim.WeaponAnimError:
         return {}
 
 
 def edited_states() -> set:
     item, _weapon_ = _weapon()
-    if item is None or wt().source_dir() is None:
+    if item is None or link.source_dir() is None:
         return set()
     try:
-        return set(weapon_anim.load_clips(wt().source_dir(), item.name))
+        return set(weapon_anim.load_clips(link.source_dir(), item.name))
     except weapon_anim.WeaponAnimError:
         return set()
 
@@ -691,7 +685,7 @@ def bake(context) -> None:
         editor_state["busy"] = False
 
 
-# --- Changes: kept when you leave a frame ----------------------------------------------------
+# Changes: kept when you leave a frame
 
 def _group_of(name: str) -> str | None:
     if name.startswith("hand "):
@@ -770,11 +764,11 @@ def store_edits() -> None:
     """Write the changes now (the result at every frame follows when you save: store())."""
     item, _weapon_ = _weapon()
     state = editor_state.get("state")
-    if item is None or state is None or wt().source_dir() is None or item.name != editor_state.get("shown"):
+    if item is None or state is None or link.source_dir() is None or item.name != editor_state.get("shown"):
         return
     labels = {s[0]: s[1] for s in states()}
     entry = editor_state.get("entry") or {}
-    weapon_anim.save_state(wt().source_dir(), item.name, state, labels.get(state, ""),
+    weapon_anim.save_state(link.source_dir(), item.name, state, labels.get(state, ""),
                            {part: entry.get(part) for part in ("arms", "gun")}, _stored_edits(),
                            editor_state["length"])
 
@@ -789,7 +783,7 @@ def store(context=None) -> bool:
     if not editor_state["dirty"]:
         return False
     item, _weapon_ = _weapon()
-    if item is None or item.name != editor_state["shown"] or wt().source_dir() is None:
+    if item is None or item.name != editor_state["shown"] or link.source_dir() is None:
         return False
     bones = editor_state["bones"]
     state = editor_state["state"]
@@ -816,7 +810,7 @@ def store(context=None) -> bool:
     finally:
         editor_state["busy"] = False
     labels = {s[0]: s[1] for s in states()}
-    weapon_anim.save_state(wt().source_dir(), item.name, state, labels.get(state, ""),
+    weapon_anim.save_state(link.source_dir(), item.name, state, labels.get(state, ""),
                            {"arms": weapon_anim.Clip(arms_frames), "gun": weapon_anim.Clip(gun_frames)},
                            _stored_edits(), editor_state["length"])
     editor_state["dirty"] = False
@@ -846,8 +840,6 @@ def _before_save(_dummy=None):
     except (ReferenceError, RuntimeError, AttributeError, OSError, KeyError) as exc:
         print(f"boz_suite: weapon animations not stored: {exc}")
 
-
-# --- Playback and the timeline ------------------------------------------------------------
 
 def _play_tick():
     wm = bpy.context.window_manager
@@ -1064,7 +1056,7 @@ class BOZ_OT_weapon_reset_anim(Operator):
         state = editor_state.get("state")
         if item is None or state is None:
             return {"CANCELLED"}
-        weapon_anim.save_state(wt().source_dir(), item.name, state, "", {}, {"arms": [], "gun": []}, 0)
+        weapon_anim.save_state(link.source_dir(), item.name, state, "", {}, {"arms": [], "gun": []}, 0)
         show_state(context, state)
         return {"FINISHED"}
 
@@ -1103,7 +1095,7 @@ def timeline_text(part: str) -> str:
     return ", ".join(pieces)
 
 
-# --- Placement (Weapons tab) ------------------------------------------------------------------
+# Placement (Weapons tab)
 
 def _select(view, obj) -> None:
     if obj is None:
@@ -1307,7 +1299,7 @@ def _fit_fields_changed(self, context):
 def _model_items(self, context):
     from . import assets_tab
     items = [("STOCK", "Stock gun", "The weapon's own model")]
-    source = wt().source_dir()
+    source = link.source_dir()
     for asset in assets_tab.defs():
         if asset.kind == "weapon" and source is not None and assets.has_game(source, asset.name):
             items.append((asset.name, asset.name, "Your asset (Assets tab), with its own bones"))
@@ -1320,8 +1312,8 @@ def auto_model(context, asset_name: str, keep_bones: dict | None = None) -> dict
     stock bone its original motion comes from."""
     item, weapon = _weapon()
     level = weapon.level or wt().base_level(context)
-    stock = viewmodel.Rig(wt().game_pack().read, level, weapon.source)
-    model, _textures = assets.load_game(wt().source_dir(), asset_name)
+    stock = viewmodel.Rig(game.game_pack().read, level, weapon.source)
+    model, _textures = assets.load_game(link.source_dir(), asset_name)
     fit = weapon_model.auto_fit({b.name: b.head for b in model.bones}, model.vertices,
                                 stock.gun_bones, stock.gun_model.vertices if stock.gun_model else [])
     reload_anim = stock._anim(stock.gun_anims, stock.gun_states, iw_hash("reloading"))
@@ -1424,8 +1416,6 @@ class BOZ_OT_weapon_auto_fit(Operator):
             show_preview(context)
         return {"FINISHED"}
 
-
-# --- The viewport ----------------------------------------------------------------------------
 
 def _set_overlay() -> None:
     wm = bpy.context.window_manager
@@ -1578,8 +1568,6 @@ def draw_view_header(self, context):
         layout.operator(BOZ_OT_weapon_anim_play.bl_idname, text="",
                         icon="PAUSE" if wm.boz_anim_playing else "PLAY")
 
-
-# --- Panels --------------------------------------------------------------------------------
 
 class _ViewPanel:
     bl_space_type = "PROPERTIES"

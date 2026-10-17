@@ -42,8 +42,6 @@ def icons_dir(source: Path) -> Path:
     return Path(source) / 'weapons' / 'icons'
 
 
-# --- Weapons' rectangles ------------------------------------------------------------------
-
 def uv_of(blob) -> tuple[int, int, int, int] | None:
     """(x0, y0, x1, y1) of a CPlayerWeapon blob's HUD picture, or None."""
     first, second = spec_fields.prop(blob, 'm_uv0'), spec_fields.prop(blob, 'm_uv1')
@@ -83,8 +81,6 @@ def game_uv(pack, weapon: str) -> tuple[int, int, int, int] | None:
     return None
 
 
-# --- The atlas ----------------------------------------------------------------------------
-
 def atlas_resource(parsed):
     """The hud_icons texture resource of a parsed ingame group, or None."""
     for resource_type in parsed.types():
@@ -120,8 +116,6 @@ def fit(picture):
     return out
 
 
-# --- The touch sticks ---------------------------------------------------------------------
-
 STICKS = iw_hash('HUD_ALL')
 STICK_RECTS = ((0, 0, 257, 236), (257, 0, 92, 72), (625, 431, 80, 80))
 
@@ -146,8 +140,6 @@ def hide_sticks(parsed) -> bool:
             return True
     return False
 
-
-# --- The build ----------------------------------------------------------------------------
 
 def apply(source: Path, defs, read, groups: dict, map_name: str, pack=None) -> list[str]:
     """Give the project's weapons their icons: copies of other weapons' rectangles, or their own

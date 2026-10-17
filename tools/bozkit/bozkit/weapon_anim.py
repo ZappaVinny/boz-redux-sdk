@@ -47,8 +47,6 @@ class Clip:
         return self.frames[-1][0] if self.frames else 0
 
 
-# --- Project files --------------------------------------------------------------------------
-
 def clips_dir(source: Path, weapon: str) -> Path:
     return Path(source) / 'weapons' / 'anims' / weapon
 
@@ -112,7 +110,6 @@ def save_state(source: Path, weapon: str, state: int, label: str, clips: dict, e
     path.write_text(json.dumps(data, separators=(',', ':')) + '\n', encoding='utf-8')
 
 
-# --- Timelines --------------------------------------------------------------------------------
 # Each part (arms, gun) of an animation has its own list of changes, sorted by frame:
 #   {"frame": f, "pose": {bone: [px, py, pz, qw, qx, qy, qz]}}   your pose, held from f on
 #   {"frame": f, "original": s}                                   the original again from f, playing
@@ -215,8 +212,6 @@ def sample(clip: Clip | None, frame: float, defaults: dict) -> dict:
     return out
 
 
-# --- Maths ----------------------------------------------------------------------------------
-
 def _compose(a, b):
     """World (position, rotation) of transform *b* under *a*."""
     position, rotation = a
@@ -234,8 +229,6 @@ def _normalise(q):
     length = math.sqrt(sum(c * c for c in q)) or 1.0
     return tuple(c / length for c in q)
 
-
-# --- Where the arms sit ---------------------------------------------------------------------
 
 def arms_offset(arms: dict):
     """(position in skeleton units, rotation) of a weapon's arms entry, or None when they sit
@@ -266,8 +259,6 @@ def offset_arms(clip: Clip, bones, offset) -> Clip:
         frames.append((frame, out))
     return Clip(frames)
 
-
-# --- The gun's own skeleton -----------------------------------------------------------------
 
 ROOT = 'tag_origin'   # bone 0 of a gun's own skeleton: at the origin, unturned, like every stock gun's
 

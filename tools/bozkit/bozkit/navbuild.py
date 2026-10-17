@@ -25,10 +25,10 @@ from pathlib import Path
 
 from . import navigation
 
-_STOCK_POLY = struct.Struct('<I6H6HHBB')       # 32 bytes
-_STOCK_OFF_MESH = struct.Struct('<6ffHBBI')    # 36 bytes
-_BOZ_POLY = navigation._POLY                   # 40 bytes
-_BOZ_OFF_MESH = navigation._OFF_MESH           # 40 bytes
+_STOCK_POLY = struct.Struct('<I6H6HHBB')
+_STOCK_OFF_MESH = struct.Struct('<6ffHBBI')
+_BOZ_POLY = navigation._POLY
+_BOZ_OFF_MESH = navigation._OFF_MESH
 
 
 def helper_path() -> Path:

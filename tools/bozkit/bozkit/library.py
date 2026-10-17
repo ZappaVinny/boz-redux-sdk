@@ -117,9 +117,6 @@ def map_groups(paths: Iterable[str], level: str) -> list[str]:
     return sorted(wanted)
 
 
-# Previews
-
-
 def _cooked_preview(body: bytes, target: int):
     """A small RGBA image of an ETC1 or DXT1 texture: the smallest mip at least *target* wide,
     decoding only every n-th block when there is no small mip."""
@@ -221,9 +218,6 @@ def render_model(model: native.Model, face_colours, size: int = THUMB):
     for _depth, polygon, colour in faces:
         draw.polygon(polygon, fill=colour)
     return image.resize((size, size), Image.Resampling.LANCZOS)
-
-
-# Building
 
 
 @dataclass
@@ -594,9 +588,6 @@ def build(client_root: str | Path, folder: Path | None = None,
     return folder
 
 
-# Reading
-
-
 class LibraryPack:
     """The library's group copies, read like the game's pack (``read('levels/kino/...')``)."""
 
@@ -632,7 +623,6 @@ def open_game(client_root: str | Path | None = None):
     if client_root and _pack_path(client_root).is_file():
         return derbh.Pack(_pack_path(client_root))
     return None
-
 
 
 @dataclass

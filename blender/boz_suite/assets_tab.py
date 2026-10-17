@@ -32,13 +32,8 @@ _state: dict = {"process": None, "building": None, "refreshing": False, "frame":
                 "shown": None}
 
 
-def source_dir() -> Path | None:
-    root = link.project_root()
-    return root / "source" if root else None
-
-
 def defs() -> list:
-    source = source_dir()
+    source = link.source_dir()
     if source is None:
         return []
     out = []
@@ -52,17 +47,15 @@ def defs() -> list:
 
 def asset_def(name: str):
     try:
-        return assets.load_def(source_dir(), name)
+        return assets.load_def(link.source_dir(), name)
     except (assets.AssetError, TypeError):
         return None
 
 
 def stats_of(name: str) -> dict:
-    source = source_dir()
+    source = link.source_dir()
     return assets.load_stats(source, name) if source else {}
 
-
-# --- The list and the settings ------------------------------------------------------------
 
 class BOZ_AssetItem(PropertyGroup):
     label: StringProperty()
@@ -84,7 +77,7 @@ def _settings_changed(self, context):
     asset.texture_size = int(settings.texture_size)
     asset.unit = "" if settings.unit == "auto" else settings.unit
     asset.bake_normals = settings.bake_normals
-    assets.save_def(source_dir(), asset)
+    assets.save_def(link.source_dir(), asset)
     refresh_list(context, keep=item.name)
 
 
@@ -179,8 +172,6 @@ def _selected_changed(self, context):
     show_asset(context)
 
 
-# --- Making the game version ----------------------------------------------------------------
-
 def _bozkit_dir() -> Path:
     here = Path(__file__).resolve().parent
     vendor = here / "_vendor"
@@ -249,10 +240,8 @@ def _finish(name: str, output: str) -> None:
         print(f"boz_suite: after making {name}: {exc}")
 
 
-# --- Blender data for an asset ------------------------------------------------------------
-
 def _images(name: str) -> list:
-    folder = assets.game_dir(source_dir(), name) / "textures"
+    folder = assets.game_dir(link.source_dir(), name) / "textures"
     out = []
     for index in range(len(list(folder.glob("*.png"))) if folder.is_dir() else 0):
         path = folder / f"{index}.png"
@@ -268,7 +257,7 @@ def build_mesh(name: str, data_name: str, unit_scale: float = assets.ASSET_SCALE
     *unit_scale*), with game materials; None without a game version."""
     from . import convert
     try:
-        model, _textures = assets.load_game(source_dir(), name)
+        model, _textures = assets.load_game(link.source_dir(), name)
     except (assets.AssetError, TypeError):
         return None
     data = bpy.data.meshes.new(data_name)
@@ -334,8 +323,6 @@ def place_asset(scene, name: str, position=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 
                         collision="solid", shape="box")
     return convert.model_object(model, scene, data=data)
 
-
-# --- The view scene -----------------------------------------------------------------------
 
 def view_scene():
     scene = bpy.data.scenes.get(link.ASSET_SCENE)
@@ -523,8 +510,6 @@ def refresh_view(window) -> None:
         setup_view(window)
 
 
-# --- Operators ----------------------------------------------------------------------------
-
 def _clean_name(text: str) -> str:
     name = "".join(c if c.isalnum() and c.isascii() else "_" for c in text).strip("_") or "asset"
     if not name[0].isalpha():
@@ -619,7 +604,7 @@ class BOZ_OT_asset_refresh_source(Operator):
         try:
             asset.source = assets.copy_source(link.project_root(), asset.name, original)
             asset.edited = False
-            assets.save_def(source_dir(), asset)
+            assets.save_def(link.source_dir(), asset)
         except (assets.AssetError, OSError) as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
@@ -678,7 +663,7 @@ class BOZ_OT_asset_fix(Operator):
             asset.texture_size = max(64, asset.max_texture() // 2)
         elif self.fix == "unit":
             asset.unit = "cm"
-        assets.save_def(source_dir(), asset)
+        assets.save_def(link.source_dir(), asset)
         refresh_settings()
         make(asset.name)
         return {"FINISHED"}
@@ -710,7 +695,7 @@ class BOZ_OT_asset_save_edits(Operator):
 def save_edits(name: str, obj) -> None:
     """Write the view's game-version object back as *name*'s game version."""
     from mathutils import kdtree
-    source = source_dir()
+    source = link.source_dir()
     old, textures = assets.load_game(source, name)
     data = obj.data
     data.calc_loop_triangles()
@@ -764,7 +749,7 @@ class BOZ_OT_asset_place(Operator):
 
     def execute(self, context):
         name = self.name or (selected().name if selected() else "")
-        if not name or not assets.has_game(source_dir(), name):
+        if not name or not assets.has_game(link.source_dir(), name):
             self.report({"ERROR"}, "Make the asset's game version first")
             return {"CANCELLED"}
         scene = link.map_scene()
@@ -794,15 +779,13 @@ class BOZ_MT_my_assets(Menu):
     bl_label = "My assets"
 
     def draw(self, context):
-        made = [a for a in defs() if assets.has_game(source_dir(), a.name)]
+        made = [a for a in defs() if assets.has_game(link.source_dir(), a.name)]
         if not made:
             self.layout.label(text="No assets yet: import one in the Assets tab")
         for asset in made:
             self.layout.operator(BOZ_OT_asset_place.bl_idname, text=asset.name,
                                  icon="MESH_MONKEY" if asset.kind == "prop" else "MOD_ARMATURE").name = asset.name
 
-
-# --- Panels -------------------------------------------------------------------------------
 
 STATUS_ICONS = {"none": "QUESTION", "ok": "CHECKMARK", "warnings": "INFO", "errors": "ERROR",
                 "building": "SORTTIME"}
@@ -961,8 +944,6 @@ def _view_mode_changed(self, context):
         if window.workspace.name == WORKSPACE:
             setup_view(window)
 
-
-# --- The palette's My assets ----------------------------------------------------------------
 
 def rebuild_palette() -> None:
     from . import prefab_library

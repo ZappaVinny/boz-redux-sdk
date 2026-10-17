@@ -105,9 +105,6 @@ def strip_part_name(obj) -> None:
         obj.name = obj.boz.part_name or without_suffix(obj.name.split(PART_SEPARATOR)[-1])
 
 
-# Images and materials
-
-
 def image_from_texture(name: str, texture: "world.Texture", path: Path | None):
     if path is not None and path.is_file():
         image = bpy.data.images.load(str(path), check_existing=True)
@@ -170,9 +167,6 @@ def texture_of_image(image) -> "world.Texture":
             out += bytes((int(b * 255 + 0.5), int(g * 255 + 0.5), int(r * 255 + 0.5),
                           int(a * 255 + 0.5)))
     return world.Texture(width, height, bytes(out))
-
-
-# World -> scene
 
 
 def mesh_data(mesh: "world.Mesh", source: Path, data_name: str):
@@ -858,9 +852,6 @@ def show_game_models(scene) -> int:
     return changed
 
 
-# Scene -> world
-
-
 def _geometry(obj, data, matrix):
     """(vertices, uvs, triangles, triangle material slots) of evaluated mesh data; positions go
     through *matrix* (world space for level meshes, identity for props)."""
@@ -1090,9 +1081,6 @@ def prefab_of(obj, problems: list | None = None):
         raise ValueError(f"{obj.name} is not a prefab of this map")
     used = world.meshes_used([found])
     return found, [mesh for mesh in whole.meshes if mesh.name in used]
-
-
-# Make editable
 
 
 def make_editable(obj, name: str) -> None:

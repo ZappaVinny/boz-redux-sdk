@@ -18,7 +18,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from bpy.types import Operator, Panel, PropertyGroup, UIList
 
-from . import link
+from . import game, link
 
 from ._bozkit import sound
 from ._bozkit import hashing
@@ -35,25 +35,15 @@ CATEGORY_ITEMS = [("all", "All", "Every sound the map plays"),
     [(key, label, "") for key, label in sound.GROUPS.items()]
 
 
-def source_dir() -> Path | None:
-    root = link.project_root()
-    return root / "source" if root else None
-
-
-def _pack():
-    from . import weapons_tab
-    return weapons_tab.game_pack()
-
-
 def _read(path: str):
-    pack = _pack()
+    pack = game.game_pack()
     if pack is None:
         raise sound.SoundError("the game data is not available (build the asset library)")
     return pack.read(path)
 
 
 def defs() -> list:
-    source = source_dir()
+    source = link.source_dir()
     try:
         return sound.list_defs(source) if source else []
     except sound.SoundError:
@@ -78,8 +68,8 @@ def _weapons(context) -> list:
 
 def catalog(context, refresh: bool = False) -> list:
     """The map's sound slots (cached per base level and weapon list)."""
-    pack = _pack()
-    if pack is None or source_dir() is None:
+    pack = game.game_pack()
+    if pack is None or link.source_dir() is None:
         return []
     from . import weapons_tab
     base = link.map_scene().boz.base
@@ -97,8 +87,6 @@ def catalog(context, refresh: bool = False) -> list:
 def slot(key: str):
     return next((s for s in catalog(bpy.context) if s.key == key), None)
 
-
-# --- Playback ---------------------------------------------------------------------------------
 
 def _device():
     import aud
@@ -150,8 +138,6 @@ def read_recording(path: Path) -> tuple[list[list[float]], int]:
         data = data.reshape(-1, 1)
     return [data[:, c].tolist() for c in range(data.shape[1])], rate
 
-
-# --- The wave view ----------------------------------------------------------------------------
 
 WAVE_IMAGE = "BOZ Sound"
 WAVE_SIZE = (1600, 400)
@@ -222,7 +208,7 @@ def show_wave(top=None, bottom=None, trim=(0.0, 0.0)) -> None:
 
 
 def _wave_of_slot(key: str) -> None:
-    source = source_dir()
+    source = link.source_dir()
     try:
         original = sound.original_samples(_read, key)
     except (sound.SoundError, OSError, KeyError):
@@ -236,7 +222,7 @@ def _wave_of_slot(key: str) -> None:
 
 
 def _wave_of_sound(name: str, preview=None) -> None:
-    source = source_dir()
+    source = link.source_dir()
     if source is None:
         return
     try:
@@ -258,8 +244,6 @@ def _slot_selected(self, context):
     if item is not None:
         _wave_of_slot(item.key)
 
-
-# --- Lists ------------------------------------------------------------------------------------
 
 class BOZ_SoundSlot(PropertyGroup):
     key: StringProperty()
@@ -332,7 +316,7 @@ def _sound_selected(self, context):
     if _state["refreshing"]:
         return
     item = selected_sound(link.map_scene())
-    source = source_dir()
+    source = link.source_dir()
     if item is None or source is None:
         return
     try:
@@ -345,7 +329,7 @@ def _sound_selected(self, context):
 def refresh_sounds(context, keep: str | None = None) -> None:
     scene = link.map_scene()
     keep = keep or (selected_sound(scene).name if selected_sound(scene) else None)
-    source = source_dir()
+    source = link.source_dir()
     _state["refreshing"] = True
     try:
         scene.boz_sounds.clear()
@@ -365,7 +349,7 @@ def refresh_sounds(context, keep: str | None = None) -> None:
 def refresh_slots(context, refresh: bool = False) -> None:
     scene = link.map_scene()
     keep = selected_slot(scene).key if selected_slot(scene) else None
-    source = source_dir()
+    source = link.source_dir()
     replaced = sound.load_slots(source) if source else {}
     category = scene.boz_sound_category
     _state["refreshing"] = True
@@ -399,13 +383,11 @@ def refresh(context) -> None:
 
 def _sound_items(self, context):
     if _state["items"] is None:
-        source = source_dir()
+        source = link.source_dir()
         _state["items"] = [(NONE, "Pick a saved sound", "")] + [
             (d.name, d.name, "") for d in defs() if source and sound.is_saved(source, d.name)]
     return _state["items"]
 
-
-# --- Operators --------------------------------------------------------------------------------
 
 def _clean_name(text: str) -> str:
     import re
@@ -425,14 +407,14 @@ class BOZ_OT_sound_import(Operator):
     name: StringProperty(name="Name", description="The sound's name (empty: from the file)")
 
     def invoke(self, context, event):
-        if source_dir() is None:
+        if link.source_dir() is None:
             self.report({"ERROR"}, "Open a project first")
             return {"CANCELLED"}
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
     def execute(self, context):
-        source = source_dir()
+        source = link.source_dir()
         path = Path(self.filepath)
         if source is None or not path.is_file():
             self.report({"ERROR"}, "Pick an audio file")
@@ -464,7 +446,7 @@ class BOZ_OT_sound_preview(Operator):
 
     def execute(self, context):
         scene = link.map_scene()
-        item, source = selected_sound(scene), source_dir()
+        item, source = selected_sound(scene), link.source_dir()
         if item is None or source is None:
             return {"CANCELLED"}
         if self.original:
@@ -488,7 +470,7 @@ class BOZ_OT_sound_save(Operator):
 
     def execute(self, context):
         scene = link.map_scene()
-        item, source = selected_sound(scene), source_dir()
+        item, source = selected_sound(scene), link.source_dir()
         if item is None or source is None:
             return {"CANCELLED"}
         try:
@@ -513,7 +495,7 @@ class BOZ_OT_sound_remove(Operator):
         return context.window_manager.invoke_confirm(self, event)
 
     def execute(self, context):
-        item, source = selected_sound(link.map_scene()), source_dir()
+        item, source = selected_sound(link.map_scene()), link.source_dir()
         if item is None or source is None:
             return {"CANCELLED"}
         sound.delete(source, item.name)
@@ -530,7 +512,7 @@ class BOZ_OT_sound_slot_play(Operator):
     mine: BoolProperty(default=False)
 
     def execute(self, context):
-        source = source_dir()
+        source = link.source_dir()
         key = self.key or (selected_slot(link.map_scene()).key if selected_slot(link.map_scene()) else "")
         if not key or source is None:
             return {"CANCELLED"}
@@ -575,7 +557,7 @@ class BOZ_OT_sound_slot_replace(Operator):
         return {"RUNNING_MODAL"}
 
     def execute(self, context):
-        source = source_dir()
+        source = link.source_dir()
         key = self.key or (selected_slot(link.map_scene()).key if selected_slot(link.map_scene()) else "")
         if not key or source is None or self.sound == NONE:
             return {"CANCELLED"}
@@ -595,7 +577,7 @@ class BOZ_OT_sound_slot_reset(Operator):
     key: StringProperty()
 
     def execute(self, context):
-        source = source_dir()
+        source = link.source_dir()
         key = self.key or (selected_slot(link.map_scene()).key if selected_slot(link.map_scene()) else "")
         if not key or source is None:
             return {"CANCELLED"}
@@ -616,8 +598,6 @@ class BOZ_OT_sounds_refresh(Operator):
         refresh_slots(context, refresh=True)
         return {"FINISHED"}
 
-
-# --- Panels -----------------------------------------------------------------------------------
 
 class BOZ_UL_sound_slots(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index=0):
@@ -662,10 +642,10 @@ class BOZ_PT_sound_slots(_SoundsPanel, Panel):
     def draw(self, context):
         layout = self.layout
         scene = link.map_scene()
-        if source_dir() is None:
+        if link.source_dir() is None:
             layout.label(text="Open a project to replace sounds", icon="INFO")
             return
-        if _pack() is None:
+        if game.game_pack() is None:
             layout.label(text="Build the asset library in the launcher to hear the game's sounds",
                          icon="ERROR")
             return
@@ -706,7 +686,7 @@ class BOZ_PT_sound_processor(_SoundsPanel, Panel):
     def draw(self, context):
         layout = self.layout
         scene = link.map_scene()
-        if source_dir() is None:
+        if link.source_dir() is None:
             return
         row = layout.row()
         row.template_list("BOZ_UL_sounds", "", scene, "boz_sounds", scene, "boz_sound_index", rows=4)
@@ -737,7 +717,7 @@ class BOZ_PT_sound_processor(_SoundsPanel, Panel):
         row.operator(BOZ_OT_sound_preview.bl_idname, text="Preview (game)", icon="PLAY").original = False
         row.operator(BOZ_OT_sound_stop.bl_idname, text="", icon="PAUSE")
         changed = False
-        source = source_dir()
+        source = link.source_dir()
         try:
             changed = sound.load_def(source, item.name).settings != _from_settings(settings)
         except sound.SoundError:
@@ -809,7 +789,7 @@ class BOZ_OT_weapon_sound_play(Operator):
     sound: StringProperty()
 
     def execute(self, context):
-        source = source_dir()
+        source = link.source_dir()
         if source is None or not sound.is_saved(source, self.sound):
             return {"CANCELLED"}
         play_file(sound.game_wav(source, self.sound))
@@ -840,7 +820,7 @@ class BOZ_PT_weapon_sounds(Panel):
     def draw(self, context):
         from . import weapons_tab
         layout = self.layout
-        if _pack() is None or source_dir() is None:
+        if game.game_pack() is None or link.source_dir() is None:
             layout.label(text="Needs the asset library and a project", icon="INFO")
             return
         item = weapons_tab.selected(link.map_scene())
@@ -852,7 +832,7 @@ class BOZ_PT_weapon_sounds(Panel):
             own = weapon.sounds.get(key)
             row.label(text=label)
             if own:
-                row.label(text=f"→ {own}", icon="CHECKMARK" if sound.is_saved(source_dir(), own)
+                row.label(text=f"→ {own}", icon="CHECKMARK" if sound.is_saved(link.source_dir(), own)
                           else "ERROR")
                 row.operator(BOZ_OT_weapon_sound_play.bl_idname, text="", icon="PLAY").sound = own
                 row.operator(BOZ_OT_weapon_sound_set.bl_idname, text="", icon="FILE_REFRESH").field = key
@@ -865,7 +845,7 @@ class BOZ_PT_weapon_sounds(Panel):
         if not mine:
             return
         layout.label(text="The game's sounds it plays (replacing one changes it for all):")
-        replaced = sound.load_slots(source_dir())
+        replaced = sound.load_slots(link.source_dir())
         for found in mine:
             title = next((u for u in found.users if u.startswith(prefixes)), found.label)
             if any(title.endswith(f": {label}") and key in weapon.sounds

@@ -24,7 +24,7 @@ EPS = 1e-4          # metres: points closer than this in XZ are one point
 MAX_VERTS = 6
 
 
-# --- BV tree (Detour's dtNavMeshBuilder createBVTree) ---------------------------------------
+# BV tree (Detour's dtNavMeshBuilder createBVTree)
 
 def _longest_axis(x: int, y: int, z: int) -> int:
     axis, best = 0, x
@@ -79,8 +79,6 @@ def bv_tree(tile: navigation.TileData, quant: float) -> list[tuple]:
         subdivide(0, len(items))
     return [tuple(node) for node in nodes]
 
-
-# --- Cutting ------------------------------------------------------------------------------
 
 def _cross(o, a, b) -> float:
     return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])

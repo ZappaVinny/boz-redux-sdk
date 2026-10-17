@@ -135,20 +135,20 @@ class Registry:
             except ValueError:
                 return out
         if entry.cls == ENTITY_SPEC:
-            from . import world
+            from . import world_compile
             try:
                 spec = resources.decode_entity_spec(body)
             except Exception:   # noqa: BLE001
                 return self._words(body)
-            out = world.spec_hashes(spec)
+            out = world_compile.spec_hashes(spec)
             for component in _components(spec):
                 out += self.runtime.get(component.type_hash, [])
             return [h for h in out if h in self.by_hash]
         if reflect.is_blob(body, 4) or reflect.is_blob(body):
-            from . import world
+            from . import world_compile
             blob = resources.decode_reflected(body)
             if blob is not None:
-                return [h for h in world.blob_hashes(blob) if h in self.by_hash]
+                return [h for h in world_compile.blob_hashes(blob) if h in self.by_hash]
         return self._words(body)
 
     def _words(self, body: bytes) -> list[int]:
@@ -391,8 +391,6 @@ def _type_in(target: group_module.Group, cls: int, like: group_module.ResourceTy
     types.insert(index, resource_type)
     return resource_type
 
-
-# --- Names in scripts ----------------------------------------------------------------------------
 
 # What a script can name and use by name: specs (spawn), sounds and sequences (play), screen
 # effects, fogs and camera shakes.

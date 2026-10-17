@@ -175,8 +175,6 @@ FIELD_BY_KEY = {f.key: f for f in FIELDS}
 GROUPS = tuple(dict.fromkeys(f.group for f in FIELDS))
 
 
-# --- Reading weapon entity specs -----------------------------------------------------------
-
 def weapon_blob(spec):
     for component in spec.components:
         if component.type_hash == PLAYER_WEAPON and component.blob is not None:
@@ -359,8 +357,6 @@ def is_gun(weapon: GameWeapon) -> bool:
     return weapon.values.get('behaviour') != 0 or name in BOUGHT_MELEE
 
 
-# --- Project files -------------------------------------------------------------------------
-
 @dataclass
 class WeaponDef:
     name: str
@@ -510,8 +506,6 @@ def validate(defs: list[WeaponDef], available: set[str]) -> list[str]:
                 problems.append(f'weapon {weapon.name}: {spec.label} cannot be changed')
     return problems
 
-
-# --- Applying to a map's groups ------------------------------------------------------------
 
 def entity_specs(parsed):
     for resource_type in parsed.types():

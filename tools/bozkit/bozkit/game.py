@@ -245,8 +245,6 @@ def hook_stub(event: str) -> str:
             'end\n')
 
 
-# --- Values and resources -----------------------------------------------------------------------
-
 def _value(field: Field, prop: reflect.Property):
     if field.type == 'std::vector<unsigned int>':
         (n,) = struct.unpack_from('<I', prop.raw, 0)
@@ -432,8 +430,6 @@ def round_values(chain: list[dict], round_number: int, power_on: bool = False,
             'interval': grown('m_TimeOut', 'm_TimeOutMultiplier')}
 
 
-# --- Zombie types ------------------------------------------------------------------------------
-
 ZOMBIE_CONFIG = iw_hash('CZombieConfiguration')
 
 
@@ -508,8 +504,6 @@ def write_zombie_types(statics: group.Group, used: list[int]) -> None:
     resource.body = resources.encode_reflected(blob)
 
 
-# --- Mystery box -------------------------------------------------------------------------------
-
 BOX_FIELDS = {'m_Cost': ('Box cost', 950), 'm_FireSaleCost': ('Fire sale cost', 10),
               'm_MinWeapons': ('Weapons shown at least', 4),
               'm_MaxWeapons': ('Weapons shown at most', 10)}
@@ -547,8 +541,6 @@ def _all_components(spec):
     for _, _, child in spec.children:
         yield from _all_components(child)
 
-
-# --- Score table -------------------------------------------------------------------------------
 
 def read_scores(shared: group.Group, prop_name: str = 'm_Scores') -> dict:
     """The shared score table's {action: points} (m_Scores), or its per-round limits
@@ -599,8 +591,6 @@ def score_table_name(map_name: str) -> str:
     return f'boz_score_{map_name}'
 
 
-# --- Loading screen ----------------------------------------------------------------------------
-
 def loading_group_name(map_name: str) -> str:
     return f'loading_{map_name}'
 
@@ -649,8 +639,6 @@ def point_loading_screen(fixed: group.Group, map_name: str) -> None:
             return
     raise GameError(f'fixed has no loading-{map_name}')
 
-
-# --- Project file --------------------------------------------------------------------------------
 
 def path(source: Path) -> Path:
     return Path(source) / 'game.json'

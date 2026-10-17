@@ -120,9 +120,6 @@ def _log(tag: str, text: str) -> None:
     link.append_log(f"{tag:<5} {text}")
 
 
-# Dropped assets
-
-
 def _pending(scene) -> bool:
     return any("boz_asset_kind" in obj for obj in scene.objects) or any(
         "boz_asset_texture" in m and not m.get("boz_realized") for m in bpy.data.materials

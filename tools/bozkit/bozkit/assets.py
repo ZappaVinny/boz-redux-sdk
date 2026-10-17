@@ -96,8 +96,6 @@ class GameModel:
     levels: dict = field(default_factory=dict)    # weapons: 'ads', 'lod0'.. -> lighter GameModel
 
 
-# --- Files ----------------------------------------------------------------------------------
-
 def assets_dir(source: Path) -> Path:
     return Path(source) / 'assets'
 
@@ -262,8 +260,6 @@ def guess_unit(length: float, kind: str) -> str:
     return 'cm'
 
 
-# --- Budget and textures --------------------------------------------------------------------
-
 def split_budget(triangle_counts: list[int], budget: int, floor: int = MIN_PART_TRIANGLES) -> list[int]:
     """Each mesh's share of *budget*, by its share of the triangles; no mesh gets less than
     *floor* (or its own count, when that is smaller) and none more than it has."""
@@ -352,8 +348,6 @@ def flat_texture(colour: tuple[float, float, float, float]) -> world.Texture:
     r, g, b, a = (max(0, min(255, round(c * 255))) for c in colour)
     return world.Texture(4, 4, bytes((b, g, r, a)) * 16)
 
-
-# --- Checks and the compiler ----------------------------------------------------------------
 
 def describe(model: GameModel, textures: list[world.Texture]) -> dict:
     return {'triangles': len(model.triangles), 'vertices': len(model.vertices),

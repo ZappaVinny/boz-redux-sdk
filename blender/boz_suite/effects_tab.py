@@ -9,13 +9,12 @@ Name it gives one a name scripts use (source/effects.json), and the changes a pr
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 from bpy.types import Operator, Panel, PropertyGroup, UIList
 
-from . import link
+from . import game, link
 from ._bozkit import effects
 
 WORKSPACE = "Effects"
@@ -26,18 +25,8 @@ KIND_ITEMS = [("all", "All", "Effects and projectiles"),
                                             "game's behaviour")]
 
 
-def source_dir() -> Path | None:
-    root = link.project_root()
-    return root / "source" if root else None
-
-
-def _pack():
-    from . import weapons_tab
-    return weapons_tab.game_pack()
-
-
 def catalog(refresh: bool = False) -> list:
-    pack = _pack()
+    pack = game.game_pack()
     if pack is None:
         return []
     if refresh or _state["catalog"] is None:
@@ -50,7 +39,7 @@ def catalog(refresh: bool = False) -> list:
 
 
 def used() -> list:
-    source = source_dir()
+    source = link.source_dir()
     try:
         return effects.load(source) if source else []
     except effects.EffectError:
@@ -79,8 +68,6 @@ def snippet(item) -> str:
         return f'effects.projectile("{item.name}", effects.aim(){options})'
     return f'effects.spawn("{item.name}", effects.aim(), {{lifetime = 2}})'
 
-
-# --- Lists ------------------------------------------------------------------------------------
 
 class BOZ_EffectEntry(PropertyGroup):
     key: StringProperty()
@@ -180,7 +167,7 @@ def _changes_changed(self, context):
         return
     scene = link.map_scene()
     item = selected(scene.boz_effects_used, scene.boz_effect_used_index)
-    source = source_dir()
+    source = link.source_dir()
     if item is None or source is None:
         return
     current = used()
@@ -196,7 +183,7 @@ def _rename(self, context):
         return
     scene = link.map_scene()
     item = selected(scene.boz_effects_used, scene.boz_effect_used_index)
-    source = source_dir()
+    source = link.source_dir()
     new = _clean(scene.boz_effect_rename)
     if item is None or source is None or new == item.name:
         return
@@ -216,8 +203,6 @@ def _clean(text: str) -> str:
         name = "e_" + name
     return name[:32]
 
-
-# --- Operators --------------------------------------------------------------------------------
 
 class BOZ_OT_effects_refresh(Operator):
     bl_idname = "boz.effects_refresh"
@@ -239,7 +224,7 @@ class BOZ_OT_effect_use(Operator):
     def execute(self, context):
         scene = link.map_scene()
         item = selected(scene.boz_effect_entries, scene.boz_effect_index)
-        source = source_dir()
+        source = link.source_dir()
         if item is None or source is None:
             return {"CANCELLED"}
         entry = next((e for e in catalog() if e.key == item.key), None)
@@ -270,7 +255,7 @@ class BOZ_OT_effect_remove(Operator):
     def execute(self, context):
         scene = link.map_scene()
         item = selected(scene.boz_effects_used, scene.boz_effect_used_index)
-        source = source_dir()
+        source = link.source_dir()
         if item is None or source is None:
             return {"CANCELLED"}
         effects.save(source, [u for u in used() if u.name != item.name])
@@ -292,8 +277,6 @@ class BOZ_OT_effect_copy(Operator):
         self.report({"INFO"}, "Copied")
         return {"FINISHED"}
 
-
-# --- Panels -----------------------------------------------------------------------------------
 
 class BOZ_UL_effect_entries(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index=0):
@@ -336,10 +319,10 @@ class BOZ_PT_effects_game(_EffectsPanel, Panel):
     def draw(self, context):
         layout = self.layout
         scene = link.map_scene()
-        if source_dir() is None:
+        if link.source_dir() is None:
             layout.label(text="Open a project to use effects", icon="INFO")
             return
-        if _pack() is None:
+        if game.game_pack() is None:
             layout.label(text="Build the asset library in the launcher to see the effects", icon="ERROR")
             return
         layout.prop(scene, "boz_effect_kind", text="Show")
@@ -369,7 +352,7 @@ class BOZ_PT_effects_used(_EffectsPanel, Panel):
     def draw(self, context):
         layout = self.layout
         scene = link.map_scene()
-        if source_dir() is None:
+        if link.source_dir() is None:
             return
         if not len(scene.boz_effects_used) and used():
             refresh_used(context)

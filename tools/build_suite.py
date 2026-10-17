@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / 'blender' / 'boz_suite'
 BOZKIT = ROOT / 'tools' / 'bozkit' / 'bozkit'
 OUTPUT = ROOT / 'build' / 'suite'
-NOT_VENDORED = {'desktop.py', '__main__.py'}
+NOT_VENDORED = {'desktop.py', 'desktop_window.py', '__main__.py'}
 sys.path.insert(0, str(BOZKIT.parent))
 from bozkit.schema import gamedef_file  # noqa: E402
 NAVMESH_HELPERS = [ROOT / 'tools' / 'navmesh' / 'build' / name

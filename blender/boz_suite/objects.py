@@ -48,9 +48,6 @@ def kind_label(obj) -> tuple[str, str]:
     return "Not part of the map", "QUESTION"
 
 
-# Scripts
-
-
 def scripts_dir() -> Path | None:
     project = link.current_project()
     return project.scripts if project is not None else None
@@ -321,9 +318,6 @@ class BOZ_OT_script_reload(Operator):
     def execute(self, context):
         sync_all(link.map_scene())
         return {"FINISHED"}
-
-
-# Prefabs
 
 
 def _selected_parts(context):

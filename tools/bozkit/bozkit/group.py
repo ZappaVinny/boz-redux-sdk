@@ -138,6 +138,17 @@ def read_parsed(read, path: str) -> Group:
     return parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
 
 
+def find_resource(parsed: Group, class_hash: int, resource_hash: int) -> Resource | None:
+    """The resource of a class named *resource_hash* (its name or its in-group name), or None."""
+    for kind in parsed.types():
+        if kind.class_hash != class_hash:
+            continue
+        for item in kind.resources:
+            if resource_hash in (item.name_hash, item.in_group_hash):
+                return item
+    return None
+
+
 def encode(group: Group) -> bytes:
     out = bytearray(group.header)
     for s in group.sections:

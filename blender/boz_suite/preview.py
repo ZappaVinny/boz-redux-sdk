@@ -15,7 +15,7 @@ from bpy.types import Operator, Panel
 from bpy.props import EnumProperty
 
 from ._bozkit import blender_scene, collision, group, levels, library, world
-from ._bozkit import spec_fields
+from ._bozkit import spec_fields, world_compile
 
 from . import convert, meshes, scene_view
 from . import link
@@ -85,7 +85,7 @@ def build(context) -> str:
         defs = weapons.load_defs(project.root / "source")
         weapons.attach_models(defs, project.root / "source")
         assets.attach(source, project.root / "source")
-        files = world.compile_world(pack, project.map_name, source, None, weapons=defs)
+        files = world_compile.compile_world(pack, project.map_name, source, None, weapons=defs)
     except (world.WorldError, levels.LevelError, weapons.WeaponError) as exc:
         raise ValueError(str(exc)) from None
     statics = files.groups[f"{project.map_name}_statics.group.bin"]

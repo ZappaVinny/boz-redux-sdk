@@ -102,8 +102,6 @@ def default_bones(asset_bones: list[str], bones: list[anim.Bone], mover: int | N
     return out
 
 
-# --- Fitting --------------------------------------------------------------------------------
-
 def _sub(a, b):
     return tuple(x - y for x, y in zip(a, b))
 
@@ -214,8 +212,6 @@ def apply_fit(fit: dict, points):
     return [tuple(l + c for l, c in zip(location, anim.quat_rotate(rotation, tuple(p * scale for p in point))))
             for point in points]
 
-
-# --- Building ---------------------------------------------------------------------------------
 
 @dataclass
 class Built:

@@ -19,7 +19,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, StringProperty)
 from bpy.types import Operator, Panel, PropertyGroup, UIList
 
-from . import link
+from . import game, link
 
 from ._bozkit import hud_icons, library, maps, weapons as wp
 
@@ -49,19 +49,11 @@ end
 _state: dict = {"levels": {}, "refreshing": False, "items": {}}
 
 
-# --- Data --------------------------------------------------------------------------------
-
-def game_pack():
-    from . import game
-    models = game.game_models()
-    return models.pack if models is not None else None
-
-
 def level_weapons(level: str) -> list:
     """The game's weapons of a level (cached), [] without the asset library."""
     level = maps.gear(level)
     if level not in _state["levels"]:
-        pack = game_pack()
+        pack = game.game_pack()
         try:
             _state["levels"][level] = wp.read_level(pack, level) if pack is not None else []
         except (KeyError, OSError, ValueError, library.LibraryError):
@@ -69,17 +61,12 @@ def level_weapons(level: str) -> list:
     return _state["levels"][level]
 
 
-def source_dir() -> Path | None:
-    root = link.project_root()
-    return root / "source" if root else None
-
-
 def base_level(context) -> str:
     return maps.gear(link.map_scene().boz.base)
 
 
 def defs() -> dict:
-    source = source_dir()
+    source = link.source_dir()
     try:
         return {d.name: d for d in wp.load_defs(source)} if source else {}
     except wp.WeaponError:
@@ -89,7 +76,7 @@ def defs() -> dict:
 def project_index(context) -> list[str]:
     """The project's weapon list; written the first time (the Colt alone for a map that does
     not start from a whole shipped level)."""
-    source = source_dir()
+    source = link.source_dir()
     if source is None:
         return []
     try:
@@ -149,7 +136,7 @@ def current_values(context, name: str) -> tuple[dict, dict]:
 
 
 def save(context, weapon) -> None:
-    source = source_dir()
+    source = link.source_dir()
     if source is None:
         return
     is_new = weapon.base and weapon.base != weapon.name
@@ -161,7 +148,7 @@ def save(context, weapon) -> None:
 
 
 def start_weapon() -> tuple[str, int]:
-    source = source_dir()
+    source = link.source_dir()
     try:
         return wp.load_start(source) if source else (wp.DEFAULT_START, wp.DEFAULT_START_RESERVE)
     except wp.WeaponError:
@@ -169,10 +156,10 @@ def start_weapon() -> tuple[str, int]:
 
 
 def _start_reserve_changed(self, context):
-    if _state["refreshing"] or source_dir() is None:
+    if _state["refreshing"] or link.source_dir() is None:
         return
     name, _reserve = start_weapon()
-    wp.save_start(source_dir(), name, self.boz_start_reserve)
+    wp.save_start(link.source_dir(), name, self.boz_start_reserve)
 
 
 def label_of(context, name: str) -> str:
@@ -217,8 +204,6 @@ def weapon_items(context, include_none=True, listed_only=False) -> list:
 def clear_caches() -> None:
     _state["items"].clear()
 
-
-# --- Rows of the form --------------------------------------------------------------------
 
 def _enum_items(self, context):
     spec = wp.FIELD_BY_KEY.get(self.key)
@@ -398,8 +383,6 @@ def refresh(context) -> None:
     refresh_fields(context)
 
 
-# --- Operators ----------------------------------------------------------------------------
-
 def _import_items(self, context):
     key = ("import", base_level(context), tuple(project_index(context)))
     if key not in _state["items"]:
@@ -435,7 +418,7 @@ class BOZ_OT_weapon_import(Operator):
         if not self.choice:
             return {"CANCELLED"}
         level, _, name = self.choice.partition(":")
-        source = source_dir()
+        source = link.source_dir()
         index = project_index(context)
         if level != base_level(context):
             if game_weapon(base_level(context), name) is not None:
@@ -476,7 +459,7 @@ class BOZ_OT_weapon_new(Operator):
         start = weapon_def(context, item.name)
         new = wp.WeaponDef(name, start.source, start.level, dict(start.fields), "",
                            json.loads(json.dumps(start.model)))
-        source = source_dir()
+        source = link.source_dir()
         wp.save_def(source, new)
         wp.save_index(source, project_index(context) + [name])
         clear_caches()
@@ -498,7 +481,7 @@ class BOZ_OT_weapon_remove(Operator):
         item = selected(link.map_scene())
         if item is None:
             return {"CANCELLED"}
-        source = source_dir()
+        source = link.source_dir()
         if item.status in ("new", "imported"):
             wp.delete_def(source, item.name)
         wp.save_index(source, [n for n in project_index(context) if n != item.name])
@@ -655,10 +638,10 @@ class BOZ_OT_weapon_start(Operator):
 
     def execute(self, context):
         item = selected(link.map_scene())
-        if item is None or source_dir() is None:
+        if item is None or link.source_dir() is None:
             return {"CANCELLED"}
         current, reserve = start_weapon()
-        wp.save_start(source_dir(), wp.DEFAULT_START if current == item.name else item.name, reserve)
+        wp.save_start(link.source_dir(), wp.DEFAULT_START if current == item.name else item.name, reserve)
         refresh_list(context, keep=item.name)
         return {"FINISHED"}
 
@@ -673,8 +656,6 @@ class BOZ_OT_weapons_refresh(Operator):
         show_preview(context)
         return {"FINISHED"}
 
-
-# --- Panels -------------------------------------------------------------------------------
 
 STATUS_ICONS = {"game": "BLANK1", "edited": "GREASEPENCIL", "new": "ADD", "imported": "IMPORT"}
 
@@ -832,20 +813,18 @@ class BOZ_PT_weapon_script(_WeaponsPanel, Panel):
         row.operator(BOZ_OT_weapon_script_clear.bl_idname, text="", icon="X")
 
 
-# --- HUD icon ------------------------------------------------------------------------------
-
 ICON_IMAGE = "BOZ HUD icon"
 
 
 def update_icon_preview(context) -> None:
     """Draw the selected weapon's HUD picture into the preview image."""
     item = selected(link.map_scene())
-    source = source_dir()
+    source = link.source_dir()
     picture = None
     if item is not None and source is not None:
         weapon = weapon_def(context, item.name)
         try:
-            picture = hud_icons.preview(game_pack(), source, weapon, base_level(context))
+            picture = hud_icons.preview(game.game_pack(), source, weapon, base_level(context))
         except (hud_icons.IconError, OSError, ValueError, KeyError):
             picture = None
     image = bpy.data.images.get(ICON_IMAGE)
@@ -899,7 +878,7 @@ class BOZ_OT_weapon_icon_image(Operator):
     def execute(self, context):
         import shutil
         item = selected(link.map_scene())
-        source = source_dir()
+        source = link.source_dir()
         if item is None or source is None:
             return {"CANCELLED"}
         try:
@@ -981,7 +960,7 @@ CLASSES = (BOZ_WeaponField, BOZ_WeaponItem, BOZ_PoolItem, BOZ_OT_box_pool, BOZ_U
            BOZ_PT_weapon_script)
 
 
-# --- The view (weapon_view) ----------------------------------------------------------------
+# The view (weapon_view)
 
 def show_preview(context) -> str:
     from . import weapon_view

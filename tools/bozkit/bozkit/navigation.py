@@ -136,11 +136,11 @@ _TILE_HEADER = struct.Struct('<5iI9i3f3f3ff')
 # u32 (zero in shipped data), vertCount, areaAndtype, 2 bytes padding. Stock Detour has 32 bytes
 # with u16 flags. Proven by section sizes summing to each shipped tile's length.
 _POLY = struct.Struct('<I6H6HIIBBxx')
-POLY_SIZE = _POLY.size  # 40
+POLY_SIZE = _POLY.size
 # dtOffMeshConnection is likewise 4 bytes longer than stock (40 instead of 36): pos[6], radius,
 # an extra float (0.9 in every shipped link), then poly, flags, side and userId as in stock.
 _OFF_MESH = struct.Struct('<6fffHBBI')
-OFF_MESH_SIZE = _OFF_MESH.size  # 40
+OFF_MESH_SIZE = _OFF_MESH.size
 
 
 @dataclass

@@ -449,7 +449,8 @@ def _hash_files(root: Path) -> list[dict]:
 def compile_map(project: Project, game, fixed=None):
     """The game's groups for a map project's world (``bozkit.levels.LevelFiles``). *game*
     reads the shipped groups: ``bozkit.library.open_game``."""
-    from . import assets, effects, game as game_rules, hud_icons, levels, sound, weapons, world
+    from . import (assets, effects, game as game_rules, hud_icons, levels, sound, weapons, world,
+                   world_compile)
     if project.kind != 'map':
         raise ProjectError(f'{project.mod.id} is not a map project')
     if game is None:
@@ -462,7 +463,7 @@ def compile_map(project: Project, game, fixed=None):
         index = weapons.load_index(source) or []
         start, reserve = weapons.load_start(source)
         layout = world.load(source)
-        files = world.compile_world(game, project.map_name, assets.attach(layout, source), fixed,
+        files = world_compile.compile_world(game, project.map_name, assets.attach(layout, source), fixed,
                                     weapons=defs)
         # The Sounds tab's replaced game sounds (the shared ones in a patched ingame group).
         sound.apply(source, game.read, files.groups, layout.base, project.map_name)
@@ -526,7 +527,7 @@ def lua_value(value, indent: str = '') -> str:
 
 def world_data_lua(runtime: dict) -> str:
     """boz/world_data.lua: the map's start state and scripted objects, read by boz.world and
-    boz.prefabs when the level starts (world.compile_world's runtime)."""
+    boz.prefabs when the level starts (world_compile.compile_world's runtime)."""
     data = {key: list(runtime.get(key, [])) for key in ('hidden', 'no_collision', 'blocked')}
     data['objects'] = list(runtime.get('objects', []))
     data['names'] = list(runtime.get('names', []))

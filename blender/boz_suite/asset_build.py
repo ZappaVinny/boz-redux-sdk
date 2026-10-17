@@ -413,8 +413,6 @@ def reduce(meshes, budget: int, drop: bool = False) -> None:
         drop_small_pieces(meshes, budget)
 
 
-# --- Materials and textures --------------------------------------------------------------------
-
 def _image_from(socket, depth: int = 0):
     """The image feeding *socket* (through other nodes), or None."""
     if socket is None or not socket.is_linked or depth > 5:
@@ -478,8 +476,6 @@ def make_texture(material, side: int, bake_normals: bool):
         rgba = assets.shade(rgba, pixels_at(normal, tw, th)[..., :3])
     return assets.texture_from_rgba(rgba, bottom_up=True)
 
-
-# --- The game version ------------------------------------------------------------------------
 
 def collect(meshes, armature, scale: float, kind: str, material_index: dict | None = None):
     """(GameModel, materials in texture order, per-material surface area). *material_index*
