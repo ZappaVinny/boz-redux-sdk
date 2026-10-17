@@ -372,6 +372,7 @@ class WeaponDef:
     arms: dict = field(default_factory=dict)     # where the arms sit: {"location", "rotation"}
     display: str = ''                            # its name in game prompts ('' = the game's own)
     sounds: dict = field(default_factory=dict)   # {sound field: project sound}: its own sounds
+    icon: dict = field(default_factory=dict)     # HUD picture: {"like": weapon} / {"image": file}
     sound_data: dict = field(default_factory=dict, compare=False, repr=False)  # attach_models
     model_data: tuple | None = field(default=None, compare=False, repr=False)   # attach_models
     clips: dict = field(default_factory=dict, compare=False, repr=False)      # attach_models
@@ -449,7 +450,7 @@ def load_defs(source: Path) -> list[WeaponDef]:
                              str(data.get('level', '')), dict(data.get('fields', {})),
                              str(data.get('script', '')), dict(data.get('model', {})),
                              dict(data.get('arms', {})), str(data.get('display', '')),
-                             dict(data.get('sounds', {}))))
+                             dict(data.get('sounds', {})), dict(data.get('icon', {}))))
     return out
 
 
@@ -473,6 +474,8 @@ def save_def(source: Path, weapon: WeaponDef) -> Path:
         data['display'] = weapon.display
     if weapon.sounds:
         data['sounds'] = dict(sorted(weapon.sounds.items()))
+    if weapon.icon:
+        data['icon'] = weapon.icon
     path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8', newline='\n')
     return path
 

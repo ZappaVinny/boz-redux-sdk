@@ -72,6 +72,25 @@ check(rounds.current() == 5 and rounds.killed() == 3 and rounds.alive() == 4 and
 check(rounds.total() == 20 and rounds.zombies_left() == 17, "zombies left from the wave's count")
 check(rounds.wave_class() == "CWaveRepeatable" and not rounds.special(), "the wave's class")
 check(rounds.go_to(10) and memory[WM + 0x78] == 9, "go to a round")
+-- rounds.set: the level's first wave (normal difficulty), followed to round 3 along m_NextWave.
+memory[LEVEL + 0x204] = 0x8a00
+local h = require("boz.hash").name
+local W1, W2, W3 = 0x8d00, 0x8e00, 0x8f00
+local by_hash = {[h("w1")] = W1, [h("w2")] = W2, [h("w3")] = W3}
+functions[address("Wave_Find")] = function(x) return by_hash[x] or 0 end
+memory[W1 + 0x84], memory[W2 + 0x84], memory[W3 + 0x84] = h("w2"), h("w3"), h("w3")
+local reflect, real_get = require("boz.reflect"), require("boz.reflect").get
+reflect.get = function(at, class_name, field)
+    if class_name == "CLevel" and field == "m_StartingWavesSP" then return {h("w0"), h("w1"), h("w0")} end
+    return real_get(at, class_name, field)
+end
+memory[LEVEL + 0x20c] = 1
+check(rounds.first_wave() == h("w1") and rounds.wave_for(3) == h("w3") and rounds.wave_for(9) == h("w3"), "the wave chain")
+check(rounds.set(3) and memory[WM + 0x78] == 2, "set round")
+local sent = last("CIsSubject::NotifyVirtual")
+check(sent[2] == WM + 0x20 and memory[sent[4] + 4] == h("w3") and memory[sent[4] + 0x14] == 2, "starts it as round 3")
+memory[LEVEL + 0x20c] = 2
+reflect.get = real_get
 rounds.set_spawning(false)
 check(executed[#executed] == "DisableZombieSpawning true", "stop spawning")
 rounds.queue("wave1")

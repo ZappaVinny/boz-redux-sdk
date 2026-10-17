@@ -34,6 +34,8 @@ game = {
     end,
 }
 events = {on = function(name, fn) if name == "frame" then table.insert(frames, fn) end end}
+local hooks = {}
+hook = {add = function(target, handlers) hooks[target] = handlers return target end, remove = function() end}
 function log(message) print("log: " .. message) end
 
 local function check(condition, message)
@@ -181,4 +183,23 @@ local aim, zombie = effects.aim()
 check(aim.x == 100.0 and aim.z == -40.0 and zombie, "the crosshair point")
 check(effects.sound("gersch_opens", aim) and called("CIwSoundManager::Play")[1][3] == hash.name("gersch_opens"),
       "a sound plays by name")
+-- Black hole kills are the player's: a zombie's gersch death damage gets the player as attacker.
+do
+    local h = require("boz.hash")
+    local on_event, damage = hooks[address("CAIControllerZombie::OnEvent")], hooks[address("CHealth::Damage")]
+    assert(on_event and damage, "FAILED: the kill credit hooks")
+    local set = {}
+    local function call(args) return {arg = function(_, i) return args[i] or 0 end, set_arg = function(_, i, v) set[i] = v end} end
+    memory[address("CLevelManager::s_instance")] = 0x6100
+    memory[0x6100 + 0x1a0] = 0x6200
+    functions["CIsEntityDB::GetEntity"] = function(e) return e == 0x6200 and 0x6300 or 0 end
+    functions["Entity_GetNameHash"] = function(r) return r == 0x6300 and 0xabc or 0 end
+    damage.before(call({0x7000, 0x7ffffffe, 0}))
+    assert(set[3] == nil, "FAILED: other damage keeps its attacker")
+    local ev = call({0x7100, 0, h.name("SUBJECT_ZOMBIE_GERSCH_DEATH")})
+    on_event.before(ev)
+    damage.before(call({0x7000, 0x7ffffffe, 0}))
+    on_event.after(ev)
+    assert(set[3] == 0xabc, "FAILED: a black hole kill is the player's")
+end
 print("effects_test: OK")

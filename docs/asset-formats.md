@@ -94,7 +94,8 @@ top of the surface has v = 0. Tools that display images upright must mirror v (`
 
 Uncompressed textures use Marmalade's formats, named by channel from the most significant bits of
 a little-endian word: `0x0e` is ABGR_8888 (bytes **R, G, B, A**), `0x0a` is BGR_888 (bytes
-R, G, B) and `0x05` is ABGR_4444 (alpha in the top nibble, red in the bottom). Evidence: textures
+R, G, B) and `0x05` is 16-bit with **red in the top nibble, alpha in the bottom** (GL RGBA4444: the
+HUD's `hud_icons` atlas shows its grey weapon icons in game only read this way). Evidence: textures
 that are ETC1 in `blackops_etc.dz` and `0x0a` in `blackops_gles1.dz` match pixel for pixel in
 R, G, B order; a texture written as B, G, R, A showed red and blue swapped in the game; and the
 tutorial's graffiti sign, `0x0e` in one level and `0x05` in another, has the same alpha-0

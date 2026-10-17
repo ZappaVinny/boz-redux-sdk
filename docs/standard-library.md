@@ -103,14 +103,14 @@ Rounds and the match (Zombies mode).
 
 ```lua
 rounds.current()            the round number          rounds.zombies_left()
-rounds.start_next()         rounds.go_to(10)          rounds.kill_all()
+rounds.set(10)              rounds.start_next()       rounds.kill_all()
 rounds.wave()               the round's settings (zombies, health, speeds, ...)
 rounds.on_start(fn)         rounds.on_end(fn)
 ```
 
 <details><summary>How it works</summary>
 
-CWaveManager (singleton) runs the rounds: +0x50 the round's CWave, +0x70 zombies alive, +0x78 the round number, +0x7c spawned and +0x84 killed this round (the round ends when killed reaches the wave's zombie count: vtable +0x50 GetZombieCount(round, powerOn)), +0x88 the next round's wave, timers +0x8c (next spawn), +0x90 (next round), +0x94 (spawning starts), +0xb8 power on. A round starts with SUBJECT_NEW_WAVE (CWaveManager::StartWave: the next wave, round + 1) and ends with SUBJECT_WAVE_ENDED. Developer commands (StartWave, SpawnZombie, KillAllZombies, SwitchPowerOn, TimeFactor) run through boz.console. The Game tab sets a map's rounds (docs/game.md).
+CWaveManager (singleton) runs the rounds: +0x50 the round's CWave, +0x70 zombies alive, +0x78 the round number, +0x7c spawned and +0x84 killed this round (the round ends when killed reaches the wave's zombie count: vtable +0x50 GetZombieCount(round, powerOn)), +0x88 the next round's wave, timers +0x8c (next spawn), +0x90 (next round), +0x94 (spawning starts), +0xb8 power on. A round starts with SUBJECT_NEW_WAVE (CWaveManager::StartWave: the next wave, round + 1; WaveManager_FillNextWave picks the next wave or a special round) and ends with SUBJECT_WAVE_ENDED. Developer commands (SpawnZombie, KillAllZombies, SwitchPowerOn, TimeFactor) run through boz.console. The Game tab sets a map's rounds (docs/game.md).
 
 </details>
 
@@ -130,7 +130,10 @@ CWaveManager (singleton) runs the rounds: +0x50 the round's CWave, +0x70 zombies
 | `rounds.set_wave(field, value)` | Changes a setting of the running round's wave (e.g. "m_ZombieHealth"); it lasts until the level loads again. Returns true, or false and why. |
 | `rounds.timers()` | Milliseconds until the next spawn, until the next round starts, and until spawning starts. |
 | `rounds.special_history()` | The round the last special round ran in, and how many have run. |
-| `rounds.start_next()` | Starts the next round now. |
+| `rounds.start_next()` | Starts the next round now, as the game does when the pause between rounds ends: the next wave of the chain (or a special round when one is due), round + 1; zombies left over go. Returns false outside a round. (The console's StartWave needs a wave name: without one it stops the rounds.) |
+| `rounds.first_wave()` | The level's first wave (its name hash): the level's starting wave for the difficulty (CLevel m_StartingWavesSP: easy, normal, hard), else "wave1". |
+| `rounds.wave_for(number)` | The wave round `number` plays (its name hash): the level's first wave, followed along each wave's next wave (a repeating wave stays, growing with the round number). Special rounds are not counted. |
+| `rounds.set(number)` | Starts round `number` now (1 or more): its wave from the level's chain, zombie count and health as that round has them; zombies left over go. Returns false outside a match. |
 | `rounds.go_to(number)` | Makes the next round started be round `number` (its wave stays the chain's next one; the repeating round's growth and the game's health use the number). |
 | `rounds.queue(wave)` | Queues a wave by name or hash (one of the level's CWave resources: "wave1", "boz_normal_3", ...) as the next round. |
 | `rounds.on_start(fn)` | Calls fn(round) when a round starts. Returns a handle (boz.game_events.off). |

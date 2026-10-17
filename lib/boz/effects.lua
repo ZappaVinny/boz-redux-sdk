@@ -37,6 +37,8 @@ local EXPLOSIONS = {frag = "projectile_frag_grenade", raygun = "projectile_raygu
                     claymore = "projectile_claymore", monkey = "projectile_monkeyBomb"}
 
 local FALLBACK = {
+    ["CHealth::Damage"] = 0x199754 + 1,
+    ["CAIControllerZombie::OnEvent"] = 0x115b74 + 1,
     ["Spawn_ByHash"] = 0x1fa9c6 + 1,
     ["EntityDB_Destroy"] = 0x0bb2d8 + 1,
     ["Physics_SetActivation"] = 0x029924 + 1,
@@ -382,6 +384,42 @@ function effects.spawn(name, position, options)
     return effect, err
 end
 
+-- Black hole kills count as the player's. A zombie a black hole takes gets SUBJECT_ZOMBIE_GERSCH_DEATH
+-- and kills itself with CHealth::Damage(health, all, attacker 0): with no attacker the game adds
+-- no kill to the player's stats (CAIControllerZombie's SUBJECT_DIED counts STAT_ZOMBIESKILLED only
+-- for the local player's name hash). While a zombie handles that event, its damage is the player's.
+local kill_credit = {installed = false, active = 0}
+
+local function credit_black_hole_kills()
+    if kill_credit.installed then
+        return
+    end
+    kill_credit.installed = true
+    local gersch_death = hash.name("SUBJECT_ZOMBIE_GERSCH_DEATH")
+    hook.add(sym("CAIControllerZombie::OnEvent"), {
+        before = function(c)
+            if c:arg(3) & 0xffffffff == gersch_death then
+                kill_credit.active = kill_credit.active + 1
+            end
+        end,
+        after = function(c)
+            if c:arg(3) & 0xffffffff == gersch_death and kill_credit.active > 0 then
+                kill_credit.active = kill_credit.active - 1
+            end
+        end,
+    })
+    hook.add(sym("CHealth::Damage"), {before = function(c)
+        if kill_credit.active > 0 and c:arg(3) == 0 then
+            local level = game.read("u32", sym("CLevelManager::s_instance") or 0)
+            local player = level ~= 0 and game.read("u32", level + 0x1a0) or 0
+            local id = player ~= 0 and require("boz.entities").name_hash(player)
+            if id then
+                c:set_arg(3, id)
+            end
+        end
+    end})
+end
+
 --- Spawns a projectile at a position and lets the game run it. Options: trigger (e.g. "open"),
 --- lifetime (seconds; after a trigger), raise (centimetres: it floats that far above the position,
 --- and a black hole's kill reach grows to match, so zombies walking under it still die; for one
@@ -392,6 +430,7 @@ end
 --- has set it up (a frame or so). Returns the projectile, or nil and why.
 function effects.projectile(name, position, options)
     options = options or {}
+    credit_black_hole_kills()
     local lift = options.raise or options.lift or 10
     local effect, err = spawn(name, position, {rotation = options.rotation, lift = lift})
     if not effect then

@@ -21,11 +21,13 @@ from .hashing import iw_hash
 _TEXTURE_SCAN = range(4, 40)
 # Raw CIwImage formats seen in BOZ, named as Marmalade names them (channels from the most
 # significant bits of a little-endian word): 0x0e ABGR_8888 (bytes R, G, B, A), 0x0a BGR_888
-# (bytes R, G, B) and 0x05 ABGR_4444 (alpha in the top nibble, red in the bottom). Evidence:
+# (bytes R, G, B) and 0x05 16-bit (red in the top nibble, alpha in the bottom: GL RGBA4444;
+# hud_icons shows its grey weapon icons in game only read this way, 2026-10-16). Evidence:
 # textures that are ETC1 in blackops_etc.dz and 0x0a in blackops_gles1.dz match pixel for pixel
 # in R, G, B order; a texture written as B, G, R, A showed red and blue swapped in the game
 # (2026-10-10); and the tutorial's graffiti sign, 0x0e in one level and 0x05 in another, has the
-# same alpha-0 background in both (00 00 ff 00 and 0x0f00: blue). Older bozkit read B, G, R, A.
+# same alpha-0 background in both (00 00 ff 00 and 0x0f00; transparent, so its colour proves
+# nothing). Older bozkit read B, G, R, A.
 _TEXTURE_FORMATS = {0x05: (2, 'ABGR4444'), 0x0E: (4, 'ABGR8888')}
 _DECODE_ONLY_FORMATS = {0x0A: (3, 'BGR888')}
 _VERTS = iw_hash('CIwModelBlockVerts')
@@ -216,10 +218,12 @@ def decode_texture_rgba(body: bytes) -> DecodedTexture:
             return DecodedTexture(layout.width, layout.height, bytes(rgba), 'BGR888')
         if layout.pixel_format == 0x0e:
             return DecodedTexture(layout.width, layout.height, bytes(raw), 'ABGR8888')
+        # 16-bit texels upload as GL RGBA4444: red in the top nibble, alpha in the bottom (checked
+        # against the HUD: hud_icons shows its grey icons only this way round).
         rgba = bytearray()
         for (value,) in struct.iter_unpack('<H', raw):
-            rgba += bytes(((value & 15) * 17, (value >> 4 & 15) * 17, (value >> 8 & 15) * 17,
-                           (value >> 12) * 17))
+            rgba += bytes(((value >> 12) * 17, (value >> 8 & 15) * 17, (value >> 4 & 15) * 17,
+                           (value & 15) * 17))
         return DecodedTexture(layout.width, layout.height, bytes(rgba), 'ABGR4444')
     if len(body) < 95:
         raise ValueError('unsupported CIwTexture layout')
@@ -284,7 +288,7 @@ def _abgr4444(image: Image.Image) -> bytes:
     raw = image.convert('RGBA').tobytes()
     for index in range(0, len(raw), 4):
         red, green, blue, alpha = ((channel * 15 + 127) // 255 for channel in raw[index:index + 4])
-        out += struct.pack('<H', (alpha << 12) | (blue << 8) | (green << 4) | red)
+        out += struct.pack('<H', (red << 12) | (green << 8) | (blue << 4) | alpha)
     return bytes(out)
 
 

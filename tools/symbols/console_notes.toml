@@ -62,8 +62,9 @@ note = "Speed of the developer fly mode (CPlayerFreeFly, registered as \"Flying!
 args = "<round>"
 note = "Dead Ops Arcade: jumps to a round."
 [command.StartWave]
+args = "<wave>"
 status = "works"
-note = "Zombies: starts the next round."
+note = "Zombies: starts the named wave (a CWave resource such as wave1) as the next round. Without a name it ends the rounds (no wave). boz.rounds.set / start_next start rounds properly."
 [command.SpawnZombie]
 status = "works"
 note = "Zombies: spawns one zombie."

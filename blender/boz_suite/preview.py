@@ -85,13 +85,16 @@ def build(context) -> str:
     problems = []
     source = convert.scene_to_world(link.map_scene(), problems)
     try:
-        from bozkit import assets
+        from bozkit import assets, weapons
     except ModuleNotFoundError:
-        from ._vendor.bozkit import assets
+        from ._vendor.bozkit import assets, weapons
     try:
+        # The project's own weapons too, as Build & Run compiles it (wall buys may sell them).
+        defs = weapons.load_defs(project.root / "source")
+        weapons.attach_models(defs, project.root / "source")
         assets.attach(source, project.root / "source")
-        files = world.compile_world(pack, project.map_name, source, None)
-    except (world.WorldError, levels.LevelError) as exc:
+        files = world.compile_world(pack, project.map_name, source, None, weapons=defs)
+    except (world.WorldError, levels.LevelError, weapons.WeaponError) as exc:
         raise ValueError(str(exc)) from None
     statics = files.groups[f"{project.map_name}_statics.group.bin"]
     items = _scene_meshes(statics, project.map_name)

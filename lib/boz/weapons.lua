@@ -339,12 +339,38 @@ local function install()
             emit("equipped", name_of(game.read("u32", weapon + WEAPON_NAME)))
         end
     end})
+    -- Hip fire goes through CPlayerController::FireWeapon; a shot while aiming does not (the aim
+    -- state fires through the arms' state machine), so a clip that went down counts as a shot too,
+    -- less the shots the hook already told about (waiting up to a second for their round to go).
+    local watch = {gun = 0, clip = 0, owed = 0, owed_age = 0}
     hook.add(sym("CPlayerController::FireWeapon"), {before = function()
         local gun = weapons.current()
         if gun then
+            watch.owed, watch.owed_age = watch.owed + 1, 0
             emit("fired", gun.name, {clip = gun:clip()})
         end
     end})
+    events.on("frame", function(dt)
+        local gun = weapons.current()
+        if not gun then
+            watch.gun = 0
+            return
+        end
+        local clip = gun:clip()
+        if gun.pointer == watch.gun and clip < watch.clip and watch.clip - clip <= 8 then
+            local shots = watch.clip - clip
+            local told = math.min(shots, watch.owed)
+            watch.owed = watch.owed - told
+            for i = 1, shots - told do
+                emit("fired", gun.name, {clip = watch.clip - (i - 1) - told})
+            end
+        end
+        watch.owed_age = watch.owed_age + (dt or 0)
+        if watch.owed_age > 1 then
+            watch.owed = 0
+        end
+        watch.gun, watch.clip = gun.pointer, clip
+    end)
     hook.add(sym("CWeaponManager::SetReloading"), {before = function(call)
         if call:arg(2) ~= 0 and is_players(call:arg(1)) then
             local gun = weapons.current()

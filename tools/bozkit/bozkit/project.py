@@ -447,7 +447,7 @@ def _hash_files(root: Path) -> list[dict]:
 def compile_map(project: Project, game, fixed=None):
     """The game's groups for a map project's world (``bozkit.levels.LevelFiles``). *game*
     reads the shipped groups: ``bozkit.library.open_game``."""
-    from . import assets, effects, game as game_rules, levels, sound, weapons, world
+    from . import assets, effects, game as game_rules, hud_icons, levels, sound, weapons, world
     if project.kind != 'map':
         raise ProjectError(f'{project.mod.id} is not a map project')
     if game is None:
@@ -464,6 +464,11 @@ def compile_map(project: Project, game, fixed=None):
                                     weapons=defs)
         # The Sounds tab's replaced game sounds (the shared ones in a patched ingame group).
         sound.apply(source, game.read, files.groups, layout.base, project.map_name)
+        # The Weapons tab's HUD icons (own pictures in a patched hud_icons sheet).
+        hud_icons.apply(source, defs, game.read, files.groups, project.map_name, pack=game)
+        if 'ingame.group.bin' in files.groups:
+            # A shipped ingame group replaces the client's own fix-up (it hides the touch sticks).
+            hud_icons.hide_sticks(files.groups['ingame.group.bin'])
         # The Effects tab's effects (from other maps: carried in) under the names scripts use.
         files.runtime['effects'] = effects.apply(game.read, source, files.groups,
                                                  project.map_name, layout.base, pack=game,
@@ -472,7 +477,7 @@ def compile_map(project: Project, game, fixed=None):
         files.runtime['game'] = game_rules.apply(game_rules.load(source), project.root,
                                                  files.groups, project.map_name, game.read, pack=game)
     except (world.WorldError, levels.LevelError, weapons.WeaponError, sound.SoundError,
-            effects.EffectError, game_rules.GameError) as exc:
+            effects.EffectError, game_rules.GameError, hud_icons.IconError) as exc:
         raise ProjectError(str(exc)) from None
     built = files.groups.get(f'weapons_{project.map_name}.group.bin')
     if built is not None and weapons._hash_of(start) not in weapons._hashes(built):

@@ -4,13 +4,23 @@
 -- every way to see it. This mod gives it a window: a command line with history, a browser for all
 -- console variables, cheats and the developer commands. Press ` or F1.
 --
--- Game access goes through the standard library in scripts/boz (console, player, fly, rounds).
+-- Game access goes through the standard library in scripts/boz: console, player, fly, rounds,
+-- zombies, weapons, score, pickups, pieces, effects, map, deadops (the Game tab).
 
 local console = require("boz.console")
 local player = require("boz.player")
 local fly = require("boz.fly")
 local rounds = require("boz.rounds")
 local levels = require("boz.levels")
+local zombies = require("boz.zombies")
+local weapons = require("boz.weapons")
+local score = require("boz.score")
+local pickups = require("boz.pickups")
+local pieces = require("boz.pieces")
+local effects = require("boz.effects")
+local map = require("boz.map")
+local deadops = require("boz.deadops")
+local spawns = require("boz.spawns")
 
 -- The Developer mod is the default test runner: the Blender add-on's Build & Run asks it to start
 -- the level just saved, once.
@@ -32,6 +42,11 @@ local state = {
     cmd_filter = "",
     cmd_args = "",
     round = 1,
+    round_text = "",
+    points_text = "",
+    weapon_text = "",
+    perk = 1,
+    powerup = 1,
     values = {},
     values_age = math.huge,
 }
@@ -439,47 +454,288 @@ local function cheats_tab(dt)
     end
     ui.text_disabled("Noclip: move keys fly where you look, Space up, Left Ctrl down.")
 
-    ui.separator("Zombies match")
-    if ui.button("Start next round") then
-        rounds.start_next()
+    ui.text_disabled("Zombies, rounds, weapons and the map: the Game tab.")
+end
+
+-- The Game tab: the match through the standard library. Every action reports in the Console tab.
+
+local function report(ok, done, why)
+    if ok then
+        info(done)
+    else
+        fail(why or "not possible here (start a Zombies match)")
     end
+end
+
+-- A spot zombies can reach: the spawn point nearest the player.
+local function spawn_spot()
+    local here = player.position()
+    local point = here and spawns.nearest(here)
+    return point and point:position() or here
+end
+
+local function each_zombie(fn)
+    local n = 0
+    for z in zombies.each("all") do
+        if z:alive() and not z:dying() then
+            fn(z)
+            n = n + 1
+        end
+    end
+    return n
+end
+
+local function round_section()
+    local round = rounds.current()
+    if not round then
+        ui.text_disabled("Start a Zombies match.")
+        return
+    end
+    ui.text(string.format("Round %d   zombies left %s   alive %s", round, tostring(rounds.zombies_left() or "?"),
+        tostring(rounds.alive() or "?")))
+    local submitted, text = ui.input("Round##setround", state.round_text, {submit = true, width = 80,
+        hint = tostring(round)})
+    state.round_text = text
     ui.same_line()
+    if ui.button("Set round") or submitted then
+        local number = tonumber(text)
+        if number and number >= 1 then
+            report(rounds.set(number), "Round " .. math.floor(number) .. " started")
+        else
+            fail("Type a round number (1 or more)")
+        end
+        state.round_text = ""
+    end
+    ui.tooltip("Starts that round now, with its own zombie count and health; zombies left over go.")
     if ui.button("Spawn a zombie") then
-        rounds.spawn_zombie()
+        report(zombies.spawn_at_point(nil, false), "Spawned a zombie")
     end
     ui.same_line()
     if ui.button("Kill all zombies") then
-        rounds.kill_all()
+        info("Killed " .. each_zombie(function(z) z:kill() end))
     end
     ui.same_line()
-    if ui.button("Power on") then
-        rounds.power_on()
+    local spawning = console.get("DisableZombieSpawning") ~= "true"
+    local changed, on = ui.checkbox("Zombies spawn", spawning)
+    if changed then
+        rounds.set_spawning(on)
+        info(on and "Zombies spawn again" or "No more zombies spawn")
     end
+    ui.same_line()
     if ui.button("Pause / resume time") then
         rounds.toggle_pause()
+    end
+end
+
+local function zombies_section()
+    if ui.button("Freeze all") then
+        info("Froze " .. each_zombie(function(z) z:freeze() end))
+    end
+    ui.same_line()
+    if ui.button("Burn all") then
+        info("Set " .. each_zombie(function(z) z:burn() end) .. " on fire")
+    end
+    ui.same_line()
+    if ui.button("Explode all") then
+        info("Exploded " .. each_zombie(function(z) z:explode() end))
+    end
+    ui.same_line()
+    if ui.button("All sprint") then
+        info(each_zombie(function(z) z:set_speed("sprint") end) .. " sprinting")
+    end
+    if ui.button("Spawn a hellhound") then
+        local at = spawn_spot()
+        local dog, why = at and zombies.spawn("zombie_dog", at)
+        report(dog, "Spawned a hellhound", why or "no spot to spawn at")
+    end
+    ui.same_line()
+    if ui.button("Spawn a monkey") then
+        local at = spawn_spot()
+        local monkey, why = at and zombies.spawn("zombie_monkey", at)
+        report(monkey, "Spawned a monkey", why)
+    end
+    ui.same_line()
+    if ui.button("Spawn George") then
+        local at = spawn_spot()
+        local george, why = at and zombies.spawn_george(at)
+        report(george, "George is here", why)
+    end
+    ui.same_line()
+    if ui.button("Bring the nearest here") then
+        local here = player.position()
+        local z = here and zombies.nearest(here)
+        report(z and z:teleport(spawn_spot()), "Brought a zombie to the nearest spawn point", "no zombie")
+    end
+    ui.text_disabled("Hellhounds, monkeys and George spawn where their map (or a build that uses them) loaded them.")
+end
+
+local function player_section()
+    local hp, max = player.health()
+    if not hp then
+        ui.text_disabled("Start a Zombies match.")
+        return
+    end
+    ui.text(string.format("Health %.0f / %d   points %s   stance %s", hp, max, tostring(score.get()),
+        tostring(player.stance())))
+    if ui.button("Full health") then
+        player.set_health(max)
+    end
+    ui.same_line()
+    local submitted, text = ui.input("Points##points", state.points_text, {submit = true, width = 90})
+    state.points_text = text
+    ui.same_line()
+    if ui.button("Set points") or submitted then
+        local value = tonumber(text)
+        if value then
+            score.set(math.max(0, math.floor(value)))
+            info("Points set to " .. math.floor(value))
+        end
+        state.points_text = ""
+    end
+    ui.same_line()
+    if ui.button("+10000") then
+        score.add(10000)
+    end
+    local _, perk = ui.combo("##perk", state.perk, player.PERKS)
+    state.perk = perk
+    ui.same_line()
+    if ui.button("Give perk") then
+        report(player.give_perk(player.PERKS[perk]), "Gave " .. player.PERKS[perk])
+    end
+    ui.same_line()
+    if ui.button("Take perk") then
+        report(player.take_perk(player.PERKS[perk]), "Took " .. player.PERKS[perk], "the player does not have it")
+    end
+    ui.same_line()
+    if ui.button("All perks") then
+        run("perks")
+    end
+    ui.same_line()
+    if ui.button("No perks") then
+        report(player.take_all_perks(), "Took every perk")
+    end
+end
+
+local function weapons_section()
+    local gun = weapons.current()
+    if not gun then
+        ui.text_disabled("Start a Zombies match.")
+        return
+    end
+    local owned = {}
+    for _, slot in ipairs({"primary", "secondary", "grenade", "tactical"}) do
+        local w = weapons.slot(slot)
+        if w then
+            owned[#owned + 1] = slot .. ": " .. w.name
+        end
+    end
+    ui.text(table.concat(owned, "   "))
+    if ui.button("Pack-a-Punch it") then
+        report(weapons.upgrade(gun.name), "Upgraded " .. gun.name, gun.name .. " has no upgrade")
+    end
+    ui.same_line()
+    if ui.button("Max ammo") then
+        weapons.refill()
+        info("Ammo refilled")
+    end
+    ui.same_line()
+    if ui.button("Drop it") then
+        report(weapons.take(gun.name), "Took " .. gun.name, "it is the only gun")
+    end
+    ui.same_line()
+    local submitted, text = ui.input("##giveweapon", state.weapon_text, {submit = true, width = 160,
+        hint = "weapon name (mp40, raygun)"})
+    state.weapon_text = text
+    ui.same_line()
+    if ui.button("Give") or submitted then
+        local name = text:match("^%s*(.-)%s*$")
+        report(name ~= "" and weapons.give(name), "Gave " .. name, "no weapon " .. name .. " on this map")
+        state.weapon_text = ""
+    end
+end
+
+local function powerups_section()
+    local _, index = ui.combo("##powerup", state.powerup, pickups.TYPES)
+    state.powerup = index
+    local name = pickups.TYPES[index]
+    ui.same_line()
+    if ui.button("Use it now") then
+        report(pickups.give(name), "Power-up: " .. name)
+    end
+    ui.same_line()
+    if ui.button("Drop it here") then
+        local here = player.position()
+        report(here and pickups.spawn(name, here), "Dropped " .. name)
+    end
+end
+
+local function map_section()
+    if ui.button("Power on") then
+        map.power_on()
+    end
+    ui.same_line()
+    if ui.button("Open every door") then
+        local n = 0
+        for _, door in ipairs(pieces.doors()) do
+            if door:get("m_DoorState") ~= 2 then
+                door:use_free()
+                n = n + 1
+            end
+        end
+        info("Opening " .. n .. " doors")
+    end
+    ui.same_line()
+    if ui.button("Move the box") then
+        local boxes, current = pieces.boxes(), pieces.active_box()
+        local others = {}
+        for _, box in ipairs(boxes) do
+            if not current or box.entity ~= current.entity then
+                others[#others + 1] = box
+            end
+        end
+        report(#others > 0 and pieces.move_box(others[math.random(#others)]), "The box moves", "only one box spot here")
+    end
+    ui.same_line()
+    if ui.button("Fix barricades") then
+        pieces.fix_all_barricades()
+    end
+    if ui.button("Explosion at the crosshair") then
+        local at = effects.aim()
+        report(at and effects.explode(at), "Boom")
     end
     ui.same_line()
     if ui.button("Wireframe") then
         run("wireframe")
     end
+end
 
-    ui.separator("Dead Ops Arcade")
-    local round_changed, round = ui.slider("Round##round", state.round, 1, 100, true)
+local function deadops_section()
+    local round_changed, round = ui.slider("Round##doround", state.round, 1, 100, true)
     if round_changed then
         state.round = round
     end
     ui.same_line()
-    if ui.button("Set round") then
-        run("SetRound " .. state.round)
+    if ui.button("Set round##do") then
+        deadops.set_round(state.round)
     end
-    if ui.button("Zombie spawning on / off") then
-        run("toggleEnemySpawn")
+    if ui.button("Zombie spawning on / off##do") then
+        deadops.spawning()
     end
     ui.same_line()
     if ui.button("Spawn an enemy") then
-        run("spawnEnemy")
+        deadops.spawn_enemy()
     end
-    ui.text_disabled("Commands answer only in the mode they belong to. Results show in the Console tab.")
+    ui.text_disabled("Dead Ops commands answer only in Dead Ops Arcade.")
+end
+
+local function game_tab()
+    ui.collapsing("Round", round_section, true)
+    ui.collapsing("Zombies", zombies_section, true)
+    ui.collapsing("Player", player_section, true)
+    ui.collapsing("Weapons", weapons_section, true)
+    ui.collapsing("Power-ups", powerups_section, false)
+    ui.collapsing("Map", map_section, false)
+    ui.collapsing("Dead Ops Arcade", deadops_section, false)
 end
 
 local function variables_tab(dt)
@@ -574,6 +830,7 @@ events.on("frame", function(dt)
             ui.tab_bar("developer", function()
                 ui.tab("Console", console_tab)
                 ui.tab("Cheats", function() cheats_tab(dt) end)
+                ui.tab("Game", game_tab)
                 ui.tab("Variables", function() variables_tab(dt) end)
                 ui.tab("Commands", commands_tab)
             end)

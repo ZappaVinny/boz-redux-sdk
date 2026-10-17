@@ -95,7 +95,7 @@ Available: Zombies match (rounds).
 | `KillAllZombies` |  | Zombies: kills every zombie. | works |
 | `SpawnWaveZombie` |  | Zombies: spawns a zombie that counts toward the current round. |  |
 | `SpawnZombie` |  | Zombies: spawns one zombie. | works |
-| `StartWave` |  | Zombies: starts the next round. | works |
+| `StartWave` | `<wave>` | Zombies: starts the named wave (a CWave resource such as wave1) as the next round. Without a name it ends the rounds (no wave). boz.rounds.set / start_next start rounds properly. | works |
 
 ### CSpawnManager
 

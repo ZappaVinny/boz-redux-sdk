@@ -783,7 +783,7 @@ return {
         ["StartTeleportLobby"] = {"", ""},
         ["StartTeleportProjector"] = {"", ""},
         ["StartTeleportRandom"] = {"", ""},
-        ["StartWave"] = {"", "Zombies: starts the next round."},
+        ["StartWave"] = {"<wave>", "Zombies: starts the named wave (a CWave resource such as wave1) as the next round. Without a name it ends the rounds (no wave). boz.rounds.set / start_next start rounds properly."},
         ["StopSearchRooms"] = {"", ""},
         ["SwitchFog"] = {"", ""},
         ["SwitchPowerOn"] = {"", "Turns the map's power on."},

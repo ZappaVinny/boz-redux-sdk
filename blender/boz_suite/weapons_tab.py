@@ -23,9 +23,10 @@ from bpy.types import Operator, Panel, PropertyGroup, UIList
 from . import link
 
 try:
-    from bozkit import assets, blender_scene, library, viewmodel, weapon_model, weapons as wp
+    from bozkit import assets, blender_scene, hud_icons, library, viewmodel, weapon_model, weapons as wp
 except ModuleNotFoundError:
-    from ._vendor.bozkit import assets, blender_scene, library, viewmodel, weapon_model, weapons as wp
+    from ._vendor.bozkit import (assets, blender_scene, hud_icons, library, viewmodel, weapon_model,
+                                 weapons as wp)
 
 WORKSPACE = "Weapons"
 SCRIPT_TEMPLATE = '''-- {name}: a weapon script. self is the weapon: self.name, and the live weapon's
@@ -158,7 +159,7 @@ def save(context, weapon) -> None:
         return
     is_new = weapon.base and weapon.base != weapon.name
     if not weapon.fields and not weapon.level and not is_new and not weapon.script \
-            and not weapon.model and not weapon.display and not weapon.sounds:
+            and not weapon.model and not weapon.display and not weapon.sounds and not weapon.icon:
         wp.delete_def(source, weapon.name)
     else:
         wp.save_def(source, weapon)
@@ -359,6 +360,12 @@ def refresh_fields(context) -> None:
     try:
         scene.boz_weapon_fields.clear()
         scene.boz_weapon_display = weapon_def(context, item.name).display if item else ""
+        if item is not None:
+            like = (weapon_def(context, item.name).icon or {}).get("like")
+            try:
+                scene.boz_icon_like = like or "BASE"
+            except TypeError:
+                pass
         if item is None:
             return
         values, base = current_values(context, item.name)
@@ -384,6 +391,10 @@ def refresh_fields(context) -> None:
             row.changed = spec.key in changed
     finally:
         _state["refreshing"] = False
+    try:
+        update_icon_preview(context)
+    except (RuntimeError, AttributeError):
+        pass
 
 
 def refresh(context) -> None:
@@ -826,13 +837,153 @@ class BOZ_PT_weapon_script(_WeaponsPanel, Panel):
         row.operator(BOZ_OT_weapon_script_clear.bl_idname, text="", icon="X")
 
 
+# --- HUD icon ------------------------------------------------------------------------------
+
+ICON_IMAGE = "BOZ HUD icon"
+
+
+def update_icon_preview(context) -> None:
+    """Draw the selected weapon's HUD picture into the preview image."""
+    item = selected(link.map_scene())
+    source = source_dir()
+    picture = None
+    if item is not None and source is not None:
+        weapon = weapon_def(context, item.name)
+        try:
+            picture = hud_icons.preview(_pack(), source, weapon, base_level(context))
+        except (hud_icons.IconError, OSError, ValueError, KeyError):
+            picture = None
+    image = bpy.data.images.get(ICON_IMAGE)
+    if picture is None:
+        if image is not None:
+            bpy.data.images.remove(image)
+        return
+    from PIL import Image
+    canvas = Image.new("RGBA", picture.size, (32, 32, 32, 255))   # as on the dark HUD
+    canvas.alpha_composite(picture)
+    canvas = canvas.transpose(Image.FLIP_TOP_BOTTOM)
+    if image is None or tuple(image.size) != canvas.size:
+        if image is not None:
+            bpy.data.images.remove(image)
+        image = bpy.data.images.new(ICON_IMAGE, canvas.size[0], canvas.size[1], alpha=True)
+    image.pixels.foreach_set([v / 255.0 for v in canvas.tobytes()])
+    image.update()
+    image.preview_ensure()
+    image.preview.reload()
+
+
+def _icon_like_items(self, context):
+    return [("BASE", "Its base weapon's", "")] + [i for i in weapon_items(context, include_none=False)]
+
+
+def _icon_like_changed(self, context):
+    if _state.get("refreshing"):
+        return
+    item = selected(link.map_scene())
+    if item is None:
+        return
+    weapon = weapon_def(context, item.name)
+    value = self.boz_icon_like
+    weapon.icon = {} if value == "BASE" or value == weapon.source else {"like": value}
+    save(context, weapon)
+    update_icon_preview(context)
+
+
+class BOZ_OT_weapon_icon_image(Operator):
+    bl_idname = "boz.weapon_icon_image"
+    bl_label = "Use my picture"
+    bl_description = ("A picture of your own for the HUD (PNG with a transparent background, the "
+                      "gun seen from the side, pointing left as the game's are). The build fits it in")
+    filepath: StringProperty(subtype="FILE_PATH")
+    filter_glob: StringProperty(default="*.png", options={"HIDDEN"})
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        import shutil
+        item = selected(link.map_scene())
+        source = source_dir()
+        if item is None or source is None:
+            return {"CANCELLED"}
+        try:
+            from PIL import Image
+            with Image.open(self.filepath) as picture:
+                hud_icons.fit(picture)
+        except (OSError, ValueError) as exc:
+            self.report({"ERROR"}, f"Not a usable picture: {exc}")
+            return {"CANCELLED"}
+        folder = hud_icons.icons_dir(source)
+        folder.mkdir(parents=True, exist_ok=True)
+        name = f"{item.name}.png"
+        shutil.copyfile(self.filepath, folder / name)
+        weapon = weapon_def(context, item.name)
+        weapon.icon = {"image": name}
+        save(context, weapon)
+        update_icon_preview(context)
+        link.append_log(f"sdk   {item.name}: HUD icon from {Path(self.filepath).name}")
+        return {"FINISHED"}
+
+
+class BOZ_OT_weapon_icon_reset(Operator):
+    bl_idname = "boz.weapon_icon_reset"
+    bl_label = "Base weapon's icon"
+    bl_description = "Show its base weapon's HUD picture again"
+
+    def execute(self, context):
+        item = selected(link.map_scene())
+        if item is None:
+            return {"CANCELLED"}
+        weapon = weapon_def(context, item.name)
+        weapon.icon = {}
+        save(context, weapon)
+        _state["refreshing"] = True
+        try:
+            link.map_scene().boz_icon_like = "BASE"
+        finally:
+            _state["refreshing"] = False
+        update_icon_preview(context)
+        return {"FINISHED"}
+
+
+class BOZ_PT_weapon_icon(_WeaponsPanel, Panel):
+    bl_idname = "BOZ_PT_weapon_icon"
+    bl_label = "HUD icon"
+
+    @classmethod
+    def poll(cls, context):
+        return super().poll(context) and selected(link.map_scene()) is not None
+
+    def draw(self, context):
+        layout = self.layout
+        scene = link.map_scene()
+        weapon = weapon_def(context, selected(scene).name)
+        image = bpy.data.images.get(ICON_IMAGE)
+        if image is not None and image.preview is not None:
+            layout.template_icon(icon_value=image.preview.icon_id, scale=6.0)
+        else:
+            layout.label(text="(no preview: build the asset library in the launcher)", icon="IMAGE_DATA")
+        own = (weapon.icon or {}).get("image")
+        if own:
+            row = layout.row(align=True)
+            row.label(text=f"Your picture: {own}", icon="IMAGE_DATA")
+            row.operator(BOZ_OT_weapon_icon_reset.bl_idname, text="", icon="X")
+        else:
+            layout.prop(scene, "boz_icon_like", text="Same as")
+        layout.operator(BOZ_OT_weapon_icon_image.bl_idname, icon="FILEBROWSER")
+        layout.label(text="Shown top right in game, beside the ammo count")
+
+
 GROUP_PANELS = [_make_group_panel(group, index) for index, group in enumerate(wp.GROUPS)]
 
 CLASSES = (BOZ_WeaponField, BOZ_WeaponItem, BOZ_PoolItem, BOZ_OT_box_pool, BOZ_UL_weapons,
            BOZ_OT_weapon_import, BOZ_OT_weapon_new, BOZ_OT_weapon_remove, BOZ_OT_weapon_reset,
            BOZ_OT_weapon_field_help, BOZ_OT_weapon_script_new, BOZ_OT_weapon_script_open,
            BOZ_OT_weapon_script_clear, BOZ_OT_weapon_start, BOZ_OT_weapons_refresh,
-           BOZ_PT_weapons, BOZ_PT_weapon_properties, *GROUP_PANELS, BOZ_PT_weapon_script)
+           BOZ_OT_weapon_icon_image, BOZ_OT_weapon_icon_reset,
+           BOZ_PT_weapons, BOZ_PT_weapon_properties, BOZ_PT_weapon_icon, *GROUP_PANELS,
+           BOZ_PT_weapon_script)
 
 
 # --- The view (weapon_view) ----------------------------------------------------------------
@@ -888,10 +1039,14 @@ def register():
         description="Spare rounds of the starting weapon (the game's default: 40)",
         update=_start_reserve_changed)
     bpy.types.WindowManager.boz_pool_items = CollectionProperty(type=BOZ_PoolItem)
+    bpy.types.Scene.boz_icon_like = EnumProperty(
+        name="HUD icon", items=_icon_like_items, update=_icon_like_changed,
+        description="Show another weapon's HUD picture (any weapon of the map)")
 
 
 def unregister():
     from . import weapon_view
+    del bpy.types.Scene.boz_icon_like
     del bpy.types.WindowManager.boz_pool_items
     del bpy.types.Scene.boz_start_reserve
     del bpy.types.Scene.boz_weapon_display
