@@ -65,14 +65,16 @@ class Formats(unittest.TestCase):
         def state(name, length):
             return (struct.pack('<IIIiihIBB', iw_hash(name), 5, 6, 4096, length, 0, 0, 0, 0)
                     + struct.pack('<I', 0) * 4)
-        body = struct.pack('<I', 2) + state('reloading', 2333) + state('idle', 0) + struct.pack('<h', 1)
-        changes = anim.asm_lengths(body, {iw_hash('reloading'): 3067, iw_hash('idle'): 500})
+        body = (struct.pack('<I', 3) + state('reloading', 2333) + state('idle', 0) + state('Aim_up', 0)
+                + struct.pack('<h', 1))
+        changes = anim.asm_lengths(body, {iw_hash('reloading'): 3067, iw_hash('idle'): 500,
+                                          iw_hash('Aim_up'): 533})
         out = bytearray(body)
         for offset, value in changes.items():
             struct.pack_into('<I', out, offset, value)
         lengths = [struct.unpack_from('<i', out, at + anim.LENGTH_AFTER_ANIM)[0]
                    for _name, at, _second in anim.asm_anim_offsets(bytes(out))]
-        self.assertEqual(lengths, [3067, 0])        # idle has no length and keeps none
+        self.assertEqual(lengths, [3067, 0, 533])   # idle keeps none; aiming in needs one
 
 
 class Clips(unittest.TestCase):

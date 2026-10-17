@@ -1,5 +1,5 @@
 # What the arguments of game events mean (boz.game_events handlers get subject, sender, a, b).
-# Kept by hand from reverse engineering; tools/events_doc.py merges it into docs/game-events.md.
+# Kept by hand from reverse engineering; tools/docgen/events_doc.py merges it into docs/game-events.md.
 
 [SUBJECT_NEW_WAVE]
 note = "A round starts (CWaveManager::StartWave). a: StartWaveInfo* (+4 wave name hash, +8 health and +0xc zombie count for a special round, +0x10 next wave, +0x14 round number when set)."

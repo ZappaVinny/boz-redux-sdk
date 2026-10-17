@@ -9,7 +9,7 @@
 --
 -- The game describes its components and resources to its own reflection system (CIsClassInfo:
 -- 359 classes, their bases and fields with offset, size and type); boz/reflection_data.lua holds
--- that description (tools/stdlib_data.py, from the game definition). docs/toolkit-fields.md
+-- that description (tools/stdlib/generate_data.py, from the game definition). docs/toolkit-fields.md
 -- explains what the fields do.
 --
 -- Types read: unsigned int, int, short, char, unsigned char, bool, float, CIwFVec3 {x, y, z},

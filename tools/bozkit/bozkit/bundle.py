@@ -64,8 +64,8 @@ class Entry:
 
 def runtime_names() -> dict[int, list[int]]:
     """{class hash: [name hashes]} from the game definition's runtime names."""
-    from .schema import GAMEDEF
-    for path in (GAMEDEF / 'runtime' / 'boz-1.0.11.toml', Path(__file__).with_name('runtime_names.toml')):
+    from .schema import gamedef_file
+    for path in (gamedef_file('runtime'), Path(__file__).with_name('runtime_names.toml')):
         if path.is_file():
             data = tomllib.loads(path.read_text(encoding='utf-8'))
             return {iw_hash(c['name']): [iw_hash(n) for n in c.get('names', [])]

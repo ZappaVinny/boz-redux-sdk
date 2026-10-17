@@ -13,11 +13,13 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from . import maps
+
 PROJECT_FILE = 'boz-project.toml'
 PROJECT_SCHEMA = 2
 SUPPORTED_SCHEMAS = (1, 2)
 KINDS = ('script', 'map')
-MAP_TEMPLATES = ('empty', 'debug', 'kino', 'callofthedead', 'ascension', 'tutorial')
+MAP_TEMPLATES = ('empty', 'debug') + maps.SHIPPED
 GAME_VERSION = '1.0.11'
 BUILD_REPORT = 'boz-build.json'
 ID_RE = re.compile(r'^[a-z][a-z0-9_-]*$')

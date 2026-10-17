@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(boz_navmesh CXX)
 
-# Recast and Detour from the tools/recast submodule (zlib licence), built as static libraries.
-set(RECAST ${CMAKE_CURRENT_SOURCE_DIR}/../recast)
+# Recast and Detour from the third_party/recast submodule (zlib licence), built as static libraries.
+set(RECAST ${CMAKE_CURRENT_SOURCE_DIR}/third_party/recast)
 file(GLOB RECAST_SOURCES ${RECAST}/Recast/Source/*.cpp)
 file(GLOB DETOUR_SOURCES ${RECAST}/Detour/Source/*.cpp)
 

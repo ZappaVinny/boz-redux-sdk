@@ -5,7 +5,7 @@ player, menus, the console and more, with the game's addresses, offsets and even
 inside. Mods should use it instead of the client's low-level `game`/`hook` functions
 ([lua-api.md](lua-api.md)) wherever it covers what they need.
 
-This page is generated from the comments in `lib/boz/*.lua` (`tools/stdlib_doc.py`); see
+This page is generated from the comments in `lib/boz/*.lua` (`tools/stdlib/generate_doc.py`); see
 [making-mods.md](making-mods.md) for how to use it in a mod.
 
 Using it in a mod: an SDK project's build adds it to the mod as `scripts/boz`; then
@@ -216,7 +216,7 @@ each kind has its AI controller class (zombies.KINDS); CWaveManager::OnSpawnZomb
 | `zombies.kill_all(kind)` | Kills every living AI of a kind (default "all"), each as if the player did (the kills count). Returns how many. |
 | `zombies.spawn_one()` | Spawns one zombie the game's way (SpawnZombie: at a spawn point near the player). |
 | `zombies.set_invulnerable(on)` | Makes zombies and the other AI unhurtable (true) or normal again (the AIGodmode cvar). |
-| `zombies.credit_kills(event)` | Makes the kills a zombie deals itself while handling `event` count as the player's (stats, achievements), e.g. "SUBJECT_ZOMBIE_GERSCH_DEATH" for the zombies a black hole takes. The game kills them with no attacker; while a zombie handles the event, damage without one is the player's. |
+| `zombies.credit_kills(event)` | Makes the kills a zombie deals itself while handling `event` count as the player's (stats, achievements), e.g. "SUBJECT_ZOMBIE_GERSCH_DEATH" for the zombies a black hole takes. The game kills them with CHealth::Damage and no attacker; that damage becomes the player's. |
 
 ### boz.weapons
 
@@ -915,7 +915,7 @@ local waves = reflect.singleton("CWaveManager")      -- managers by class name
 for name, value in pairs(reflect.dump(perk, "CPerk")) do print(name, value) end
 ```
 
-The game describes its components and resources to its own reflection system (CIsClassInfo: 359 classes, their bases and fields with offset, size and type); boz/reflection_data.lua holds that description (tools/stdlib_data.py, from the game definition). docs/toolkit-fields.md explains what the fields do.
+The game describes its components and resources to its own reflection system (CIsClassInfo: 359 classes, their bases and fields with offset, size and type); boz/reflection_data.lua holds that description (tools/stdlib/generate_data.py, from the game definition). docs/toolkit-fields.md explains what the fields do.
 
 Types read: unsigned int, int, short, char, unsigned char, bool, float, CIwFVec3 {x, y, z}, CIwFQuat {x, y, z, w}, CIwColour {r, g, b, a}, string (std::string: its characters' pointer first), NetworkProperty<T> (the value at +4; writing marks it changed at +8), vector<T> (begin, end), list<T> (header pointer; nodes: next, previous, value at +8), enums (unsigned int), CIsTimer, bitset (raw bits). Containers and strings are read-only.
 
@@ -1272,7 +1272,7 @@ cvars.commands()                    every command {name, args, note}
 
 <details><summary>How it works</summary>
 
-boz.console registers and sets them (CIwConsole); boz/cvar_data.lua is the game definition's catalog (tools/stdlib_data.py) with the notes of tools/symbols/console_notes.toml.
+boz.console registers and sets them (CIwConsole); boz/cvar_data.lua is the game definition's catalog (tools/stdlib/generate_data.py) with the notes of tools/symbols/console_notes.toml.
 
 </details>
 

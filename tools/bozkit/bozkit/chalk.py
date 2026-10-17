@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from . import blender_scene as scene
 from . import group, levels, native, resources
+from . import maps
 from .hashing import iw_hash
 
 SIZE = (128, 64)
@@ -76,7 +77,7 @@ def find_decals(pack, cache_path=None) -> dict[int, Decal]:
             pass
     names = pack.names() if hasattr(pack, 'names') else []
     found: dict[int, Decal] = {}
-    for level in levels.SHIPPED_LEVELS:
+    for level in maps.SHIPPED:
         statics = f'levels/{level}/{level}_statics.group.bin'
         if statics not in names:
             continue

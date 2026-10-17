@@ -102,7 +102,7 @@ def _parsed(read, path):
 def catalog(read, names, known: dict | None = None) -> list[Entry]:
     """Every effect and projectile of the game: the shared effects, each map's own effect groups
     and each map's projectiles (labelled by the weapons that fire them)."""
-    from . import levels, resources, weapons
+    from . import resources, weapons
     known = dict(weapons._names() if known is None else known)
     names = list(names)
     out = []

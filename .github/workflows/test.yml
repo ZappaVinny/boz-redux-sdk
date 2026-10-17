@@ -26,7 +26,17 @@ jobs:
         run: python3 -m unittest discover tools/bozkit/tests -v
       - name: Check installed CLI
         run: bozkit --help
-      - name: Verify generated standard-library reference
+      - name: Lint (pyflakes rules)
+        run: pipx run ruff==0.6.9 check --select F tools/bozkit/bozkit tools/stdlib tools/docgen blender/boz_suite
+      - name: Standard library tests
         run: |
-          python3 tools/stdlib_doc.py
-          git diff --exit-code -- docs/standard-library.md
+          sudo apt-get install -y lua5.4
+          lua5.4 lib/tests/run.lua
+      - name: Generated files are current
+        run: |
+          python3 tools/stdlib/generate_data.py
+          python3 tools/stdlib/generate_doc.py
+          python3 tools/docgen/events_doc.py
+          python3 tools/docgen/weapons_doc.py
+          python3 tools/stdlib/sync.py --check
+          git diff --exit-code -- lib docs mods

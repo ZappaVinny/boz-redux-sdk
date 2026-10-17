@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from . import library as asset_library
+from . import maps
 from . import project as sdk_project
 from . import sdkhome
 
@@ -251,7 +252,7 @@ def _build_window():
                             'the only weapon', True),
                            ('debug', 'Debug arena', 'A walled arena with zombie spawns, Juggernog '
                             'and power: the quickest way to test', bool(self.maps))]
-                for key, label in asset_library.MAPS.items():
+                for key, label in maps.LABELS.items():
                     entries.append((key, label, 'The whole original map to change and add to '
                                     '(a fresh copy)', key in self.maps))
                 self.note.setText('Open in Editor to build the map; Build && Run compiles it and '
@@ -775,7 +776,7 @@ def _build_window():
                 self.kind.addItem(asset_library.KIND_LABELS[kind], kind)
             self.level = QComboBox()
             self.level.addItem('All maps', '')
-            for name, label in asset_library.MAPS.items():
+            for name, label in maps.LABELS.items():
                 self.level.addItem(label, name)
             self.level.addItem('Shared (every map)', 'shared')
             self.named = QCheckBox('Named only')
@@ -898,7 +899,7 @@ def _build_window():
                 return
             path = self.library.thumb_path(asset)
             self.preview.setPixmap(QPixmap(str(path)) if path else QPixmap())
-            maps = ', '.join(asset_library.MAPS.get(name, 'Shared') for name in asset.maps)
+            maps = ', '.join(maps.LABELS.get(name, 'Shared') for name in asset.maps)
             rows = [f'<b>{html.escape(asset.title)}</b>',
                     asset_library.KIND_LABELS[asset.kind][:-1],
                     f'Name: {html.escape(asset.name) if asset.name else "<i>not stored in the game</i>"}',

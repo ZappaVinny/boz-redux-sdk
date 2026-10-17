@@ -25,6 +25,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import maps
 from . import derbh, group
 from .hashing import iw_hash
 
@@ -32,8 +33,6 @@ CHILDREN = 0x3B495DC0  # section listing child groups; its name string is not in
 LEVEL = iw_hash('CLevel')
 RESOLUTION_STRING = iw_hash('CResolutionSpecificString')
 HEADER = bytes((0x3D, 0x03, 0x07, 0x01, 0x00, 0x00))
-SHIPPED_LEVELS = ('kino', 'ascension', 'callofthedead', 'tutorial')
-GEAR = {'tutorial': 'kino'}  # levels whose weapons and arms groups belong to another level
 PACK = 'blackops_etc.dz'
 
 
@@ -52,7 +51,7 @@ def check_name(name: str) -> str:
     """A level name the game's fixed 160-byte buffers and file paths accept."""
     if not name or len(name) > 40 or not all(c.islower() or c.isdigit() or c == '_' for c in name):
         raise LevelError('level names use lowercase letters, digits and _ (at most 40)')
-    if name in SHIPPED_LEVELS:
+    if name in maps.SHIPPED:
         raise LevelError(f'{name} is one of the game\'s own levels')
     return name
 
@@ -218,7 +217,7 @@ def common_files(pack: derbh.Pack, name: str, template: str = 'kino',
     fixed = fixed or _read(pack, 'fixed/fixed')
     add_loading_screen(fixed, template, name)
     files.groups['fixed.group.bin'] = fixed
-    template = GEAR.get(template, template)   # the tutorial uses Kino's weapons and arms
+    template = maps.gear(template)
     projectiles = f'weapon_projectiles_{name}'
     weapons = _copy(pack, f'weapons_{name}', 'ingame/weapons', f'weapons_{template}')
     weapon_children = []

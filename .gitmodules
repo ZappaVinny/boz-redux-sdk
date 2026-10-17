@@ -5,5 +5,5 @@
 	path = gamedef
 	url = https://github.com/ZappaVinny/boz-redux-gamedef.git
 [submodule "tools/recast"]
-	path = tools/recast
+	path = tools/navmesh/third_party/recast
 	url = https://github.com/recastnavigation/recastnavigation.git

@@ -14,6 +14,7 @@ import math
 from dataclasses import dataclass
 
 from . import anim, group as group_module, levels, resources, weapons
+from . import maps
 from .hashing import iw_hash
 
 SKEL = iw_hash('CIwAnimSkel')
@@ -72,7 +73,7 @@ class Rig:
 
     def __init__(self, read, level: str, weapon: str):
         from . import native
-        gear = weapons.GEAR.get(level, level)
+        gear = maps.gear(level)
         self.weapons_path = f'ingame/weapons/weapons_{gear}.group.bin'
         self.arms_path = f'ingame/characters/arms/arms_{gear}.group.bin'
         gun_data = _by_class(group_module.parse(read(self.weapons_path)))

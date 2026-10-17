@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Copies the standard library (lib/boz) into the reference mods that carry it (scripts/boz).
 
-    python3 tools/sync_stdlib.py           copy
-    python3 tools/sync_stdlib.py --check   exit 1 when a mod's copy differs (CI)
+    python3 tools/stdlib/sync.py           copy
+    python3 tools/stdlib/sync.py --check   exit 1 when a mod's copy differs (CI)
 
 A map project gets the standard library from bozkit at build time; only the reference mods in
 this repo keep a copy of their own, so they work as plain folders.
@@ -15,7 +15,7 @@ import shutil
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / 'lib' / 'boz'
 MODS = [ROOT / 'mods' / 'developer']
 GENERATED_PER_MOD = {'world_data.lua'}

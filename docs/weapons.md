@@ -171,6 +171,7 @@ bus: `weapon_given`, `weapon_equipped`, `weapon_reloaded` (`data.weapon`); `weap
 | Fires only when aiming | `requiresADS` |  | False | The trigger does nothing unless the player aims down sights. |
 | Aim assist | `autoAim` |  | True | The crosshair is pulled toward zombies. *Likely (from the shipped weapons).* |
 | Recoil | `recoil` |  | None | How much the view kicks per shot. Values: 0 None, 1 Light, 2 Medium, 3 Heavy. *Likely (from the shipped weapons).* |
+| Muzzle flash | `muzzleFlash` |  | 0 | The muzzle flash effect. |
 
 ### Ammo
 
@@ -248,6 +249,5 @@ bus: `weapon_given`, `weapon_equipped`, `weapon_reloaded` (`data.weapon`); `weap
 | Reload (rounds left) | `reloadPartialSequence` |  | 0 | A reload with rounds still in the clip. |
 | Bought | `buySound` |  | 0 | Played when it is bought. |
 | Bought (player) | `playerBuySound` |  | 0 | The buyer's own purchase sound. |
-| Muzzle flash | `muzzleFlash` |  | 0 | The muzzle flash effect. |
 
 <!-- fields:end -->

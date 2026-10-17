@@ -14,7 +14,7 @@
 -- map's own (only on that map).
 --
 -- How it works: boz.console registers and sets them (CIwConsole); boz/cvar_data.lua is the game
--- definition's catalog (tools/stdlib_data.py) with the notes of tools/symbols/console_notes.toml.
+-- definition's catalog (tools/stdlib/generate_data.py) with the notes of tools/symbols/console_notes.toml.
 
 local cvars = {}
 

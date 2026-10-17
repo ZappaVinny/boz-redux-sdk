@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes docs/standard-library.md from the standard lib's own comments (lib/boz/*.lua).
 
-  python3 tools/stdlib_doc.py [lib/boz] [docs/standard-library.md]
+  python3 tools/stdlib/generate_doc.py [lib/boz] [docs/standard-library.md]
 
 Each module's leading comment becomes its description; every public function (`function m.f(...)`
 or `function Class:f(...)`) and constant (`m.NAME = ...`) is listed with the `---` comment lines
@@ -12,7 +12,7 @@ import re
 import sys
 from pathlib import Path
 
-SDK = Path(__file__).resolve().parents[1]
+SDK = Path(__file__).resolve().parents[2]
 
 # Reference order and grouping. Modules not listed go to "Other".
 GROUPS = [
@@ -117,7 +117,7 @@ def render(lib):
         "inside. Mods should use it instead of the client's low-level `game`/`hook` functions",
         "([lua-api.md](lua-api.md)) wherever it covers what they need.",
         "",
-        "This page is generated from the comments in `lib/boz/*.lua` (`tools/stdlib_doc.py`); see",
+        "This page is generated from the comments in `lib/boz/*.lua` (`tools/stdlib/generate_doc.py`); see",
         "[making-mods.md](making-mods.md) for how to use it in a mod.",
         "",
         "Using it in a mod: an SDK project's build adds it to the mod as `scripts/boz`; then",

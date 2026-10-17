@@ -37,9 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .hashing import iw_hash
+from . import maps
 
-GEAR = {'tutorial': 'kino'}   # levels that use another level's weapons (bozkit.levels.GEAR)
-WEAPON_LEVELS = ('kino', 'callofthedead', 'ascension')
 ENTITY_SPEC = iw_hash('CIsEntitySpec')
 PLAYER_WEAPON = iw_hash('CPlayerWeapon')
 TEXTURE_CLASSES = {iw_hash('CIwTexture')}
@@ -169,7 +168,7 @@ FIELDS = (
     Field('buySound', 'Bought', 'Sounds', 'sound', '', 'Played when it is bought.', 0),
     Field('playerBuySound', 'Bought (player)', 'Sounds', 'sound', '',
           'The buyer\'s own purchase sound.', 0),
-    Field('muzzleFlash', 'Muzzle flash', 'Sounds', 'sound', '', 'The muzzle flash effect.', 0),
+    Field('muzzleFlash', 'Muzzle flash', 'Firing', 'effect', '', 'The muzzle flash effect.', 0),
 )
 FIELD_BY_KEY = {f.key: f for f in FIELDS}
 GROUPS = tuple(dict.fromkeys(f.group for f in FIELDS))
@@ -282,7 +281,7 @@ class GameWeapon:
 
 
 def weapons_group_path(level: str) -> str:
-    return f'ingame/weapons/weapons_{GEAR.get(level, level)}.group.bin'
+    return f'ingame/weapons/weapons_{maps.gear(level)}.group.bin'
 
 
 _KNOWN: dict[int, str] | None = None
@@ -313,7 +312,6 @@ def name_for(name_hash: int, resource_name: int | None, known: dict) -> str:
 def read_level(game, level: str) -> list[GameWeapon]:
     """The weapons of a level's weapons group (the game's own data)."""
     from . import group as group_module
-    from . import resources
 
     parsed = group_module.read_parsed(game.read, weapons_group_path(level))
     return read_group(parsed, level)
@@ -350,12 +348,19 @@ def read_group(parsed, level: str = '', extra_names=()) -> list[GameWeapon]:
     return out
 
 
+# The game's weapon specs that are not weapons a player buys: the perk drink (perkcola_*) and the
+# last-stand pistols (*_laststand*). Of the melee weapons (behaviour 0) only the Bowie knife is
+# bought (from the wall).
+NOT_BOUGHT_PREFIX, NOT_BOUGHT_PART = 'perkcola', 'laststand'
+BOUGHT_MELEE = {'knife_bowie'}
+
+
 def is_gun(weapon: GameWeapon) -> bool:
     """Weapons players buy and carry (not perk bottles, last-stand pistols or knives)."""
     name = weapon.name.lower()
-    if name.startswith('perkcola') or 'laststand' in name:
+    if name.startswith(NOT_BOUGHT_PREFIX) or NOT_BOUGHT_PART in name:
         return False
-    return weapon.values.get('behaviour') != 0 or name == 'knife_bowie'
+    return weapon.values.get('behaviour') != 0 or name in BOUGHT_MELEE
 
 
 # --- Project files -------------------------------------------------------------------------
@@ -488,7 +493,7 @@ def delete_def(source: Path, name: str) -> None:
 def default_index(game_weapons: list[GameWeapon], template: str) -> list[str]:
     """The weapons a new project lists: the Colt for an empty map, else every gun of its base."""
     if template in ('empty', ''):
-        return ['colt45']
+        return [DEFAULT_START]
     return [w.name for w in game_weapons if is_gun(w)]
 
 
@@ -543,7 +548,7 @@ def _bring(bundle, weapon: 'WeaponDef', groups: dict) -> list[str]:
     spec, and the state machines it names by text (m_weaponAsm into the weapons group, m_armsAsm
     into the arms group, where the game's own are). Returns warnings."""
     from . import resources
-    gear = GEAR.get(weapon.level, weapon.level)
+    gear = maps.gear(weapon.level)
     source = _hash_of(weapon.source)
     weapons_file = next(f for f, g in bundle.groups.items() if g is groups['weapons'])
     arms_file = next(f for f, g in bundle.groups.items() if g is groups['arms'])
@@ -570,10 +575,10 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=Non
     warnings = []
     aliases = {}
     weapons_group = groups['weapons']
-    base_gear = GEAR.get(base_level, base_level)
+    base_gear = maps.gear(base_level)
     # 1. Weapons of other levels.
     for weapon in defs:
-        if weapon.level and GEAR.get(weapon.level, weapon.level) != base_gear:
+        if weapon.level and maps.gear(weapon.level) != base_gear:
             if bundle is None:
                 raise WeaponError(f'weapon {weapon.name}: weapons of other maps need the game')
             warnings += _bring(bundle, weapon, groups)

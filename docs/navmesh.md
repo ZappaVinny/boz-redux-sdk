@@ -9,11 +9,11 @@ rebuilds the navmesh tiles around them.
 ## Build the helper
 
 The rebuild runs Recast through a small native program, `boz-navmesh`, built from
-`tools/navmesh` against the `tools/recast` submodule (recastnavigation 1.6.0, zlib licence):
+`tools/navmesh` against the `tools/navmesh/third_party/recast` submodule (recastnavigation 1.6.0, zlib licence):
 
 ```bash
 cd /home/zappa/Work/boz/boz-redux-sdk
-git submodule update --init tools/recast
+git submodule update --init tools/navmesh/third_party/recast
 cmake -S tools/navmesh -B tools/navmesh/build -DCMAKE_BUILD_TYPE=Release
 cmake --build tools/navmesh/build -j
 python3 tools/build_suite.py          # bundles the helper into the editor

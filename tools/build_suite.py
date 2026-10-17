@@ -20,6 +20,8 @@ TEMPLATE = ROOT / 'blender' / 'boz_suite'
 BOZKIT = ROOT / 'tools' / 'bozkit' / 'bozkit'
 OUTPUT = ROOT / 'build' / 'suite'
 NOT_VENDORED = {'desktop.py', '__main__.py'}
+sys.path.insert(0, str(BOZKIT.parent))
+from bozkit.schema import gamedef_file  # noqa: E402
 NAVMESH_HELPERS = [ROOT / 'tools' / 'navmesh' / 'build' / name
                    for name in ('boz-navmesh', 'boz-navmesh.exe')]
 GENERATE = '''
@@ -57,7 +59,7 @@ def _vendor(target: Path) -> None:
         if helper.is_file():
             shutil.copy2(helper, target / '_vendor' / 'bozkit' / helper.name)
     # The game definition's runtime names (bozkit.bundle: what classes play or spawn by name).
-    runtime = ROOT / 'gamedef' / 'runtime' / 'boz-1.0.11.toml'
+    runtime = gamedef_file('runtime')
     if runtime.is_file():
         shutil.copy2(runtime, target / '_vendor' / 'bozkit' / 'runtime_names.toml')
 

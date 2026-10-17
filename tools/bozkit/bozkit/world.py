@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import group, levels, png
+from . import maps
 from .hashing import iw_hash
 
 COLLISION_KINDS = ('floor', 'solid', 'none')
@@ -285,7 +286,7 @@ def _check_mesh(mesh: Mesh, label: str, problems: list[str]) -> None:
 def _validate_layout(world: Layout) -> list[str]:
     """Problems that would stop a layout from compiling."""
     problems = []
-    if world.base not in levels.SHIPPED_LEVELS:
+    if world.base not in maps.SHIPPED:
         problems.append(f'base level {world.base!r} is not one of the game\'s levels')
     names = [mesh.name for mesh in world.meshes + world.props]
     for mesh in world.meshes:
@@ -438,7 +439,7 @@ def template_world(template: str, pack=None) -> 'World':
         if pack is None:
             raise WorldError('the debug arena needs the game data (build the asset library)')
         return from_layout(_arena_layout(pack))
-    if template in levels.SHIPPED_LEVELS:
+    if template in maps.SHIPPED:
         if pack is None:
             raise WorldError(f'the {template} template needs the game data (build the asset library)')
         return World(template, inherit=True)
@@ -805,7 +806,7 @@ def _meshes_used(items) -> set[str]:
 def validate(world: World) -> list[str]:
     """Problems that would stop the world from compiling."""
     problems = []
-    if world.base not in levels.SHIPPED_LEVELS:
+    if world.base not in maps.SHIPPED:
         problems.append(f'base level {world.base!r} is not one of the game\'s levels')
     meshes = {mesh.name for mesh in world.meshes}
     for mesh in world.meshes:
@@ -1694,7 +1695,7 @@ class _Level:
                     if name == name_hash:
                         skel = levels._blob_prop(renderable.blob, 'skel')
                         return (reflect.typed_value(skel) if skel is not None else 0), model, skin
-        gear = levels.GEAR.get(self.base, self.base)
+        gear = maps.gear(self.base)
         weapons = getattr(self, 'weapon_group', None)
         if weapons is None:
             try:
@@ -1887,7 +1888,7 @@ class _Level:
         display = self._weapon_display(weapon) if weapon else None
         if display is None:
             return None
-        gear = levels.GEAR.get(self.base, self.base)
+        gear = maps.gear(self.base)
         body = self.game._find(levels.MODEL, display[1], [f'ingame/weapons/weapons_{gear}.group.bin'])
         if body is None and getattr(self, 'weapon_group', None) is not None:
             # An imported weapon's model is in the map's own weapons group.

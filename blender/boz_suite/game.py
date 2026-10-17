@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import bpy
 
-from ._bozkit import blender_scene, chalk, levels, library, native, resources, toolkit, world
+from ._bozkit import blender_scene, chalk, levels, library, maps, native, resources, toolkit, world
 from ._bozkit import hashing
 from . import meshes
 iw_hash = hashing.iw_hash
@@ -132,7 +132,7 @@ def _drawn_model(spec):
 def _model_group(models, base: str, model: int, group_path: str):
     """The group with an entity's model: its own map's groups first (a door from another map
     keeps its model in that map's rooms), then the base level's, then any level's."""
-    gear = levels.GEAR.get(base, base)
+    gear = maps.gear(base)
     prefer = (models.map_paths(group_path) if group_path else []) + [
         f"levels/{base}/{base}_dynamics.group.bin", world.INGAME,
         f"levels/{base}/{base}_statics.group.bin", f"ingame/weapons/weapons_{gear}.group.bin"]
@@ -201,7 +201,7 @@ def weapon_model(base: str, weapon: str):
     models = game_models()
     if models is None:
         return None
-    gear = levels.GEAR.get(base, base)
+    gear = maps.gear(base)
     path = f"ingame/weapons/weapons_{gear}.group.bin"
     value = int(weapon, 16) if weapon.startswith("0x") else iw_hash(weapon)
     try:
@@ -230,7 +230,7 @@ def weapon_names(base: str) -> list[str]:
     models = game_models()
     if models is None:
         return []
-    gear = levels.GEAR.get(base, base)
+    gear = maps.gear(base)
     try:
         weapons = models.group(f"ingame/weapons/weapons_{gear}.group.bin")
     except world.WorldError:

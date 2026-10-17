@@ -754,7 +754,7 @@ class BOZ_PT_sound_processor(_SoundsPanel, Panel):
 
 def _weapon_fields():
     from ._bozkit import weapons as wp
-    return [(f.key, f.label) for f in wp.FIELDS if f.kind == "sound" and f.key != "muzzleFlash"]
+    return [(f.key, f.label) for f in wp.FIELDS if f.kind == "sound"]
 
 
 class BOZ_OT_weapon_sound_set(Operator):

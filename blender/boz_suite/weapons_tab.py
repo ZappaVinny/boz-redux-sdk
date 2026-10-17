@@ -21,7 +21,7 @@ from bpy.types import Operator, Panel, PropertyGroup, UIList
 
 from . import link
 
-from ._bozkit import hud_icons, library, weapons as wp
+from ._bozkit import hud_icons, library, maps, weapons as wp
 
 WORKSPACE = "Weapons"
 SCRIPT_TEMPLATE = '''-- {name}: a weapon script. self is the weapon: self.name, and the live weapon's
@@ -59,7 +59,7 @@ def _pack():
 
 def level_weapons(level: str) -> list:
     """The game's weapons of a level (cached), [] without the asset library."""
-    level = wp.GEAR.get(level, level)
+    level = maps.gear(level)
     if level not in _state["levels"]:
         pack = _pack()
         try:
@@ -75,7 +75,7 @@ def source_dir() -> Path | None:
 
 
 def base_level(context) -> str:
-    return wp.GEAR.get(link.map_scene().boz.base, link.map_scene().boz.base)
+    return maps.gear(link.map_scene().boz.base)
 
 
 def defs() -> dict:
@@ -180,15 +180,15 @@ def label_of(context, name: str) -> str:
     return found.label if found else name
 
 
-def sound_items(context) -> list:
-    """Sounds (and muzzle flashes) the level's weapons use, named after the first weapon using
-    each: a new weapon can take any of them."""
-    key = ("sounds", base_level(context))
+def used_items(context, kind: str) -> list:
+    """What the level's weapons use for fields of *kind* ("sound", "effect"), named after the
+    first weapon using each: a new weapon can take any of them."""
+    key = (kind, base_level(context))
     if key not in _state["items"]:
         seen = {}
         for weapon in level_weapons(base_level(context)):
             for spec in wp.FIELDS:
-                if spec.kind == "sound":
+                if spec.kind == kind:
                     value = weapon.values.get(spec.key) or 0
                     if value and value not in seen:
                         seen[value] = f"{weapon.label}: {spec.label}"
@@ -231,8 +231,8 @@ def _enum_items(self, context):
         return _state["items"][key]
     if spec.kind == "weapon":
         return weapon_items(context)
-    if spec.kind == "sound":
-        return sound_items(context)
+    if spec.kind in ("sound", "effect"):
+        return used_items(context, spec.kind)
     return [("0", "-", "")]
 
 
@@ -246,7 +246,7 @@ def _row_value(row):
         return bool(row.value_bool)
     if spec.kind == "enum":
         return int(row.value_enum)
-    if spec.kind == "sound":
+    if spec.kind in ("sound", "effect"):
         return int(row.value_enum)
     if spec.kind == "weapon":
         return "" if row.value_enum == NONE else row.value_enum
@@ -375,7 +375,7 @@ def refresh_fields(context) -> None:
                 row.value_float = float(value or 0.0)
             elif spec.kind == "bool":
                 row.value_bool = bool(value)
-            elif spec.kind in ("enum", "sound"):
+            elif spec.kind in ("enum", "sound", "effect"):
                 wanted = str(int(value or 0))
                 if wanted in {i[0] for i in _enum_items(row, context)}:
                     row.value_enum = wanted
@@ -405,7 +405,7 @@ def _import_items(self, context):
     if key not in _state["items"]:
         listed = set(project_index(context))
         items = []
-        for level in wp.WEAPON_LEVELS:
+        for level in maps.WITH_WEAPONS:
             for weapon in level_weapons(level):
                 if weapon.name in listed or not wp.is_gun(weapon):
                     continue

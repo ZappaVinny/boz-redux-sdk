@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from . import blender_scene as scene
 from . import group, levels, reflect, resources
+from . import maps
 from .hashing import iw_hash
 
 INGAME = 'ingame/ingame.group.bin'
@@ -22,7 +23,6 @@ POWER_SWITCH = 'powerSwitch'
 NO_POWER = 'boz_no_power'
 WEAPON_FIELD = 'boz.weapon'
 CHALK_FIELD = 'boz.chalk'   # editor-only: '' automatic, 'none', or an image in the project
-SEARCH_ORDER = ('kino', 'callofthedead', 'ascension', 'tutorial')
 
 
 @dataclass(frozen=True)
@@ -188,7 +188,7 @@ def piece(key: str) -> Piece:
 def all_pieces(pack) -> list[Piece]:
     """Every piece: the fixed ones, and a door and barricade design for each distinct model."""
     variants, seen = [], set()
-    for base in SEARCH_ORDER:
+    for base in maps.SHIPPED:
         for item, spec, category, own in _entities(pack, f'levels/{base}/{base}_statics.group.bin'):
             if category not in VARIANTS:
                 continue
@@ -297,7 +297,7 @@ def resolve(pack, base: str, key: str, names: dict[int, str] | None = None) -> R
             return Resolved(piece_, '', wanted, 'spawn_player_1')
         return None
     fixed = int(key.partition(':')[2], 16) if ':' in key else None
-    paths = [statics] + [f'levels/{other}/{other}_statics.group.bin' for other in SEARCH_ORDER
+    paths = [statics] + [f'levels/{other}/{other}_statics.group.bin' for other in maps.SHIPPED
                          if other != base]
     if not key.startswith(WALL_BUY_PREFIX) and fixed is None:
         paths.append(INGAME)

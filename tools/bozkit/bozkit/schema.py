@@ -13,6 +13,13 @@ from pathlib import Path
 from .hashing import iw_hash
 
 GAMEDEF = Path(__file__).resolve().parents[3] / 'gamedef'
+GAME_VERSION = '1.0.11'
+
+
+def gamedef_file(kind: str) -> Path:
+    """A part of the game definition: 'symbols', 'reflection', 'events', 'runtime' or 'console'."""
+    return GAMEDEF / kind / f'boz-{GAME_VERSION}.toml'
+
 # Local name dictionary built from the user's own game files by `bozkit names` (never shipped).
 NAMES_CACHE = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'bozkit' / 'names.txt'
 
@@ -27,7 +34,7 @@ EXTRA_CLASSES = ('CIsEntitySpec', 'CIsComponentSpec', 'CIsCollisionMeshSpec', 'C
 
 
 class Names:
-    def __init__(self, gamedef: Path = GAMEDEF, version: str = '1.0.11'):
+    def __init__(self, gamedef: Path = GAMEDEF, version: str = GAME_VERSION):
         self.names: dict[int, str] = {}
         self.classes: dict[str, dict] = {}
         for n in BASIC_TYPES + EXTRA_CLASSES:

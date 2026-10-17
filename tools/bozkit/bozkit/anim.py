@@ -384,18 +384,19 @@ def asm_anim_offsets(body: bytes) -> list[tuple[int, int, int]]:
 LENGTH_AFTER_ANIM = 12      # a state's length (ms) from its animation reference (asm_anim_offsets)
 
 
-# Transition states that always get their clip's length: a weapon that never aimed (the
-# Thundergun) has no length on them, so they would end the moment they start.
-ALWAYS_TIMED = {iw_hash('Aim_up'), iw_hash('aim_down')}
+# The aiming transitions: aiming enters them and moves on when they end, so they need a length
+# even where the weapon's own state machine has none (a weapon that could not aim, as the
+# Thundergun, would otherwise snap in and out of the sights).
+ENDS_WITH_CLIP = {iw_hash('Aim_up'), iw_hash('aim_down')}
 
 
 def asm_lengths(body: bytes, lengths: dict) -> dict:
     """{offset: milliseconds} to give the states in *lengths* ({state name hash: ms}) their new
-    lengths; states with no length (0: idle and the like) keep none, except ALWAYS_TIMED ones."""
+    lengths; states with no length (0: idle and the like) keep none, except ENDS_WITH_CLIP."""
     out = {}
     for name, at, _second in asm_anim_offsets(body):
         offset = at + LENGTH_AFTER_ANIM
-        if name in lengths and (struct.unpack_from('<i', body, offset)[0] > 0 or name in ALWAYS_TIMED):
+        if name in lengths and (struct.unpack_from('<i', body, offset)[0] > 0 or name in ENDS_WITH_CLIP):
             out[offset] = max(1, int(lengths[name]))
     return out
 

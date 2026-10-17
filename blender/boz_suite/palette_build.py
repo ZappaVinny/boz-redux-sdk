@@ -24,7 +24,7 @@ import bpy
 
 bozkit_dir, library_dir, out_dir = (Path(value) for value in sys.argv[sys.argv.index("--") + 1:][:3])
 sys.path.insert(0, str(bozkit_dir))
-from bozkit import library, png, toolkit  # noqa: E402
+from bozkit import library, maps, png, toolkit  # noqa: E402
 from bozkit.hashing import iw_hash  # noqa: E402
 
 NAMESPACE = uuid.UUID("6d1f1c52-7a0e-4d43-9a58-1f2a6b9c0b11")
@@ -130,8 +130,8 @@ def main() -> None:
         for asset in built.search(kind=kind, limit=100000):
             if not asset.thumb:
                 continue
-            level = library.MAPS.get(asset.maps[0], "Shared") if asset.maps else "Shared"
-            tags = [library.MAPS.get(m, "Shared") for m in asset.maps]
+            level = maps.LABELS.get(asset.maps[0], "Shared") if asset.maps else "Shared"
+            tags = [maps.LABELS.get(m, "Shared") for m in asset.maps]
             source = f"{asset.groups[0]}#0x{asset.hash:08x}"
             if kind == "texture":
                 material = bpy.data.materials.new(asset.title)

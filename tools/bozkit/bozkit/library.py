@@ -25,6 +25,7 @@ from typing import Callable, Iterable
 
 from . import blender_scene as scene
 from . import derbh, group, native, reflect, resources
+from . import maps
 from .hashing import iw_hash
 from .schema import Names
 
@@ -32,8 +33,6 @@ LIBRARY_VERSION = 3  # 3: raw textures read as R, G, B, A
 GAME_VERSION = '1.0.11'
 PACK = 'blackops_etc.dz'
 THUMB = 128
-MAPS = {'kino': 'Kino der Toten', 'callofthedead': 'Call of the Dead', 'ascension': 'Ascension',
-        'tutorial': 'Tutorial'}
 KINDS = ('prop', 'weapon', 'model', 'texture', 'material', 'effect', 'sound', 'animation')
 KIND_LABELS = {'prop': 'Props', 'weapon': 'Weapons', 'model': 'Models', 'texture': 'Textures',
                'material': 'Materials', 'effect': 'Effects', 'sound': 'Sounds',
@@ -107,7 +106,7 @@ def map_of(path: str) -> str:
 def map_groups(paths: Iterable[str], level: str) -> list[str]:
     """The pack paths a level template needs: its own level, loading, weapon and arms groups
     (the tutorial uses Kino's weapons and arms)."""
-    gear = 'kino' if level == 'tutorial' else level
+    gear = maps.gear(level)
     wanted = []
     for path in paths:
         stem = path.rsplit('/', 1)[-1].split('.', 1)[0]
@@ -309,7 +308,7 @@ def build(client_root: str | Path, folder: Path | None = None,
     pack = derbh.Pack(pack_path)
     try:
         paths = [path for path in pack.names()
-                 if not path.startswith('deadops') and not path.startswith('loading/deadops')]
+                 if not path.startswith(maps.SKIPPED_PREFIXES)]
         data: dict[str, bytes] = {}
         for number, path in enumerate(paths):
             check()
@@ -547,8 +546,8 @@ def build(client_root: str | Path, folder: Path | None = None,
                 entry.triangles = source.triangles
 
     report(0.96, 'Writing the index')
-    maps = []
-    for level, label in MAPS.items():
+    templates = []
+    for level, label in maps.LABELS.items():
         level_groups = map_groups(data, level)
         if not any(path.startswith(f'levels/{level}/') for path in level_groups):
             continue
@@ -563,7 +562,7 @@ def build(client_root: str | Path, folder: Path | None = None,
                 image, _ = texture_preview(bodies[(TEXTURE, best.hash, best.variant)], 256)
                 _thumbnail(image, 256).save(thumbs / f'map_{level}.png')
                 thumb = f'map_{level}.png'
-        maps.append((level, label, json.dumps(level_groups), thumb))
+        templates.append((level, label, json.dumps(level_groups), thumb))
     database = sqlite3.connect(work / 'index.sqlite')
     database.executescript('''
         CREATE TABLE assets (kind TEXT, hash INTEGER, variant TEXT, name TEXT, label TEXT,
@@ -579,7 +578,7 @@ def build(client_root: str | Path, folder: Path | None = None,
           json.dumps(sorted(entry.groups)), json.dumps(sorted(entry.maps)), entry.width,
           entry.height, entry.triangles, entry.model, entry.size, entry.thumb)
          for entry in items.values()])
-    database.executemany('INSERT INTO maps VALUES (?, ?, ?, ?)', maps)
+    database.executemany('INSERT INTO maps VALUES (?, ?, ?, ?)', templates)
     database.executemany('INSERT INTO info VALUES (?, ?)', [
         ('built', time.strftime('%Y-%m-%d %H:%M:%S')), ('seconds', f'{time.time() - started:.0f}'),
         ('library', str(LIBRARY_VERSION))])
