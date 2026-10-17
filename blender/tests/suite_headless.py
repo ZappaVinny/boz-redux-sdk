@@ -261,7 +261,7 @@ def own_model_checks(label, asset_name):
         changed = Vector(bone.location)
         view.frame_set(30)
         held = (Vector(bone.location) - changed).length
-        check([c["frame"] for c in wv._state["edits"]["gun"]] == [10] and held < 0.01,
+        check([c["frame"] for c in wv.editor_state["edits"]["gun"]] == [10] and held < 0.01,
               f"{label}: the magazine change holds from frame 10 ({held:.4f} off)")
         bpy.ops.boz.weapon_anim_save()
         stored = wv.weapon_anim.load_clips(project / "source", "hq_wonder").get(int(states["reloading"]), {})
@@ -343,7 +343,7 @@ def weapon_checks(label):
     check({"idle", "reloading", "shooting"} <= set(states), f"{label}: the animations are listed ({sorted(states)})")
     reload_state = int(states["reloading"])
     wm.boz_anim_state = states["reloading"]
-    rig = wv._state["rig"]
+    rig = wv.editor_state["rig"]
     reload_anim = rig._anim(rig.arm_anims, rig.arm_states, reload_state)
     depsgraph = view.view_layers[0].depsgraph
     worst = 0.0
@@ -401,7 +401,7 @@ def weapon_checks(label):
     hand.location.z += 4.0
     edited_20 = Vector(hand.location)
     view.frame_set(25)                                 # leaving the frame keeps the change
-    edits = wv._state["edits"]
+    edits = wv.editor_state["edits"]
     check([c["frame"] for c in edits["arms"]] == [20] and not edits["gun"],
           f"{label}: leaving the frame keeps the arms change ({edits})")
     check((Vector(hand.location) - edited_20).length < 1e-3, f"{label}: the change holds on frame 25")
@@ -412,9 +412,9 @@ def weapon_checks(label):
     gun_bone = rig_obj.pose.bones[wv.TAG]
     gun_bone.location.x += 3.0
     view.frame_set(45)
-    check([c["frame"] for c in wv._state["edits"]["gun"]] == [40] and
-          [c["frame"] for c in wv._state["edits"]["arms"]] == [20],
-          f"{label}: arms and gun keep their own timelines ({wv._state['edits']})")
+    check([c["frame"] for c in wv.editor_state["edits"]["gun"]] == [40] and
+          [c["frame"] for c in wv.editor_state["edits"]["arms"]] == [20],
+          f"{label}: arms and gun keep their own timelines ({wv.editor_state['edits']})")
     depsgraph.update()
     evaluated = rig_obj.evaluated_get(depsgraph)
     wrist = evaluated.pose.bones["wrist L"].matrix.to_translation()
@@ -423,20 +423,20 @@ def weapon_checks(label):
     # Back to original, copy and paste, original frames.
     view.frame_set(60)
     bpy.ops.boz.weapon_original(part="arms")
-    check(wv.weapon_anim.source_of(wv._state["edits"]["arms"], 70)[0] == "original",
+    check(wv.weapon_anim.source_of(wv.editor_state["edits"]["arms"], 70)[0] == "original",
           f"{label}: back to original from 60")
     wm.boz_copy_part, wm.boz_copy_source = "ARMS", "ORIGINAL"
     view.frame_set(5)
     bpy.ops.boz.weapon_copy_pose()
     view.frame_set(80)
     bpy.ops.boz.weapon_paste_pose()
-    check(80 in [c["frame"] for c in wv._state["edits"]["arms"]], f"{label}: a pose pastes at 80")
+    check(80 in [c["frame"] for c in wv.editor_state["edits"]["arms"]], f"{label}: a pose pastes at 80")
     wm.boz_copy_part = "BOTH"
     wm.boz_copy_from, wm.boz_copy_to = 0, 10
     view.frame_set(90)
     bpy.ops.boz.weapon_copy_frames()
-    check(wv.weapon_anim.source_of(wv._state["edits"]["gun"], 95) == ("original", 5),
-          f"{label}: original frames play from 90 ({wv._state['edits']['gun']})")
+    check(wv.weapon_anim.source_of(wv.editor_state["edits"]["gun"], 95) == ("original", 5),
+          f"{label}: original frames play from 90 ({wv.editor_state['edits']['gun']})")
     bpy.ops.boz.weapon_anim_save()
     stored = wv.weapon_anim.load_clips(project / "source", "colt45").get(reload_state, {})
     check(stored.get("edits", {}).get("arms") and stored.get("arms") and stored.get("gun") and

@@ -20,6 +20,7 @@ import struct
 from pathlib import Path
 
 from .hashing import iw_hash
+from . import spec_fields
 
 INGAME = 'ingame/ingame.group.bin'
 ATLAS = iw_hash('hud_icons')
@@ -45,8 +46,7 @@ def icons_dir(source: Path) -> Path:
 
 def uv_of(blob) -> tuple[int, int, int, int] | None:
     """(x0, y0, x1, y1) of a CPlayerWeapon blob's HUD picture, or None."""
-    from . import levels
-    first, second = levels._blob_prop(blob, 'm_uv0'), levels._blob_prop(blob, 'm_uv1')
+    first, second = spec_fields.prop(blob, 'm_uv0'), spec_fields.prop(blob, 'm_uv1')
     if first is None or second is None or len(first.raw) < 4 or len(second.raw) < 4:
         return None
     return struct.unpack('<hh', first.raw[:4]) + struct.unpack('<hh', second.raw[:4])
@@ -54,10 +54,10 @@ def uv_of(blob) -> tuple[int, int, int, int] | None:
 
 def set_uv(blob, rect: tuple[int, int, int, int]) -> None:
     """Point a CPlayerWeapon blob at a rectangle of the atlas."""
-    from . import levels, reflect
+    from . import reflect
     from .weapons import PLAYER_WEAPON
     for name, values in (('m_uv0', rect[:2]), ('m_uv1', rect[2:])):
-        prop = levels._blob_prop(blob, name)
+        prop = spec_fields.prop(blob, name)
         raw = struct.pack('<hh', *values)
         if prop is None:
             blob.properties.append(reflect.Property(PLAYER_WEAPON, SVEC2, iw_hash(name), raw))
@@ -69,12 +69,12 @@ def set_uv(blob, rect: tuple[int, int, int, int]) -> None:
 def game_uv(pack, weapon: str) -> tuple[int, int, int, int] | None:
     """The HUD rectangle of a shipped weapon (any map's), or None."""
     from . import bundle, resources, weapons
-    target = weapons._hash_of(weapon)
+    target = weapons.hash_of(weapon)
     for entry in bundle.Registry.of(pack).entries(target):
         if entry.cls != bundle.ENTITY_SPEC:
             continue
         try:
-            blob = weapons._weapon_blob(resources.decode_entity_spec(entry.resource.body))
+            blob = weapons.weapon_blob(resources.decode_entity_spec(entry.resource.body))
         except Exception:   # noqa: BLE001
             continue
         rect = uv_of(blob) if blob is not None else None
@@ -101,27 +101,6 @@ def atlas_image(parsed):
     if resource is None:
         raise IconError('the game has no hud_icons texture')
     return native.decode_texture(resource.body).convert('RGBA')
-
-
-def free_slots(image, count: int | None = None) -> list[tuple[int, int]]:
-    """Top-left corners of empty (fully transparent) places for a picture, top to bottom."""
-    import numpy as np
-    used = np.asarray(image)[:, :, 3] > 0
-    height, width = used.shape
-    sums = np.zeros((height + 1, width + 1), dtype=np.int64)
-    sums[1:, 1:] = used.cumsum(0).cumsum(1)
-    w, h = SLOT
-    out: list[tuple[int, int]] = []
-    for y in range(0, height - h + 1, 2):
-        for x in range(0, width - w + 1, 2):
-            if sums[y + h, x + w] - sums[y, x + w] - sums[y + h, x] + sums[y, x]:
-                continue
-            if any(abs(x - ox) < w and abs(y - oy) < h for ox, oy in out):
-                continue
-            out.append((x, y))
-            if count is not None and len(out) >= count:
-                return out
-    return out
 
 
 def fit(picture):
@@ -182,18 +161,18 @@ def apply(source: Path, defs, read, groups: dict, map_name: str, pack=None) -> l
     weapons_group = groups.get(f'weapons_{map_name}.group.bin')
     if weapons_group is None:
         raise IconError('the map has no weapons group')
-    specs = {r.in_group_hash: r for r in weapons._entity_specs(weapons_group).resources}
+    specs = {r.in_group_hash: r for r in weapons.entity_specs(weapons_group).resources}
     done, atlas, parsed, slots = [], None, None, None
     for weapon in wanted:
-        resource = specs.get(weapons._hash_of(weapon.name))
+        resource = specs.get(weapons.hash_of(weapon.name))
         if resource is None:
             raise IconError(f'weapon {weapon.name} is not in the map')
         spec = resources.decode_entity_spec(resource.body)
-        blob = weapons._weapon_blob(spec)
+        blob = weapons.weapon_blob(spec)
         like, image = weapon.icon.get('like'), weapon.icon.get('image')
         if like:
-            other = specs.get(weapons._hash_of(like))
-            rect = uv_of(weapons._weapon_blob(resources.decode_entity_spec(other.body))) \
+            other = specs.get(weapons.hash_of(like))
+            rect = uv_of(weapons.weapon_blob(resources.decode_entity_spec(other.body))) \
                 if other is not None else None
             if rect is None and pack is not None:
                 rect = game_uv(pack, like)

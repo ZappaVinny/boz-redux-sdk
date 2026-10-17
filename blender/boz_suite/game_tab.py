@@ -59,13 +59,13 @@ def source_dir() -> Path | None:
 
 def _pack():
     from . import weapons_tab
-    return weapons_tab._pack()
+    return weapons_tab.game_pack()
 
 
 def names() -> dict:
     if _state["names"] is None:
         try:
-            _state["names"] = dict(wp._names())
+            _state["names"] = dict(wp.known_names())
         except Exception:
             _state["names"] = {}
     return _state["names"]

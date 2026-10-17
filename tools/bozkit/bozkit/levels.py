@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import maps
+from . import spec_fields
 from . import derbh, group
 from .hashing import iw_hash
 
@@ -160,15 +161,7 @@ def add_loading_screen(fixed: group.Group, template: str, new: str) -> None:
 # Game data ------------------------------------------------------------------------------------
 
 
-def game_pack(client_root: str | Path) -> derbh.Pack:
-    """The client's level data pack (read in place; nothing is extracted)."""
-    archive = Path(client_root).expanduser().resolve() / 'assets' / PACK
-    if not archive.exists():
-        raise LevelError(f'{archive} not found; set up the client\'s game files first')
-    return derbh.Pack(archive)
-
-
-def _read(pack: derbh.Pack, relative: str) -> group.Group:
+def read_group_at(pack: derbh.Pack, relative: str) -> group.Group:
     try:
         return group.parse(pack.read(f'{relative}.group.bin'))
     except KeyError:
@@ -205,7 +198,7 @@ class LevelFiles:
 def _copy(pack: derbh.Pack, name: str, folder: str, template_group: str) -> group.Group:
     """``<folder>/<template_group>`` renamed to *name*. The game reads weapons from the group
     named ``weapons_<level>`` itself, not its children, so these are copies, not wrappers."""
-    return renamed(_read(pack, f'{folder}/{template_group}'), name)
+    return renamed(read_group_at(pack, f'{folder}/{template_group}'), name)
 
 
 def common_files(pack: derbh.Pack, name: str, template: str = 'kino',
@@ -214,7 +207,7 @@ def common_files(pack: derbh.Pack, name: str, template: str = 'kino',
     ``fixed`` (pass an already edited ``fixed`` to add to it) and the weapons and arms groups,
     which are renamed copies of the template level's."""
     files = LevelFiles(check_name(name))
-    fixed = fixed or _read(pack, 'fixed/fixed')
+    fixed = fixed or read_group_at(pack, 'fixed/fixed')
     add_loading_screen(fixed, template, name)
     files.groups['fixed.group.bin'] = fixed
     template = maps.gear(template)
@@ -245,10 +238,10 @@ def clone_level(pack: derbh.Pack, name: str, template: str = 'kino',
     know. Rooms and dynamic models stay the template's own groups (listed as children)."""
     files = common_files(pack, name, template, fixed)
     folder = f'levels/{template}'
-    root = _read(pack, f'{folder}/{template}')
-    statics = _read(pack, f'{folder}/{template}_statics')
+    root = read_group_at(pack, f'{folder}/{template}')
+    statics = read_group_at(pack, f'{folder}/{template}_statics')
     try:
-        sectors = _read(pack, f'{folder}/{template}_sectors')
+        sectors = read_group_at(pack, f'{folder}/{template}_sectors')
     except LevelError:
         sectors = None   # the tutorial has no rooms
 
@@ -298,48 +291,7 @@ class Arena:
     cell: int = 200          # floor and wall quads (one texture repeat each)
 
 
-def _blob_prop(blob, name: str):
-    return next((p for p in blob.properties if p.name_hash == iw_hash(name)), None)
-
-
-def _component(spec, type_name: str):
-    return next((c for c in spec.components if c.type_hash == iw_hash(type_name)), None)
-
-
-def _set_transform(spec, position, rotation=None) -> None:
-    from . import reflect
-
-    blob = _component(spec, 'CIsTransform').blob
-    reflect.set_typed_value(_blob_prop(blob, 'm_localPosition'), tuple(map(float, position)))
-    if rotation is not None:
-        reflect.set_typed_value(_blob_prop(blob, 'm_localRotation'), tuple(map(float, rotation)))
-
-
-def _set_scale(spec, scale) -> None:
-    """Set a spec's m_localScale, adding the field when the transform has none."""
-    from . import reflect
-
-    scale = tuple(map(float, scale))
-    blob = _component(spec, 'CIsTransform').blob
-    prop = _blob_prop(blob, 'm_localScale')
-    if prop is None:
-        if scale == (1.0, 1.0, 1.0):
-            return
-        prop = reflect.Property(iw_hash('CIsTransform'), iw_hash('CIwFVec3'),
-                                iw_hash('m_localScale'), b'')
-        blob.properties.append(prop)
-    reflect.set_typed_value(prop, scale)
-
-
-def _scale_by(spec, scale) -> None:
-    """Multiply a spec's own m_localScale by *scale* (placements are relative to it)."""
-    from . import blender_scene as scene
-
-    own = scene._local_transform(spec)[2]
-    _set_scale(spec, tuple(own[i] * float(scale[i]) for i in range(3)))
-
-
-def _raw_texture(body: bytes) -> bool:
+def is_raw_texture(body: bytes) -> bool:
     from . import native
 
     try:
@@ -367,10 +319,10 @@ def arena_texture(size: int = 128) -> bytes:
     return bytes(out)
 
 
-def _model_index(pack: derbh.Pack, paths) -> dict[int, bytes]:
+def model_index(pack: derbh.Pack, paths) -> dict[int, bytes]:
     models = {}
     for path in paths:
-        for resource_type in _read(pack, path).types():
+        for resource_type in read_group_at(pack, path).types():
             if resource_type.class_hash == MODEL:
                 for resource in resource_type.resources:
                     models.setdefault(resource.in_group_hash, resource.body)
@@ -384,25 +336,25 @@ def prop_boxes(spec, models: dict[int, bytes]) -> list[list[tuple[float, float, 
     from . import blender_scene as scene
     from . import native
 
-    chain = [scene._local_transform(spec)]
+    chain = [spec_fields.local_transform(spec)]
 
     def corners(centre, half):
-        return [scene._native_apply(chain, tuple(centre[i] + (half[i] if c >> i & 1 else -half[i])
+        return [spec_fields.apply_chain(chain, tuple(centre[i] + (half[i] if c >> i & 1 else -half[i])
                                                  for i in range(3))) for c in range(8)]
 
     boxes = []
     for component in spec.components:
         blob = component.blob
         if component.type_hash != scene.COLLISION_BOX or not blob or \
-                scene._blob_value(blob, 'm_Ghost', False):
+                spec_fields.value(blob, 'm_Ghost', False):
             continue
-        half = scene._blob_value(blob, 'm_halfAxis', [0.0, 0.0, 0.0])
-        centre = scene._blob_value(blob, 'm_Offset', None) or \
-            scene._blob_value(blob, 'm_boxCentre', [0.0, 0.0, 0.0])
+        half = spec_fields.value(blob, 'm_halfAxis', [0.0, 0.0, 0.0])
+        centre = spec_fields.value(blob, 'm_Offset', None) or \
+            spec_fields.value(blob, 'm_boxCentre', [0.0, 0.0, 0.0])
         boxes.append(corners(centre, half))
     if boxes:
         return boxes
-    model = scene._model_reference(spec)
+    model = spec_fields.model_reference(spec)
     if model is None or model not in models:
         return []
     vertices = native.decode_model(models[model]).vertices

@@ -8,10 +8,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'blender'))
 sys.path.insert(0, str(ROOT / 'tools' / 'bozkit'))
+sys.path.insert(0, str(ROOT / 'tools' / 'bozkit' / 'tests'))
 
 import bpy  # noqa: E402
 import bmesh  # noqa: E402
 from boz_suite import scene_view, shipped_maps  # noqa: E402
+from fixtures import synthetic_triangle_mesh  # noqa: E402
 from bozkit import (blender_scene, bullet, collision, group, map_resources, native,  # noqa: E402
                     navigation, reflect, resources)
 from bozkit.hashing import iw_hash  # noqa: E402
@@ -61,7 +63,7 @@ def fixture() -> bytes:
         (1.0, 0.0, 0.0), 0.0, 'front', 'back')
     triangle = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
     collision_mesh = collision.CollisionMesh(
-        bullet.synthetic_triangle_mesh(triangle, [0, 1, 2]), triangle, [0, 1, 2], b'\0',
+        synthetic_triangle_mesh(triangle, [0, 1, 2]), triangle, [0, 1, 2], b'\0',
         ['default'])
     component = resources.Component(
         resources.COLLISION_MESH_SPEC, 0, iw_hash('CIsCollisionMeshSpec'), [],
@@ -176,7 +178,7 @@ with tempfile.TemporaryDirectory() as directory:
     clear_scene()
     vertices = [(100.0, 0.0, 0.0), (110.0, 0.0, 0.0), (100.0, 10.0, 0.0), (100.0, 0.0, 50.0)]
     attached_mesh = collision.CollisionMesh(
-        bullet.synthetic_triangle_mesh(vertices, [0, 1, 2, 0, 2, 3]), vertices,
+        synthetic_triangle_mesh(vertices, [0, 1, 2, 0, 2, 3]), vertices,
         [0, 1, 2, 0, 2, 3], b'\0\0', ['default'])
     attached = directory / 'attached.group.bin'
     attached.write_bytes(encode_group([model_type('crate'),

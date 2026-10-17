@@ -68,7 +68,7 @@ def _unpack_rgb565(value):
             (value & 31) * 255 // 31)
 
 
-def _decode_dxt1(data: bytes, width: int, height: int) -> bytes:
+def decode_dxt1(data: bytes, width: int, height: int) -> bytes:
     out = bytearray(width * height * 4)
     p = 0
     for by in range(0, height, 4):
@@ -110,7 +110,7 @@ def _signed3(value):
     return value - 8 if value & 4 else value
 
 
-def _decode_etc1(data: bytes, width: int, height: int) -> bytes:
+def decode_etc1(data: bytes, width: int, height: int) -> bytes:
     out = bytearray(width * height * 4)
     p = 0
     for by in range(0, height, 4):
@@ -148,7 +148,7 @@ def _decode_etc1(data: bytes, width: int, height: int) -> bytes:
 
 def encode_etc1(rgb, width: int, height: int) -> bytes:
     """ETC1 blocks for RGB texels (bytes, width x height x 3; sides multiples of 4), the way
-    _decode_etc1 reads them: individual mode, left/right halves, each half's 4-bit colour and
+    decode_etc1 reads them: individual mode, left/right halves, each half's 4-bit colour and
     the modifier table with the least error. Needs numpy."""
     import numpy
     pixels = numpy.frombuffer(bytes(rgb), dtype=numpy.uint8).reshape(height, width, 3).astype(numpy.int32)
@@ -241,9 +241,9 @@ def decode_texture_rgba(body: bytes) -> DecodedTexture:
         raise ValueError('invalid cooked CIwTexture dimensions')
     payload = body[data_offset:data_offset + size]
     if body[23] == 0x34:
-        return DecodedTexture(width, height, _decode_dxt1(payload, width, height), 'DXT1')
+        return DecodedTexture(width, height, decode_dxt1(payload, width, height), 'DXT1')
     if body[23] == 0x27:
-        return DecodedTexture(width, height, _decode_etc1(payload, width, height), 'ETC1')
+        return DecodedTexture(width, height, decode_etc1(payload, width, height), 'ETC1')
     raise ValueError('unsupported cooked CIwTexture platform')
 
 

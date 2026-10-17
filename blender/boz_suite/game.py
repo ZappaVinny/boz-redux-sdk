@@ -9,6 +9,7 @@ from __future__ import annotations
 import bpy
 
 from ._bozkit import blender_scene, chalk, levels, library, maps, native, resources, toolkit, world
+from ._bozkit import spec_fields
 from ._bozkit import hashing
 from . import meshes
 iw_hash = hashing.iw_hash
@@ -33,22 +34,6 @@ class _Found:
 
     def __init__(self):
         self.textures, self.materials = {}, {}
-
-
-def _image(texture_hash: int, body: bytes):
-    """A game texture as the add-on uploads it ("BOZ Texture <hash>")."""
-    image = bpy.data.images.get(f"BOZ Texture {texture_hash:08x}")
-    if image is not None:
-        return image
-    try:
-        decoded = native.decode_texture_rgba(body)
-    except ValueError:
-        return None
-    item = blender_scene.SceneTexture(texture_hash, decoded.width, decoded.height, decoded.rgba,
-                                      decoded.format, int.from_bytes(body[:4], "little"))
-    image = meshes.upload_image(f"BOZ Texture {texture_hash:08x}", item)
-    image["boz_resource_hash"] = f"0x{texture_hash:08x}"
-    return image
 
 
 def model_mesh(path: str, model_hash: int):
@@ -91,7 +76,7 @@ def model_mesh(path: str, model_hash: int):
         "model", levels.MODEL, model_hash, 0, path, name, "BOZ game models",
         [blender_scene.to_blender(tuple(map(float, v))) for v in model.vertices],
         list(model.triangles), uvs=model.uvs, face_materials=model.face_materials,
-        material_hashes=blender_scene._model_materials(body, set(materials)),
+        material_hashes=blender_scene.model_materials(body, set(materials)),
         vertex_colours=model.vertex_colours, uvs2=model.uvs2)
     mesh = meshes.build_mesh(item)
     mesh.name = name
@@ -114,17 +99,17 @@ def _drawn_model(spec):
     """(model hash, game transform of the drawing entity relative to *spec*'s position and
     rotation: *spec*'s own scale, then its children's transforms) of the first model an entity
     or its children draw, or None."""
-    model = blender_scene._model_reference(spec)
-    own_scale = blender_scene._local_transform(spec)[2]
+    model = spec_fields.model_reference(spec)
+    own_scale = spec_fields.local_transform(spec)[2]
     if model:
         return model, [((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), own_scale)]
     for _cls, _reserved, child in spec.children:
-        renderable = levels._component(child, "CIsRenderableModel")
+        renderable = spec_fields.component(child, "CIsRenderableModel")
         if renderable is None or renderable.blob is None:
             continue
-        assets = world._assets(renderable.blob)
+        assets = world.blob_assets(renderable.blob)
         if assets:
-            return assets[0][1][0], [blender_scene._local_transform(child),
+            return assets[0][1][0], [spec_fields.local_transform(child),
                                      ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), own_scale)]
     return None
 
@@ -145,7 +130,7 @@ def entity_spec(base: str, source_hash: int, group_path: str = ""):
         return None
     statics = f"levels/{base}/{base}_statics.group.bin"
     try:
-        body = models._find(levels.ENTITY_SPEC, source_hash, [group_path or statics])
+        body = models.find(levels.ENTITY_SPEC, source_hash, [group_path or statics])
         return resources.decode_entity_spec(body) if body else None
     except (world.WorldError, ValueError, KeyError):
         return None
@@ -218,7 +203,7 @@ def weapon_model(base: str, weapon: str):
             found = []
             for prop in blob.properties:
                 if prop.nested is not None:
-                    found += world._assets(prop.nested)
+                    found += world.blob_assets(prop.nested)
             low = next((pair for name, pair in found if name == iw_hash("LOD1")), None)
             pair = low or (found[-1][1] if found else None)
             return (path, pair[0]) if pair else None
@@ -281,7 +266,7 @@ def texture_material(path: str, texture_hash: int):
     models = game_models()
     if models is None:
         return None
-    body = models._find(levels.TEXTURE, texture_hash, [path, world.INGAME])
+    body = models.find(levels.TEXTURE, texture_hash, [path, world.INGAME])
     if body is None:
         return None
     try:
@@ -352,7 +337,7 @@ def chalk_preview(base: str, weapon: str, mode: str, project_source=None):
         located = weapon_model(base, weapon)
         if located is None:
             return None
-        body = models._find(levels.MODEL, located[1], [located[0]])
+        body = models.find(levels.MODEL, located[1], [located[0]])
         if body is None:
             return None
         model = native.decode_model(body)

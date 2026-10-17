@@ -38,6 +38,7 @@ from pathlib import Path
 
 from .hashing import iw_hash
 from . import maps
+from . import spec_fields
 
 ENTITY_SPEC = iw_hash('CIsEntitySpec')
 PLAYER_WEAPON = iw_hash('CPlayerWeapon')
@@ -176,16 +177,11 @@ GROUPS = tuple(dict.fromkeys(f.group for f in FIELDS))
 
 # --- Reading weapon entity specs -----------------------------------------------------------
 
-def _weapon_blob(spec):
+def weapon_blob(spec):
     for component in spec.components:
         if component.type_hash == PLAYER_WEAPON and component.blob is not None:
             return component.blob
     return None
-
-
-def _prop(blob, name: str):
-    from . import levels
-    return levels._blob_prop(blob, name) if blob is not None else None
 
 
 def get_value(blob, key: str):
@@ -193,13 +189,13 @@ def get_value(blob, key: str):
     from . import reflect
 
     outer, _, inner = key.partition('.')
-    prop = _prop(blob, outer)
+    prop = spec_fields.prop(blob, outer)
     if prop is None:
         return None
     if inner:
         if prop.nested is None:
             return None
-        prop = _prop(prop.nested, inner)
+        prop = spec_fields.prop(prop.nested, inner)
         if prop is None:
             return None
     value = reflect.typed_value(prop)
@@ -234,7 +230,7 @@ def set_value(blob, key: str, value) -> None:
     outer, _, inner = key.partition('.')
     holder, owner = blob, PLAYER_WEAPON
     if inner:
-        prop = _prop(blob, outer)
+        prop = spec_fields.prop(blob, outer)
         if prop is None:
             nested = reflect.Blob(iw_hash(_STRUCTS[outer]))
             prop = reflect.Property(PLAYER_WEAPON, iw_hash(_STRUCTS[outer]), iw_hash(outer), b'',
@@ -245,7 +241,7 @@ def set_value(blob, key: str, value) -> None:
         holder, owner, name = prop.nested, iw_hash(_STRUCTS[outer]), inner
     else:
         name = outer
-    target = _prop(holder, name)
+    target = spec_fields.prop(holder, name)
     type_name = _ENUM_TYPES.get(key) or _TYPE_OF.get(spec.kind, 'unsigned int')
     if target is None:
         target = reflect.Property(owner, iw_hash(type_name), iw_hash(name), b'')
@@ -259,11 +255,11 @@ def set_value(blob, key: str, value) -> None:
     elif spec.kind == 'float':
         value = float(value)
     elif spec.kind in ('weapon', 'sound', 'int'):
-        value = _hash_of(value) if spec.kind == 'weapon' else int(value)
+        value = hash_of(value) if spec.kind == 'weapon' else int(value)
     reflect.set_typed_value(target, value)
 
 
-def _hash_of(value) -> int:
+def hash_of(value) -> int:
     if isinstance(value, int):
         return value
     if not value:
@@ -287,7 +283,7 @@ def weapons_group_path(level: str) -> str:
 _KNOWN: dict[int, str] | None = None
 
 
-def _names() -> dict[int, str]:
+def known_names() -> dict[int, str]:
     """Names by hash: bozkit's dictionary (the game definition and the names cache) first, then
     the asset library's strings."""
     global _KNOWN
@@ -320,7 +316,7 @@ def read_level(game, level: str) -> list[GameWeapon]:
 def read_group(parsed, level: str = '', extra_names=()) -> list[GameWeapon]:
     from . import resources
 
-    known = dict(_names())
+    known = dict(known_names())
     for name in extra_names:
         known[iw_hash(name)] = name
     out = []
@@ -332,7 +328,7 @@ def read_group(parsed, level: str = '', extra_names=()) -> list[GameWeapon]:
                 spec = resources.decode_entity_spec(resource.body)
             except (ValueError, struct.error):
                 continue
-            blob = _weapon_blob(spec)
+            blob = weapon_blob(spec)
             if blob is None:
                 continue
             values = {f.key: value_or_default(blob, f.key) for f in FIELDS}
@@ -517,7 +513,7 @@ def validate(defs: list[WeaponDef], available: set[str]) -> list[str]:
 
 # --- Applying to a map's groups ------------------------------------------------------------
 
-def _entity_specs(parsed):
+def entity_specs(parsed):
     for resource_type in parsed.types():
         if resource_type.class_hash == ENTITY_SPEC:
             return resource_type
@@ -539,7 +535,7 @@ def _add(parsed, class_hash: int, resource) -> None:
     raise WeaponError('weapons group has no resource section')
 
 
-def _hashes(parsed) -> set[int]:
+def resource_hashes(parsed) -> set[int]:
     return {r.in_group_hash for t in parsed.types() for r in t.resources}
 
 
@@ -549,14 +545,14 @@ def _bring(bundle, weapon: 'WeaponDef', groups: dict) -> list[str]:
     into the arms group, where the game's own are). Returns warnings."""
     from . import resources
     gear = maps.gear(weapon.level)
-    source = _hash_of(weapon.source)
+    source = hash_of(weapon.source)
     weapons_file = next(f for f, g in bundle.groups.items() if g is groups['weapons'])
     arms_file = next(f for f, g in bundle.groups.items() if g is groups['arms'])
     bundle.add([source], prefer=weapons_group_path(weapon.level))
-    resource = next((r for r in _entity_specs(groups['weapons']).resources if r.in_group_hash == source), None)
+    resource = next((r for r in entity_specs(groups['weapons']).resources if r.in_group_hash == source), None)
     if resource is None:
         raise WeaponError(f'{weapon.level} has no weapon {weapon.source}')
-    blob = _weapon_blob(resources.decode_entity_spec(resource.body))
+    blob = weapon_blob(resources.decode_entity_spec(resource.body))
     for field_name, target, prefer in (('m_weaponAsm', weapons_file, weapons_group_path(weapon.level)),
                                        ('m_armsAsm', arms_file, f'ingame/characters/arms/arms_{gear}.group.bin')):
         value = get_value(blob, field_name)
@@ -582,12 +578,12 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=Non
             if bundle is None:
                 raise WeaponError(f'weapon {weapon.name}: weapons of other maps need the game')
             warnings += _bring(bundle, weapon, groups)
-    specs = _entity_specs(weapons_group)
+    specs = entity_specs(weapons_group)
     by_hash = {r.in_group_hash: r for r in specs.resources}
     # 2. New weapons: copies of their base under a new name.
     for weapon in defs:
-        new_hash = _hash_of(weapon.name)
-        base_hash = _hash_of(weapon.source)
+        new_hash = hash_of(weapon.name)
+        base_hash = hash_of(weapon.source)
         if new_hash == base_hash:
             continue
         if base_hash not in by_hash:
@@ -595,8 +591,8 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=Non
         if new_hash in by_hash:
             raise WeaponError(f'weapon {weapon.name}: the level already has a weapon by that name')
         spec = resources.decode_entity_spec(by_hash[base_hash].body)
-        blob = _weapon_blob(spec)
-        name_prop = _prop(blob, 'm_name')
+        blob = weapon_blob(spec)
+        name_prop = spec_fields.prop(blob, 'm_name')
         if name_prop is not None:
             from . import reflect
             reflect.set_typed_value(name_prop, new_hash)
@@ -611,11 +607,11 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=Non
     for weapon in defs:
         if not weapon.fields:
             continue
-        resource = by_hash.get(_hash_of(weapon.name))
+        resource = by_hash.get(hash_of(weapon.name))
         if resource is None:
             raise WeaponError(f'weapon {weapon.name} is not in the level')
         spec = resources.decode_entity_spec(resource.body)
-        blob = _weapon_blob(spec)
+        blob = weapon_blob(spec)
         for key, value in weapon.fields.items():
             set_value(blob, key, value)
         resource.body = resources.encode_entity_spec(spec)
@@ -623,7 +619,7 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=Non
     for weapon in defs:
         if not (weapon.model and weapon.model.get('asset')) and not weapon.clips and not weapon.arms:
             continue
-        resource = by_hash.get(_hash_of(weapon.name))
+        resource = by_hash.get(hash_of(weapon.name))
         if resource is None:
             raise WeaponError(f'weapon {weapon.name} is not in the level')
         apply_model(groups, weapon, resource)
@@ -635,18 +631,18 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=Non
         from . import group as group_module, sound
         if shared is None:
             shared = group_module.read_parsed(game.read, sound.SHARED_GROUP)
-        resource = by_hash.get(_hash_of(weapon.name))
+        resource = by_hash.get(hash_of(weapon.name))
         if resource is None:
             raise WeaponError(f'weapon {weapon.name} is not in the level')
         spec = resources.decode_entity_spec(resource.body)
-        blob = _weapon_blob(spec)
+        blob = weapon_blob(spec)
         for key, body in sorted(weapon.sound_data.items()):
             sequence = sound.add_weapon_sound(groups['weapons'], shared, weapon.name, key,
                                               int(value_or_default(blob, key) or 0), body)
             set_value(blob, key, sequence)
         resource.body = resources.encode_entity_spec(spec)
     # Weapons with a model of their own show it on wall buys (not their base's).
-    own_models = {_hash_of(w.name) for w in defs if w.model and w.model.get('asset')}
+    own_models = {hash_of(w.name) for w in defs if w.model and w.model.get('asset')}
     for name_hash in own_models:
         aliases.pop(name_hash, None)
     return {'aliases': aliases, 'warnings': warnings, 'own_models': own_models}
@@ -689,11 +685,11 @@ def _model_refs(blob):
     from . import reflect  # noqa: F401
     out = []
     for prop_name, role in (('renderableAsset', 'view'), ('renderableAssetADS', 'ads')):
-        prop = _prop(blob, prop_name)
+        prop = spec_fields.prop(blob, prop_name)
         if prop is not None and prop.nested is not None:
             out += [(p, role) for p in prop.nested.properties
                     if p.name_hash in (iw_hash('model'), iw_hash('skin'))]
-    lods = _prop(blob, 'LODS')
+    lods = spec_fields.prop(blob, 'LODS')
     if lods is not None and lods.nested is not None:
         number = 0
 
@@ -722,8 +718,8 @@ def _templates(parsed, view_model: int):
               if t.class_hash == iw_hash('CIwModel') for r in t.resources}
     material = None
     body = models.get(view_model, b'')
-    from .blender_scene import _model_materials
-    for mh in _model_materials(body, set(materials)):
+    from .blender_scene import model_materials
+    for mh in model_materials(body, set(materials)):
         decoded = native.decode_material(materials[mh])
         if material is None or decoded.same_as_default:
             material = decoded
@@ -764,7 +760,7 @@ def _set_reference(blob, name: str, value) -> None:
     """Point a weapon's existing reference at another resource: a hash (skel) or a name
     (m_weaponAsm, m_armsAsm)."""
     from . import reflect
-    prop = _prop(blob, name)
+    prop = spec_fields.prop(blob, name)
     if prop is None:
         raise WeaponError(f'the weapon has no {name}')
     if isinstance(value, str):
@@ -787,7 +783,7 @@ def apply_model(groups: dict, weapon: WeaponDef, resource) -> None:
     from . import anim, resources, weapon_anim, weapon_model
     weapons_group, arms_group = groups['weapons'], groups.get('arms')
     spec = resources.decode_entity_spec(resource.body)
-    blob = _weapon_blob(spec)
+    blob = weapon_blob(spec)
     skels = _resources_of(weapons_group, 'CIwAnimSkel')
     anims = _resources_of(weapons_group, 'CIwAnim')
     asms = _resources_of(weapons_group, 'CIsAnimStateMachine')

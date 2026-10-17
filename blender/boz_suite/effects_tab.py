@@ -33,7 +33,7 @@ def source_dir() -> Path | None:
 
 def _pack():
     from . import weapons_tab
-    return weapons_tab._pack()
+    return weapons_tab.game_pack()
 
 
 def catalog(refresh: bool = False) -> list:

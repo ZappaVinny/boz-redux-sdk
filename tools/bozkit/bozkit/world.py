@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import group, levels, png
+from . import spec_fields
 from . import maps
 from .hashing import iw_hash
 
@@ -164,7 +165,7 @@ class Layout:
 # Files
 
 
-def _bgra_to_rgba(bgra: bytes) -> bytes:
+def bgra_to_rgba(bgra: bytes) -> bytes:
     out = bytearray(bgra)
     out[0::4], out[2::4] = bgra[2::4], bgra[0::4]
     return bytes(out)
@@ -176,16 +177,16 @@ def read_texture(path: Path) -> Texture:
         from PIL import Image
     except ImportError:
         width, height, rgba = png.read_rgba(path.read_bytes())
-        return Texture(width, height, _bgra_to_rgba(rgba))  # the same swap both ways
+        return Texture(width, height, bgra_to_rgba(rgba))  # the same swap both ways
     image = Image.open(path).convert('RGBA')
     return Texture(image.width, image.height, image.tobytes('raw', 'BGRA'))
 
 
 def write_texture(texture: Texture, path: Path) -> None:
-    path.write_bytes(png.write_rgba(texture.width, texture.height, _bgra_to_rgba(texture.bgra)))
+    path.write_bytes(png.write_rgba(texture.width, texture.height, bgra_to_rgba(texture.bgra)))
 
 
-def _texture_files(name: str, count: int) -> list[str]:
+def texture_files(name: str, count: int) -> list[str]:
     return [f'textures/{name}.png' if i == 0 else f'textures/{name}_{i}.png' for i in range(count)]
 
 
@@ -197,7 +198,7 @@ def _write_mesh(source: Path, folder: str, mesh: Mesh) -> dict:
         data['materials'] = list(mesh.face_textures)
     (source / folder / f'{mesh.name}.json').write_text(json.dumps(data, separators=(',', ':'))
                                                        + '\n', encoding='utf-8')
-    files = _texture_files(mesh.name, len(mesh.textures))
+    files = texture_files(mesh.name, len(mesh.textures))
     for texture, relative in zip(mesh.textures, files):
         write_texture(texture, source / relative)
     item = {'name': mesh.name, 'file': f'{folder}/{mesh.name}.json', 'textures': files,
@@ -390,21 +391,21 @@ def start_area_spawns(pack, base: str = 'kino') -> list[tuple[int, int]]:
     """(entity hash, spawn type hash) of the base level's starting-area zombie spawn points."""
     from . import resources
 
-    statics = levels._read(pack, f'levels/{base}/{base}_statics')
+    statics = levels.read_group_at(pack, f'levels/{base}/{base}_statics')
     by_class = {t.class_hash: t for t in statics.types()}
     blob = resources.decode_reflected(by_class[levels.LEVEL].resources[0].body)
-    (area_hash,) = struct.unpack_from('<I', levels._blob_prop(blob, 'm_StartingArea').raw)
+    (area_hash,) = struct.unpack_from('<I', spec_fields.prop(blob, 'm_StartingArea').raw)
     area = next((r for r in by_class[levels.AREA].resources if r.in_group_hash == area_hash), None)
     if area is None:
         raise WorldError(f'{base} has no starting area')
-    raw = levels._blob_prop(resources.decode_reflected(area.body), 'm_SpawnPoints').raw
+    raw = spec_fields.prop(resources.decode_reflected(area.body), 'm_SpawnPoints').raw
     hashes = struct.unpack_from(f'<{struct.unpack_from("<I", raw)[0]}I', raw, 4)
     specs = {r.in_group_hash: r for r in by_class[levels.ENTITY_SPEC].resources}
     out = []
     for value in hashes:
         spec = resources.decode_entity_spec(specs[value].body)
-        point = levels._component(spec, 'CSpawnPoint').blob
-        out.append((value, struct.unpack_from('<I', levels._blob_prop(point, 'spawnType').raw)[0]))
+        point = spec_fields.component(spec, 'CSpawnPoint').blob
+        out.append((value, struct.unpack_from('<I', spec_fields.prop(point, 'spawnType').raw)[0]))
     return out
 
 
@@ -449,11 +450,6 @@ def template_world(template: str, pack=None) -> 'World':
 def empty_world(base: str = 'kino') -> 'World':
     """A 6 m floor tile and the four player spawns: nothing else to start from."""
     return from_layout(_empty_layout(base))
-
-
-def arena_world(pack, arena: levels.Arena | None = None, base: str = 'kino') -> 'World':
-    """The debug arena: a walled square with zombie spawns, Juggernog and the power switch."""
-    return from_layout(_arena_layout(pack, arena, base))
 
 
 # Format 3: models, volumes and prefabs
@@ -773,7 +769,7 @@ def save_prefab(source: str | Path, prefab: Prefab, meshes: list[Mesh]) -> Path:
     if own.is_dir():
         shutil.rmtree(own)
     own.mkdir(parents=True)
-    used = _meshes_used([prefab])
+    used = meshes_used([prefab])
     items, _wanted = _write_meshes(own, [m for m in meshes if m.name in used])
     stored = copy.deepcopy(prefab)
     stored.position, stored.rotation, stored.scale = (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), UNIT
@@ -797,7 +793,7 @@ def load_prefab(source: str | Path, name: str) -> tuple[Prefab, list[Mesh]]:
     return prefab, meshes
 
 
-def _meshes_used(items) -> set[str]:
+def meshes_used(items) -> set[str]:
     return {item.mesh for _full, item in walk(items) if getattr(item, 'mesh', '')}
 
 
@@ -926,13 +922,12 @@ def from_layout(layout: Layout) -> World:
 
 def _compose(parent, child):
     """(position, rotation, scale) of *child* (in *parent*'s space) in the world."""
-    from . import blender_scene as scene
 
     p_pos, p_rot, p_scale = parent
     c_pos, c_rot, c_scale = child
     scaled = tuple(c_pos[i] * p_scale[i] for i in range(3))
-    turned = scene._rotate(tuple(p_rot), scaled)
-    return (tuple(p_pos[i] + turned[i] for i in range(3)), scene._quat_mul(tuple(p_rot), tuple(c_rot)),
+    turned = spec_fields.rotate(tuple(p_rot), scaled)
+    return (tuple(p_pos[i] + turned[i] for i in range(3)), spec_fields.quat_mul(tuple(p_rot), tuple(c_rot)),
             tuple(p_scale[i] * c_scale[i] for i in range(3)))
 
 
@@ -1087,7 +1082,7 @@ class _GameModels:
                 raise WorldError(f'{path} is not in the game data') from None
         return self.groups[path]
 
-    def _find(self, cls: int, value: int, paths) -> bytes | None:
+    def find(self, cls: int, value: int, paths) -> bytes | None:
         for path in paths:
             for resource_type in self.group(path).types():
                 if resource_type.class_hash == cls:
@@ -1097,7 +1092,7 @@ class _GameModels:
         return None
 
     def model(self, path: str, value: int) -> bytes:
-        body = self._find(levels.MODEL, value, [path])
+        body = self.find(levels.MODEL, value, [path])
         if body is None:
             raise WorldError(f'{path} has no model 0x{value:08x}')
         return body
@@ -1117,7 +1112,7 @@ class _GameModels:
             p.startswith('levels/') or p.startswith('ingame/'))]
         for path in list(prefer) + rest:
             try:
-                if self._find(levels.MODEL, value, [path]) is not None:
+                if self.find(levels.MODEL, value, [path]) is not None:
                     return path
             except WorldError:
                 continue
@@ -1133,8 +1128,8 @@ class _GameModels:
         materials_known = {r.in_group_hash for p in paths for t in self.group(p).types()
                            if t.class_hash == levels.MATERIAL for r in t.resources}
         out = {levels.MODEL: [(value, body)], levels.MATERIAL: [], levels.TEXTURE: []}
-        for material_hash in blender_scene._model_materials(body, materials_known):
-            material_body = self._find(levels.MATERIAL, material_hash, paths)
+        for material_hash in blender_scene.model_materials(body, materials_known):
+            material_body = self.find(levels.MATERIAL, material_hash, paths)
             if material_body is None:
                 continue
             out[levels.MATERIAL].append((material_hash, material_body))
@@ -1143,7 +1138,7 @@ class _GameModels:
             except ValueError:
                 textures = []
             for texture_hash in textures:
-                texture_body = self._find(levels.TEXTURE, texture_hash, paths) if texture_hash else None
+                texture_body = self.find(levels.TEXTURE, texture_hash, paths) if texture_hash else None
                 if texture_body is not None:
                     out[levels.TEXTURE].append((texture_hash, texture_body))
         return out
@@ -1169,7 +1164,7 @@ def library_map(path: str) -> str:
     return parts[1] if parts[0] == 'levels' and len(parts) > 2 else 'shared'
 
 
-def _blob_hashes(blob) -> list[int]:
+def blob_hashes(blob) -> list[int]:
     from . import reflect
 
     out = []
@@ -1184,23 +1179,23 @@ def _blob_hashes(blob) -> list[int]:
             if 4 + 4 * count == len(prop.raw):
                 out += list(struct.unpack_from(f'<{count}I', prop.raw, 4))
         if prop.nested is not None:
-            out += _blob_hashes(prop.nested)
+            out += blob_hashes(prop.nested)
         for element in prop.elements or ():
-            out += _blob_hashes(element)
+            out += blob_hashes(element)
     return out
 
 
-def _spec_hashes(spec) -> list[int]:
+def spec_hashes(spec) -> list[int]:
     out = []
     for component in spec.components:
         if component.blob is not None:
-            out += _blob_hashes(component.blob)
+            out += blob_hashes(component.blob)
     for _cls, _reserved, child in spec.children:
-        out += _spec_hashes(child)
+        out += spec_hashes(child)
     return out
 
 
-def _assets(blob) -> list[tuple[int, tuple[int, int]]]:
+def blob_assets(blob) -> list[tuple[int, tuple[int, int]]]:
     """(name, (model, skin)) of the CIsRenderableAsset-like entries under a blob."""
     from . import reflect
 
@@ -1212,9 +1207,9 @@ def _assets(blob) -> list[tuple[int, tuple[int, int]]]:
         out.append((name if isinstance(name, int) else 0, (model, skin or model)))
     for prop in blob.properties:
         if prop.nested is not None:
-            out += _assets(prop.nested)
+            out += blob_assets(prop.nested)
         for element in prop.elements or ():
-            out += _assets(element)
+            out += blob_assets(element)
     return out
 
 
@@ -1266,18 +1261,18 @@ class _Level:
             types.insert(types.index(self.by_class[levels.MATERIAL]) + 1, model_type)
         self.present = {cls: {r.in_group_hash for r in self.by_class[cls].resources}
                         for cls in (levels.MODEL, levels.MATERIAL, levels.TEXTURE)}
-        self.models = levels._model_index(pack, [f'levels/{base}/{base}_dynamics', 'ingame/ingame'])
+        self.models = levels.model_index(pack, [f'levels/{base}/{base}_dynamics', 'ingame/ingame'])
         for resource in self.by_class[levels.MODEL].resources:
             self.models.setdefault(resource.in_group_hash, resource.body)
         self.loaded = {INGAME, f'levels/{base}/{base}_dynamics.group.bin', self.base_statics}
-        placed = next(r.body for t in levels._read(pack, levels.PLACED_TEMPLATE).types()
+        placed = next(r.body for t in levels.read_group_at(pack, levels.PLACED_TEMPLATE).types()
                       if t.class_hash == levels.ENTITY_SPEC for r in t.resources)
         self.placed_template = placed
-        self.transform_template = levels._component(resources.decode_entity_spec(placed),
+        self.transform_template = spec_fields.component(resources.decode_entity_spec(placed),
                                                     'CIsTransform')
-        self.texture_template = next(r.body for t in levels._read(pack, levels.TEXTURE_TEMPLATE).types()
+        self.texture_template = next(r.body for t in levels.read_group_at(pack, levels.TEXTURE_TEMPLATE).types()
                                      if t.class_hash == levels.TEXTURE for r in t.resources
-                                     if levels._raw_texture(r.body))
+                                     if levels.is_raw_texture(r.body))
         self.material_template = native.decode_material(
             self.by_class[levels.MATERIAL].resources[0].body)
         self.kept: list[group.Resource] = []
@@ -1357,7 +1352,6 @@ class _Level:
             self.dirty.append((min(xs) - 1, min(zs) - 1, max(xs) + 1, max(zs) + 1))
 
     def entity(self, entity: Placement, move_existing: bool) -> None:
-        from . import blender_scene as scene
         from . import reflect, resources
 
         if entity.source == TRIGGER_SOURCE:
@@ -1373,7 +1367,7 @@ class _Level:
             # An inherited level's own entity: move it where the world puts it.
             self.used.add(entity.hash)
             spec = resources.decode_entity_spec(existing.body)
-            old = scene._local_transform(spec)[0]
+            old = spec_fields.local_transform(spec)[0]
             self._configure(spec, entity, rotation, scale)
             existing.body = resources.encode_entity_spec(spec)
             self._mark([old, entity.position])
@@ -1386,7 +1380,7 @@ class _Level:
         else:
             if in_base:
                 raise WorldError(f'{self.base} has no entity {entity.source!r}')
-            body = self.game._find(levels.ENTITY_SPEC, entity.hash, [entity.group])
+            body = self.game.find(levels.ENTITY_SPEC, entity.hash, [entity.group])
             if body is None:
                 raise WorldError(f'{entity.group} has no entity {entity.source!r}')
         key = entity.hash
@@ -1405,18 +1399,18 @@ class _Level:
         self.used.add(key)
         spec = resources.decode_entity_spec(body)
         if copy_name is not None:
-            named = levels._component(spec, 'CIsNamed')
-            prop = levels._blob_prop(named.blob, 'name') if named and named.blob else None
+            named = spec_fields.component(spec, 'CIsNamed')
+            prop = spec_fields.prop(named.blob, 'name') if named and named.blob else None
             if prop is not None:
                 reflect.set_typed_value(prop, copy_name)
-        door = levels._component(spec, 'CDoor')
+        door = spec_fields.component(spec, 'CDoor')
         if door is not None and door.blob is not None and not (self.inherited and in_base):
             # A door unlocks areas of its own map: generated maps have one area, and another
             # map's areas are not in this one, so it unlocks none.
-            areas = levels._blob_prop(door.blob, 'm_AreasUnlock')
+            areas = spec_fields.prop(door.blob, 'm_AreasUnlock')
             if areas is not None:
                 areas.raw = struct.pack('<I', 0)
-        if levels._component(spec, 'CIsTransform') is None:
+        if spec_fields.component(spec, 'CIsTransform') is None:
             # Templates (in ingame) have no transform of their own; placed copies need one.
             spec.components.insert(0, copy.deepcopy(self.transform_template))
         self._configure(spec, entity, rotation, scale)
@@ -1424,16 +1418,16 @@ class _Level:
         if entity.group and entity.group not in self.loaded:
             # Everything it uses comes with it from its own map (models, textures, animations,
             # state machines, sounds), unless the level already has them.
-            self.repack(_spec_hashes(spec), entity.group)
-        if levels._component(spec, 'CSpawnPoint'):
+            self.repack(spec_hashes(spec), entity.group)
+        if spec_fields.component(spec, 'CSpawnPoint'):
             self.zombie_spawns.append(key)
-        if levels._component(spec, 'CWeaponChalkOutline') is not None:
+        if spec_fields.component(spec, 'CWeaponChalkOutline') is not None:
             self.wall_buys.append((entity, spec))
-            poi = levels._component(spec, 'CPOI')
+            poi = spec_fields.component(spec, 'CPOI')
             if poi is not None and poi.blob is not None:
                 # Usable from either side, as doors are: a wall buy placed facing the wall
                 # would otherwise have no prompt.
-                prop = levels._blob_prop(poi.blob, 'm_BiDirection')
+                prop = spec_fields.prop(poi.blob, 'm_BiDirection')
                 if prop is None:
                     prop = reflect.Property(iw_hash('CPOI'), iw_hash('bool'),
                                             iw_hash('m_BiDirection'), b'')
@@ -1458,7 +1452,7 @@ class _Level:
                 continue
             for item in resource_type.resources:
                 spec = resources.decode_entity_spec(item.body)
-                if levels._component(spec, 'CSnowTrigger') is not None and spec.children:
+                if spec_fields.component(spec, 'CSnowTrigger') is not None and spec.children:
                     template = spec.children[0][2]
                     break
             if template is not None:
@@ -1471,15 +1465,15 @@ class _Level:
         self.copies += 1
         name = script_of(entity).get('name') or f'{self.name}_trigger_{self.copies}'
         self._name(spec, name)
-        levels._set_transform(spec, entity.position, entity.quaternion())
-        box = levels._component(spec, 'CIsCollisionBox')
+        spec_fields.set_transform(spec, entity.position, entity.quaternion())
+        box = spec_fields.component(spec, 'CIsCollisionBox')
         half = [TRIGGER_SIZE / 2 * abs(c) for c in entity.scale]
-        reflect.set_typed_value(levels._blob_prop(box.blob, 'm_halfAxis'), half)
+        reflect.set_typed_value(spec_fields.prop(box.blob, 'm_halfAxis'), half)
         for prop in box.blob.properties:
             # m_Offset and an unnamed offset (0x3f9a899b, non-zero in the snow boxes): centred.
             if prop.name_hash in (iw_hash('m_Offset'), 0x3f9a899b):
                 reflect.set_typed_value(prop, [0.0, 0.0, 0.0])
-        ghost = levels._blob_prop(box.blob, 'm_Ghost')
+        ghost = spec_fields.prop(box.blob, 'm_Ghost')
         if ghost is None:
             ghost = reflect.Property(iw_hash('CIsCollisionObject'), iw_hash('bool'),
                                      iw_hash('m_Ghost'), b'')
@@ -1500,7 +1494,7 @@ class _Level:
                 continue
             for item in resource_type.resources:
                 spec = resources.decode_entity_spec(item.body)
-                if levels._component(spec, component) is not None:
+                if spec_fields.component(spec, component) is not None:
                     return spec
         raise WorldError(f'the game has no {component} entity to copy ({path})')
 
@@ -1513,13 +1507,13 @@ class _Level:
         size = max(abs(c) for c in entity.scale) * TRIGGER_SIZE
         if entity.source == HIT_SOURCE:
             spec = self._template_spec(HIT_TEMPLATE, 'CEasterEgg')
-            sphere = levels._component(spec, 'CIsCollisionSphere')
-            radius = levels._blob_prop(sphere.blob, 'm_radius') if sphere and sphere.blob else None
+            sphere = spec_fields.component(spec, 'CIsCollisionSphere')
+            radius = spec_fields.prop(sphere.blob, 'm_radius') if sphere and sphere.blob else None
             if radius is not None:
                 reflect.set_typed_value(radius, size / 2)
             # The musical easter egg manager groups skulls by song: a song of its own keeps the
             # volume out of the level's easter egg (boz.objects reports the hit and skips it).
-            egg = levels._component(spec, 'CEasterEgg')
+            egg = spec_fields.component(spec, 'CEasterEgg')
             for prop in egg.blob.properties if egg and egg.blob else []:
                 if prop.name_hash == HIT_SONG_FIELD:
                     reflect.set_typed_value(prop, HIT_SONG)
@@ -1529,7 +1523,7 @@ class _Level:
             spec = copy.deepcopy(barricade)
             spec.components = [c for c in spec.components if c.type_hash in keep]
             spec.children = []
-            poi = levels._component(spec, 'CPOI')
+            poi = spec_fields.component(spec, 'CPOI')
             # The game offers a point of interest only within its reach (m_MaxDistance, from the
             # player to its centre), height (m_MaxYDistance) and viewing cone (m_ViewingAngle
             # around its forward axis, both ways with m_BiDirection). A Use volume works from
@@ -1541,7 +1535,7 @@ class _Level:
                                        ('m_ViewingAngle', 'float', 360.0),
                                        ('m_BiDirection', 'bool', True),
                                        ('m_IsReverseViewAngle', 'bool', False)):
-                prop = levels._blob_prop(poi.blob, field)
+                prop = spec_fields.prop(poi.blob, field)
                 if prop is None:
                     prop = reflect.Property(iw_hash('CPOI'), iw_hash(kind), iw_hash(field), b'')
                     poi.blob.properties.append(prop)
@@ -1550,7 +1544,7 @@ class _Level:
         self.copies += 1
         name = script_of(entity).get('name') or f'{self.name}_volume_{self.copies}'
         self._name(spec, name)
-        levels._set_transform(spec, entity.position, entity.quaternion())
+        spec_fields.set_transform(spec, entity.position, entity.quaternion())
         resource = group.Resource(None, iw_hash(name), resources.encode_entity_spec(spec))
         self.kept.append(resource)
         self.own.add(id(resource))    # nothing walkable changes: its navmesh tiles stay as shipped
@@ -1558,17 +1552,16 @@ class _Level:
     def _script_entity(self, entity: Placement, resource, spec) -> None:
         """A scripted entity: no baked box (its own collision is switched instead); a blocking
         one tags the walkable area under it with its name."""
-        from . import blender_scene as scene
         from . import native
 
         self.scripted.add(id(resource))
         corners = []
         for box in levels.prop_boxes(spec, self.models):
             corners += box
-        model = scene._model_reference(spec)
+        model = spec_fields.model_reference(spec)
         if not corners and model in self.models:
-            chain = [scene._local_transform(spec)]
-            corners = [scene._native_apply(chain, c)
+            chain = [spec_fields.local_transform(spec)]
+            corners = [spec_fields.apply_chain(chain, c)
                        for c in _box_corners(native.decode_model(self.models[model]).vertices)]
         if not corners:
             corners = [tuple(entity.position)]
@@ -1578,8 +1571,8 @@ class _Level:
         """Transform, custom model and field overrides of a placed entity."""
         from . import reflect
 
-        levels._set_transform(spec, entity.position, rotation)
-        levels._scale_by(spec, scale)   # relative: weapons and wall buys have their own scale
+        spec_fields.set_transform(spec, entity.position, rotation)
+        spec_fields.scale_by(spec, scale)   # relative: weapons and wall buys have their own scale
         if entity.prop:
             self._draw_model(spec, iw_hash(f'{self.name}_prop_{entity.prop}'))
         elif entity.model:
@@ -1591,8 +1584,8 @@ class _Level:
                 self._set_weapon(spec, entity, str(value))
                 continue
             component_name, _, field_name = key.partition('.')
-            component = levels._component(spec, component_name)
-            prop = levels._blob_prop(component.blob, field_name) if component and component.blob \
+            component = spec_fields.component(spec, component_name)
+            prop = spec_fields.prop(component.blob, field_name) if component and component.blob \
                 else None
             if isinstance(value, (list, tuple)):
                 # A list of names (the mystery box's weapon pool): std::list<unsigned int>.
@@ -1629,15 +1622,15 @@ class _Level:
         trigger) gets a renderable of its own (the placed models' one)."""
         from . import reflect, resources
 
-        renderable = levels._component(spec, 'CIsRenderableModel')
+        renderable = spec_fields.component(spec, 'CIsRenderableModel')
         if renderable is None:
-            template = levels._component(resources.decode_entity_spec(self.placed_template),
+            template = spec_fields.component(resources.decode_entity_spec(self.placed_template),
                                          'CIsRenderableModel')
             renderable = copy.deepcopy(template)
             at = next((i + 1 for i, c in enumerate(spec.components)
                        if c.type_hash == iw_hash('CIsTransform')), 0)
             spec.components.insert(at, renderable)
-        for element in levels._blob_prop(renderable.blob, 'assets').elements:
+        for element in spec_fields.prop(renderable.blob, 'assets').elements:
             for prop in element.properties:
                 if prop.name_hash in (iw_hash('Name'), iw_hash('model')):
                     reflect.set_typed_value(prop, model_hash)
@@ -1653,14 +1646,14 @@ class _Level:
             raise WorldError(f'wall buy {entity.source!r}: the level has no weapon {weapon!r}')
         skel, model, skin = display
         child = next((c for _cls, _reserved, c in spec.children
-                      if levels._component(c, 'CIsRenderableModel') is not None), None)
+                      if spec_fields.component(c, 'CIsRenderableModel') is not None), None)
         if child is None:
             raise WorldError(f'entity {entity.source!r} has no weapon display to change')
-        renderable = levels._component(child, 'CIsRenderableModel').blob
-        skel_prop = levels._blob_prop(renderable, 'skel')
+        renderable = spec_fields.component(child, 'CIsRenderableModel').blob
+        skel_prop = spec_fields.prop(renderable, 'skel')
         if skel_prop is not None and skel:
             reflect.set_typed_value(skel_prop, skel)
-        for element in levels._blob_prop(renderable, 'assets').elements:
+        for element in spec_fields.prop(renderable, 'assets').elements:
             for prop in element.properties:
                 if prop.name_hash in (iw_hash('name'), iw_hash('Name')):
                     reflect.set_typed_value(prop, name_hash)
@@ -1685,15 +1678,15 @@ class _Level:
                 spec = resources.decode_entity_spec(resource.body)
             except (ValueError, struct.error):
                 continue
-            if levels._component(spec, 'CWeaponChalkOutline') is None:
+            if spec_fields.component(spec, 'CWeaponChalkOutline') is None:
                 continue
             for _cls, _reserved, child in spec.children:
-                renderable = levels._component(child, 'CIsRenderableModel')
+                renderable = spec_fields.component(child, 'CIsRenderableModel')
                 if renderable is None or renderable.blob is None:
                     continue
-                for name, (model, skin) in _assets(renderable.blob):
+                for name, (model, skin) in blob_assets(renderable.blob):
                     if name == name_hash:
-                        skel = levels._blob_prop(renderable.blob, 'skel')
+                        skel = spec_fields.prop(renderable.blob, 'skel')
                         return (reflect.typed_value(skel) if skel is not None else 0), model, skin
         gear = maps.gear(self.base)
         weapons = getattr(self, 'weapon_group', None)
@@ -1709,12 +1702,12 @@ class _Level:
                 if resource.in_group_hash != name_hash:
                     continue
                 blob = resources.decode_entity_spec(resource.body).components[0].blob
-                skel = levels._blob_prop(blob, 'skel')
+                skel = spec_fields.prop(blob, 'skel')
                 skel = reflect.typed_value(skel) if skel is not None else 0
                 found = []
                 for prop in blob.properties:
                     for nested in ([prop.nested] if prop.nested else []):
-                        found += _assets(nested)
+                        found += blob_assets(nested)
                 low = next((pair for name, pair in found if name == iw_hash('LOD1')), None)
                 pair = low or (found[-1][1] if found else None)
                 if pair is None:
@@ -1746,12 +1739,12 @@ class _Level:
         from . import reflect, resources
 
         spec = resources.decode_entity_spec(self.placed_template)
-        levels._set_transform(spec, position, rotation)
-        levels._set_scale(spec, scale)
+        spec_fields.set_transform(spec, position, rotation)
+        spec_fields.set_transform(spec, scale=scale)
         if named:
             self._name(spec, entity_name)
-        renderable = levels._component(spec, 'CIsRenderableModel').blob
-        for element in levels._blob_prop(renderable, 'assets').elements:
+        renderable = spec_fields.component(spec, 'CIsRenderableModel').blob
+        for element in spec_fields.prop(renderable, 'assets').elements:
             for prop in element.properties:
                 if prop.name_hash in (iw_hash('Name'), iw_hash('model')):
                     reflect.set_typed_value(prop, model_hash)
@@ -1763,14 +1756,14 @@ class _Level:
         """Give an entity spec the CIsNamed name boz.objects finds it by."""
         from . import reflect, resources
 
-        named = levels._component(spec, 'CIsNamed')
+        named = spec_fields.component(spec, 'CIsNamed')
         if named is None:
             template = next(c for r in self.by_class[levels.ENTITY_SPEC].resources
                             for c in resources.decode_entity_spec(r.body).components
                             if c.type_hash == iw_hash('CIsNamed') and c.blob is not None)
             named = copy.deepcopy(template)
             spec.components.insert(1, named)
-        reflect.set_typed_value(levels._blob_prop(named.blob, 'name'), name)
+        reflect.set_typed_value(spec_fields.prop(named.blob, 'name'), name)
 
     def script(self, item, footprint_points=None, margin: float = BLOCK_MARGIN) -> str:
         """Record a scripted object's start state; returns its script name ('' for none)."""
@@ -1800,7 +1793,6 @@ class _Level:
                 padding: float = 0.0) -> list:
         """Add collision; a scripted object's goes into its own collision entity. Returns the
         world-space points used."""
-        from . import blender_scene as scene
 
         if kind == 'none':
             return []
@@ -1810,10 +1802,10 @@ class _Level:
         if script:
             solid, single = self.script_collision.setdefault(script, ([], []))
             if shape == 'box':
-                points = [scene._native_apply(chain, c) for c in _box_corners(vertices, local_padding)]
+                points = [spec_fields.apply_chain(chain, c) for c in _box_corners(vertices, local_padding)]
                 single.extend(levels.box_triangles(len(solid)))
             else:
-                points = [scene._native_apply(chain, tuple(map(float, v))) if chain
+                points = [spec_fields.apply_chain(chain, tuple(map(float, v))) if chain
                           else tuple(map(float, v)) for v in vertices]
                 single.extend((a + len(solid), b + len(solid), c + len(solid))
                               for a, b, c in triangles)
@@ -1822,12 +1814,12 @@ class _Level:
             return points
         before = len(self.single)
         if shape == 'box':
-            points = [scene._native_apply(chain, c) for c in _box_corners(vertices, local_padding)]
+            points = [spec_fields.apply_chain(chain, c) for c in _box_corners(vertices, local_padding)]
             self.single.extend(levels.box_triangles(len(self.solid)))
             self.solid.extend(points)
         else:
             offset = len(self.solid)
-            points = [scene._native_apply(chain, tuple(map(float, v))) if chain
+            points = [spec_fields.apply_chain(chain, tuple(map(float, v))) if chain
                       else tuple(map(float, v)) for v in vertices]
             self.solid.extend(points)
             self.single.extend((a + offset, b + offset, c + offset) for a, b, c in triangles)
@@ -1852,7 +1844,7 @@ class _Level:
             mode = entity.settings.get(CHALK_FIELD, '')
             if mode == 'none':
                 continue
-            weapon = chalk._weapon_of(spec)
+            weapon = chalk.weapon_of(spec)
             weapon_key = weapon
             if isinstance(weapon, int):
                 weapon_key = getattr(self, 'weapon_aliases', {}).get(weapon, weapon)
@@ -1889,7 +1881,7 @@ class _Level:
         if display is None:
             return None
         gear = maps.gear(self.base)
-        body = self.game._find(levels.MODEL, display[1], [f'ingame/weapons/weapons_{gear}.group.bin'])
+        body = self.game.find(levels.MODEL, display[1], [f'ingame/weapons/weapons_{gear}.group.bin'])
         if body is None and getattr(self, 'weapon_group', None) is not None:
             # An imported weapon's model is in the map's own weapons group.
             body = next((r.body for t in self.weapon_group.types() if t.class_hash == levels.MODEL
@@ -1907,14 +1899,14 @@ class _Level:
         from . import native
 
         paths = self.game.map_paths(template.group)
-        body = self.game._find(levels.MODEL, template.model, paths)
+        body = self.game.find(levels.MODEL, template.model, paths)
         if body is None:
             return False
         quad = native.decode_model(body)
         known = {r.in_group_hash for p in paths for t in self.game.group(p).types()
                  if t.class_hash == levels.MATERIAL for r in t.resources}
-        refs = scene._model_materials(body, known)
-        material_body = self.game._find(levels.MATERIAL, refs[0], paths) if refs else None
+        refs = scene.model_materials(body, known)
+        material_body = self.game.find(levels.MATERIAL, refs[0], paths) if refs else None
         material = native.decode_material(material_body) if material_body else native.Material(
             False, 0, self.material_template.unknown, [(255, 255, 255, 255)] * 4, [0, 0, 0, 0],
             self.material_template.trailer)
@@ -1988,7 +1980,7 @@ class _Level:
             raise WorldError(f'{self.base} has no collision entity to copy')
         for name, (solid, single) in sorted(self.script_collision.items()):
             spec = resources.decode_entity_spec(source.body)
-            levels._set_transform(spec, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+            spec_fields.set_transform(spec, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
             self._name(spec, f'{name}_collision')
             component = next(c for c in spec.components
                              if c.class_hash == resources.COLLISION_MESH_SPEC)
@@ -2008,7 +2000,7 @@ class _Level:
             if id(resource) in self.own or id(resource) in self.scripted:
                 continue
             spec = resources.decode_entity_spec(resource.body)
-            if levels._component(spec, 'CDoor') is not None:
+            if spec_fields.component(spec, 'CDoor') is not None:
                 continue   # doors gate the navmesh (door_footprints), they do not cut it
             for box in levels.prop_boxes(spec, self.models):
                 self.single += levels.box_triangles(len(self.solid))
@@ -2020,23 +2012,22 @@ class _Level:
         """(name hash, XZ footprint in metres, min y, max y) of each door (its collision boxes
         and its model), for navbuild; with the areas of blocking objects unless *blockers* is
         false."""
-        from . import blender_scene as scene
         from . import native, resources
 
         doors = []
         for resource in resources_list:
             spec = resources.decode_entity_spec(resource.body)
-            if levels._component(spec, 'CDoor') is None:
+            if spec_fields.component(spec, 'CDoor') is None:
                 continue
-            own = scene._blob_value(scene._component(spec, 'CIsNamed'), 'name', None)
+            own = spec_fields.value(spec_fields.component_blob(spec, 'CIsNamed'), 'name', None)
             name_hash = iw_hash(own) if isinstance(own, str) else resource.in_group_hash
             corners = [c for box in levels.prop_boxes(spec, self.models) for c in box]
             # Debris and boats are bigger than their collision slab: the whole model is shut.
-            model = scene._model_reference(spec)
+            model = spec_fields.model_reference(spec)
             if model in self.models:
                 vertices = native.decode_model(self.models[model]).vertices
-                chain = [scene._local_transform(spec)]
-                corners += [scene._native_apply(chain, c) for c in _box_corners(vertices)]
+                chain = [spec_fields.local_transform(spec)]
+                corners += [spec_fields.apply_chain(chain, c) for c in _box_corners(vertices)]
             if not corners:
                 continue
             doors.append(_tag_area(name_hash, corners))
@@ -2141,14 +2132,14 @@ def _compile_layout(pack, name: str, world: Layout,
 
     base = world.base
     files = levels.common_files(pack, name, base, fixed)
-    statics = levels._read(pack, f'levels/{base}/{base}_statics')
+    statics = levels.read_group_at(pack, f'levels/{base}/{base}_statics')
     levels.rename_level_resource(statics, base, name)
     level = _Level(pack, name, base, statics)
     level.groups = files.groups
     _apply_weapons(pack, files, name, base, level, world.weapons)
     by_class = level.by_class
     for resource in by_class[levels.ENTITY_SPEC].resources:  # cameras: intro and main
-        if levels._component(resources.decode_entity_spec(resource.body), 'CIsCamera'):
+        if spec_fields.component(resources.decode_entity_spec(resource.body), 'CIsCamera'):
             level.kept.append(resource)
     level.build_props(world)
     for entity in world.entities:
@@ -2156,13 +2147,13 @@ def _compile_layout(pack, name: str, world: Layout,
 
     # The starting area lists the zombie spawns that are in the world.
     level_blob = resources.decode_reflected(by_class[levels.LEVEL].resources[0].body)
-    (start_area,) = struct.unpack_from('<I', levels._blob_prop(level_blob, 'm_StartingArea').raw)
+    (start_area,) = struct.unpack_from('<I', spec_fields.prop(level_blob, 'm_StartingArea').raw)
     areas = [r for r in by_class[levels.AREA].resources if r.in_group_hash == start_area]
     if not areas:
         raise WorldError(f'{base} has no starting area')
     area_blob = resources.decode_reflected(areas[0].body)
     spawns = level.zombie_spawns
-    levels._blob_prop(area_blob, 'm_SpawnPoints').raw = struct.pack(
+    spec_fields.prop(area_blob, 'm_SpawnPoints').raw = struct.pack(
         f'<I{len(spawns)}I', len(spawns), *spawns)
     areas[0].body = resources.encode_reflected(area_blob)
     by_class[levels.AREA].resources = areas
@@ -2184,7 +2175,7 @@ def _compile_layout(pack, name: str, world: Layout,
         blocking=level.blocking, doors=level.door_footprints(level.kept)))
 
     files.groups[f'{name}.group.bin'] = levels.renamed(
-        levels._read(pack, f'levels/{base}/{base}'), name,
+        levels.read_group_at(pack, f'levels/{base}/{base}'), name,
         [levels.Child(f'levels/{base}//{base}_dynamics.group', f'{base}_dynamics'),
          levels.Child(f'levels/{name}//{name}_statics.group', f'{name}_statics')])
     without_children = levels.renamed(statics, f'{name}_statics')
@@ -2216,7 +2207,7 @@ def _apply_weapons(pack, files, name: str, base: str, level, defs) -> None:
 
 def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFiles:
     from . import blender_scene as scene
-    from . import blender_scene, navbuild, resources
+    from . import navbuild, resources
 
     base = world.base
     files = levels.clone_level(pack, name, base, fixed)
@@ -2230,7 +2221,7 @@ def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFil
     for resource in level.by_class[levels.ENTITY_SPEC].resources:
         if resource.in_group_hash in removed:
             # Taken out in the editor: its navmesh tiles are rebuilt without it.
-            level._mark([blender_scene._local_transform(resources.decode_entity_spec(resource.body))[0]])
+            level._mark([spec_fields.local_transform(resources.decode_entity_spec(resource.body))[0]])
             continue
         level.kept.append(resource)
     level.build_props(world)
@@ -2264,7 +2255,7 @@ def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFil
         if source is None:
             raise WorldError(f'{base} has no collision entity to copy')
         spec = resources.decode_entity_spec(source.body)
-        levels._set_transform(spec, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+        spec_fields.set_transform(spec, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
         added = group.Resource(None, iw_hash(f'{name}_world_collision'),
                                resources.encode_entity_spec(spec))
         level.set_collision(added)

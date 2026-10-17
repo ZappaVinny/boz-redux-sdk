@@ -182,7 +182,7 @@ class Encodings(unittest.TestCase):
         rgb = b''.join(bytes((x * 15 % 256, y * 15 % 256, 128)) for y in range(height) for x in range(width))
         blocks = native.encode_etc1(rgb, width, height)
         self.assertEqual(len(blocks), (width // 4) * (height // 4) * 8)
-        back = native._decode_etc1(blocks, width, height)
+        back = native.decode_etc1(blocks, width, height)
         error = sum(abs(back[i * 4 + c] - rgb[i * 3 + c]) for i in range(width * height) for c in range(3))
         self.assertLess(error / (width * height * 3), 12)
 

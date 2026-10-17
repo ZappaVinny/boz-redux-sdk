@@ -7,8 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from fixtures import synthetic_triangle_mesh  # noqa: E402
 from bozkit import blender_scene, bullet, collision, group, native, reflect, resources  # noqa: E402
 from bozkit.hashing import iw_hash  # noqa: E402
+
 
 
 def typed(type_name, name, value, owner='CIsTransform'):
@@ -68,7 +70,7 @@ def edits_for(imported):
 
 
 def collision_type(vertices, indices):
-    mesh = collision.CollisionMesh(bullet.synthetic_triangle_mesh(vertices, indices), vertices,
+    mesh = collision.CollisionMesh(synthetic_triangle_mesh(vertices, indices), vertices,
                                    indices, bytes(range(len(indices) // 3)), ['a', 'b'])
     component = resources.Component(resources.COLLISION_MESH_SPEC, 0,
                                     iw_hash('CIsCollisionMeshSpec'), [], collision.encode(mesh))

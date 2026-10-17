@@ -535,7 +535,7 @@ def catalog(read, names, level: str, weapons=(), known_names: dict | None = None
     (or a parsed group); *weapons* are bozkit.weapons.GameWeapon-likes (label, values)."""
     from . import group as group_module
     from . import weapons as weapons_module
-    known = dict(weapons_module._names() if known_names is None else known_names)
+    known = dict(weapons_module.known_names() if known_names is None else known_names)
     sound_fields = [(f.key, f.label) for f in weapons_module.FIELDS
                     if f.kind == 'sound']
     slots = []

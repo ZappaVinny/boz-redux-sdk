@@ -481,7 +481,7 @@ def compile_map(project: Project, game, fixed=None):
             effects.EffectError, game_rules.GameError, hud_icons.IconError) as exc:
         raise ProjectError(str(exc)) from None
     built = files.groups.get(f'weapons_{project.map_name}.group.bin')
-    if built is not None and weapons._hash_of(start) not in weapons._hashes(built):
+    if built is not None and weapons.hash_of(start) not in weapons.resource_hashes(built):
         # The game gives the starting weapon without checking it exists: it would crash.
         raise ProjectError(f'the starting weapon {start} is not one of the map\'s weapons')
     files.runtime['weapons'] = weapons.runtime(defs, index)

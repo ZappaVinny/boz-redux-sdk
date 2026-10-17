@@ -27,6 +27,7 @@ from pathlib import Path
 import bpy
 
 from ._bozkit import blender_scene, toolkit, world
+from ._bozkit import spec_fields
 
 from . import game, meshes
 
@@ -71,7 +72,7 @@ def is_part(obj) -> bool:
 PART_SEPARATOR = " › "   # a part's object is "<Prefab> › <Part>": outliner searches find it
 
 
-def _without_suffix(text: str) -> str:
+def without_suffix(text: str) -> str:
     """'Door.001' -> 'Door' (Blender's suffix for a name already taken)."""
     head, dot, tail = text.rpartition(".")
     return head if dot and tail.isdigit() and len(tail) == 3 else text
@@ -87,11 +88,11 @@ def sync_part_names(scene) -> int:
             continue
         prefix = obj.parent.name + PART_SEPARATOR
         if obj.name.startswith(prefix):
-            part = clean_name(_without_suffix(obj.name[len(prefix):]))
+            part = clean_name(without_suffix(obj.name[len(prefix):]))
             if obj.boz.part_name != part:
                 obj.boz.part_name = part
             continue
-        part = obj.boz.part_name or clean_name(_without_suffix(obj.name.split(PART_SEPARATOR)[-1]))
+        part = obj.boz.part_name or clean_name(without_suffix(obj.name.split(PART_SEPARATOR)[-1]))
         obj.boz.part_name = part
         obj.name = prefix + part
         renamed += 1
@@ -101,20 +102,20 @@ def sync_part_names(scene) -> int:
 def strip_part_name(obj) -> None:
     """A part leaving its prefab goes back to its own name."""
     if PART_SEPARATOR in obj.name:
-        obj.name = obj.boz.part_name or _without_suffix(obj.name.split(PART_SEPARATOR)[-1])
+        obj.name = obj.boz.part_name or without_suffix(obj.name.split(PART_SEPARATOR)[-1])
 
 
 # Images and materials
 
 
-def _image_from_texture(name: str, texture: "world.Texture", path: Path | None):
+def image_from_texture(name: str, texture: "world.Texture", path: Path | None):
     if path is not None and path.is_file():
         image = bpy.data.images.load(str(path), check_existing=True)
         image.reload()
         return image
     image = bpy.data.images.new(name, width=texture.width, height=texture.height, alpha=True)
     stride = texture.width * 4
-    rgba = world._bgra_to_rgba(texture.bgra)
+    rgba = world.bgra_to_rgba(texture.bgra)
     values = []
     for row in range(texture.height - 1, -1, -1):
         values.extend(channel / 255.0 for channel in rgba[row * stride:(row + 1) * stride])
@@ -174,7 +175,7 @@ def texture_of_image(image) -> "world.Texture":
 # World -> scene
 
 
-def _mesh_data(mesh: "world.Mesh", source: Path, data_name: str):
+def mesh_data(mesh: "world.Mesh", source: Path, data_name: str):
     data = bpy.data.meshes.new(data_name)
     data.from_pydata([blender_scene.to_blender(v) for v in mesh.vertices], [],
                      [tuple(t) for t in mesh.triangles])
@@ -183,9 +184,9 @@ def _mesh_data(mesh: "world.Mesh", source: Path, data_name: str):
     data.loops.foreach_get("vertex_index", corner_vertices)
     layer.data.foreach_set("uv", [c for v in corner_vertices
                                   for c in blender_scene.uv_to_blender(mesh.uvs[v])])
-    files = world._texture_files(mesh.name, len(mesh.textures))
+    files = world.texture_files(mesh.name, len(mesh.textures))
     for index, (texture, relative) in enumerate(zip(mesh.textures, files)):
-        image = _image_from_texture(Path(relative).stem, texture, source / relative)
+        image = image_from_texture(Path(relative).stem, texture, source / relative)
         data.materials.append(material_for(f"{mesh.name}_{index}" if index else mesh.name, image))
     if mesh.face_textures:
         data.polygons.foreach_set("material_index", mesh.face_textures)
@@ -297,7 +298,7 @@ def world_matrix(obj):
     return matrix
 
 
-def _transform(obj, relative_to=None):
+def game_transform(obj, relative_to=None):
     """(position, x/y/z/w rotation, scale) of an object in the game's axes: in the world, or in
     *relative_to*'s space (a prefab part)."""
     matrix = world_matrix(obj)
@@ -367,7 +368,7 @@ def entity_category(base: str, source_hash: int, group_path: str = "") -> str:
     spec = game.entity_spec(base, source_hash, group_path)
     if spec is None:
         return "entity"
-    return blender_scene._category(blender_scene._component_names(spec))
+    return blender_scene.category_of(blender_scene.component_names(spec))
 
 
 def colour_marker(obj, category: str) -> None:
@@ -441,10 +442,10 @@ def set_links(obj, base: str, source_hash: int, group_path: str = "") -> None:
     spec = game.entity_spec(base, source_hash, group_path)
     if spec is None:
         return
-    links = blender_scene._node_links(spec)
+    links = blender_scene.node_links(spec)
     if links:
         obj["boz_links"] = json.dumps(links)
-    named = blender_scene._blob_value(blender_scene._component(spec, "CIsNamed"), "name", None)
+    named = spec_fields.value(spec_fields.component_blob(spec, "CIsNamed"), "name", None)
     if isinstance(named, str):
         obj["boz_link_id"] = f"0x{world.iw_hash(named):08x}"
         # The add-on draws links between markers and placed models (not hidden with markers).
@@ -686,8 +687,8 @@ def make_base_editable(scene, base: str) -> int:
         if spec is None or source in known or source == "0x00000000" or (
                 obj.parent is not None and _entity_hash(obj.parent) == source):
             continue   # unnamed entities cannot be told apart; one object edits each entity
-        category = obj.get("boz_category") or blender_scene._category(
-            blender_scene._component_names(spec))
+        category = obj.get("boz_category") or blender_scene.category_of(
+            blender_scene.component_names(spec))
         if category in ("collision", "area"):
             continue
         if obj.get("boz_kind") == "entity":
@@ -697,8 +698,8 @@ def make_base_editable(scene, base: str) -> int:
         obj.boz.source = source
         obj.boz.group = ""
         obj.hide_select = False
-        obj["boz_base_origin"] = [c for part in _transform(obj) for c in part]
-        named = blender_scene._blob_value(blender_scene._component(spec, "CIsNamed"), "name", None)
+        obj["boz_base_origin"] = [c for part in game_transform(obj) for c in part]
+        named = spec_fields.value(spec_fields.component_blob(spec, "CIsNamed"), "name", None)
         if isinstance(named, str):
             obj["boz_entity_name"] = named
         key, values = toolkit.settings_for(spec, names)
@@ -737,10 +738,10 @@ def base_values(obj) -> dict:
         return {}
 
 
-def _base_changes(obj) -> tuple[dict, bool]:
+def base_changes(obj) -> tuple[dict, bool]:
     """(changed settings, whether the object moved) of a base entity."""
     origin = list(obj.get("boz_base_origin", []))
-    position, rotation, scale = _transform(obj)
+    position, rotation, scale = game_transform(obj)
     now = [*position, *rotation, *scale]
     moved = len(origin) != 10 or any(abs(a - b) > 1e-3 for a, b in zip(now, origin))
     if not moved and len(origin) == 10:
@@ -793,7 +794,7 @@ def world_to_scene(source_world: "world.World", source: Path, scene) -> None:
     scene.boz.inherit = source_world.inherit
     if source_world.inherit:
         show_base_level(scene, source_world.base)
-    meshes = {mesh.name: _mesh_data(mesh, source, mesh.name) for mesh in source_world.meshes}
+    meshes = {mesh.name: mesh_data(mesh, source, mesh.name) for mesh in source_world.meshes}
     for mesh in source_world.meshes:
         meshes[mesh.name]["boz_double_sided"] = mesh.double_sided
     base_objects = defaultdict(list)
@@ -984,7 +985,7 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
         """The world object for a scene object (None for what is not written)."""
         role = obj.boz.role
         name = object_name(obj)
-        position, rotation, scale = _transform(obj, parent)
+        position, rotation, scale = game_transform(obj, parent)
         common = {"script": obj.boz.script, "properties": properties_of(obj)}
         if role == "model" and obj.type == "MESH":
             if max(obj.dimensions) < TINY:
@@ -1047,7 +1048,7 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
                           if source not in present]
     for source, objects in base_objects.items():
         for number, obj in enumerate(objects):
-            changed, moved = _base_changes(obj)
+            changed, moved = base_changes(obj)
             custom = own_mesh(obj) if obj.get("boz_custom_model") and obj.type == "MESH" else ""
             start = start_of(obj)
             if len(objects) == 1 and not (changed or moved or custom or start or obj.boz.script):
@@ -1057,7 +1058,7 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
             for key, value in changed.items():
                 setting = settings.get(key)
                 fields.update(toolkit.fields_for(setting, value) if setting else {key: value})
-            position, rotation, scale = _transform(obj)
+            position, rotation, scale = game_transform(obj)
             origin = list(obj.get("boz_base_origin", []))
             own = origin[7:10] if len(origin) == 10 else (1.0, 1.0, 1.0)
             relative = tuple(round(scale[i] / own[i], 5) if own[i] else 1.0 for i in range(3))
@@ -1087,7 +1088,7 @@ def prefab_of(obj, problems: list | None = None):
     found = next((item for name, item in world.walk(whole.prefabs) if name == full), None)
     if found is None:
         raise ValueError(f"{obj.name} is not a prefab of this map")
-    used = world._meshes_used([found])
+    used = world.meshes_used([found])
     return found, [mesh for mesh in whole.meshes if mesh.name in used]
 
 

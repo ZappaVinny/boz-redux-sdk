@@ -11,6 +11,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from fixtures import synthetic_triangle_mesh  # noqa: E402
 from bozkit import blender_scene, bullet, collision, corpus, gltf, group, map_resources, native, navigation, reflect, resources, save  # noqa: E402
 from bozkit.hashing import iw_hash  # noqa: E402
 from bozkit.__main__ import main as cli_main  # noqa: E402
@@ -253,7 +254,7 @@ class FormatTests(unittest.TestCase):
                                       'front', 'back')
         triangle = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
         collision_mesh = collision.CollisionMesh(
-            bullet.synthetic_triangle_mesh(triangle, [0, 1, 2]), triangle,
+            synthetic_triangle_mesh(triangle, [0, 1, 2]), triangle,
             [0, 1, 2], b'\0', ['default'])
         component = resources.Component(resources.COLLISION_MESH_SPEC, 0,
                                         iw_hash('CIsCollisionMeshSpec'), [],
@@ -339,7 +340,7 @@ class FormatTests(unittest.TestCase):
 
     def test_collision_mesh_roundtrip_and_edit(self):
         vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
-        shape = bullet.synthetic_triangle_mesh(vertices, [0, 1, 2])
+        shape = synthetic_triangle_mesh(vertices, [0, 1, 2])
         mesh = collision.CollisionMesh(shape, list(vertices), [0, 1, 2], b'\x07')
         encoded = collision.encode(mesh)
         self.assertEqual(collision.decode(encoded), mesh)
@@ -356,7 +357,7 @@ class FormatTests(unittest.TestCase):
 
     def test_bullet_sync_preserves_or_invalidates_bvh(self):
         vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
-        shape = bullet.synthetic_triangle_mesh(vertices, [0, 1, 2])
+        shape = synthetic_triangle_mesh(vertices, [0, 1, 2])
         self.assertIs(bullet.sync_triangle_mesh(shape, vertices, [0, 1, 2]), shape)
         moved = bullet.sync_triangle_mesh(shape, vertices + [(0.0, 0.0, 1.0)],
                                           [0, 1, 2, 0, 2, 3])

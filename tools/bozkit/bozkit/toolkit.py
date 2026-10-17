@@ -12,6 +12,7 @@ import struct
 from dataclasses import dataclass, field
 
 from . import blender_scene as scene
+from . import spec_fields
 from . import group, levels, reflect, resources
 from . import maps
 from .hashing import iw_hash
@@ -41,7 +42,7 @@ class Piece:
     key: str
     label: str
     catalog: str
-    category: str                      # blender_scene._category of the entity
+    category: str                      # blender_scene.category_of of the entity
     words: tuple[str, ...] = ()        # all must appear in the entity's label (lower case)
     spawn_type: str = ''               # zombie spawn points: the spawnType name
     exclude: tuple[str, ...] = ()      # component names the entity must not have
@@ -192,7 +193,7 @@ def all_pieces(pack) -> list[Piece]:
         for item, spec, category, own in _entities(pack, f'levels/{base}/{base}_statics.group.bin'):
             if category not in VARIANTS:
                 continue
-            model = scene._model_reference(spec)
+            model = spec_fields.model_reference(spec)
             if not model or (category, model) in seen:
                 continue
             seen.add((category, model))
@@ -215,8 +216,8 @@ def _entities(pack, path: str):
                 spec = resources.decode_entity_spec(item.body)
             except (ValueError, struct.error):
                 continue
-            category = scene._category(scene._component_names(spec))
-            own = scene._blob_value(scene._component(spec, 'CIsNamed'), 'name', '')
+            category = scene.category_of(scene.component_names(spec))
+            own = spec_fields.value(spec_fields.component_blob(spec, 'CIsNamed'), 'name', '')
             yield item, spec, category, own if isinstance(own, str) else ''
 
 
@@ -231,13 +232,13 @@ class Resolved:
 
 
 def _spawn_type(spec) -> int | None:
-    point = levels._component(spec, 'CSpawnPoint')
-    prop = levels._blob_prop(point.blob, 'spawnType') if point and point.blob else None
+    point = spec_fields.component(spec, 'CSpawnPoint')
+    prop = spec_fields.prop(point.blob, 'spawnType') if point and point.blob else None
     return struct.unpack_from('<I', prop.raw)[0] if prop is not None and len(prop.raw) >= 4 else None
 
 
 def _matches(piece: Piece, spec, names: list[str], label: str, entity_name: str) -> bool:
-    if scene._category(names) != piece.category:
+    if scene.category_of(names) != piece.category:
         return False
     if any(name in names for name in piece.exclude):
         return False
@@ -248,7 +249,7 @@ def _matches(piece: Piece, spec, names: list[str], label: str, entity_name: str)
         return False
     if piece.spawn_type and _spawn_type(spec) != iw_hash(piece.spawn_type):
         return False
-    if piece.model is not None and (scene._model_reference(spec) is not None) != piece.model:
+    if piece.model is not None and (spec_fields.model_reference(spec) is not None) != piece.model:
         return False
     if piece.category == 'spawn' and not piece.spawn_type and _spawn_type(spec) is not None \
             and 'spawn_player' not in text:
@@ -258,8 +259,8 @@ def _matches(piece: Piece, spec, names: list[str], label: str, entity_name: str)
 
 def _value(spec, key: str):
     component_name, _, field_name = key.partition('.')
-    component = levels._component(spec, component_name)
-    prop = levels._blob_prop(component.blob, field_name) if component and component.blob else None
+    component = spec_fields.component(spec, component_name)
+    prop = spec_fields.prop(component.blob, field_name) if component and component.blob else None
     return reflect.typed_value(prop) if prop is not None else None
 
 
@@ -279,8 +280,8 @@ def encode_hash_list(values) -> bytes:
 
 def _list_value(spec, key: str) -> list[int] | None:
     component_name, _, field_name = key.partition('.')
-    component = levels._component(spec, component_name)
-    prop = levels._blob_prop(component.blob, field_name) if component and component.blob else None
+    component = spec_fields.component(spec, component_name)
+    prop = spec_fields.prop(component.blob, field_name) if component and component.blob else None
     return hash_list(prop.raw) if prop is not None else None
 
 
@@ -308,11 +309,11 @@ def resolve(pack, base: str, key: str, names: dict[int, str] | None = None) -> R
                     continue
             else:
                 try:
-                    label, _details = scene._describe(spec, category)
+                    label, _details = scene.describe(spec, category)
                 except (ValueError, KeyError, TypeError, struct.error):
                     continue
                 entity_name = own or names.get(item.in_group_hash, '')
-                if not _matches(piece_, spec, scene._component_names(spec), label, entity_name):
+                if not _matches(piece_, spec, scene.component_names(spec), label, entity_name):
                     continue
             known = names.get(item.in_group_hash, '')
             name = known if known and iw_hash(known) == item.in_group_hash \
@@ -321,17 +322,17 @@ def resolve(pack, base: str, key: str, names: dict[int, str] | None = None) -> R
             defaults.update({setting.key: '' for setting in piece_.settings
                              if setting.key == CHALK_FIELD})
             return Resolved(piece_, '' if path == statics else path, item.in_group_hash, name,
-                            scene._model_reference(spec), defaults)
+                            spec_fields.model_reference(spec), defaults)
     return None
 
 
 def _weapon_of(spec, names: dict[int, str]):
     """The weapon a wall buy sells: its "model" child's asset name."""
     for _cls, _reserved, child in spec.children:
-        renderable = levels._component(child, 'CIsRenderableModel')
+        renderable = spec_fields.component(child, 'CIsRenderableModel')
         if renderable is None or renderable.blob is None:
             continue
-        for element in levels._blob_prop(renderable.blob, 'assets').elements or ():
+        for element in spec_fields.prop(renderable.blob, 'assets').elements or ():
             for prop in element.properties:
                 if prop.name_hash in (iw_hash('name'), iw_hash('Name')):
                     return reflect.typed_value(prop)
@@ -391,10 +392,10 @@ def settings_for(spec, names: dict[int, str] | None = None) -> tuple[str, dict]:
     """(piece key, settings as the panel shows them) for an existing entity of a level, by what
     it is: a shipped perk shows the perk settings, a door the door settings, and so on."""
     names = names or {}
-    category = scene._category(scene._component_names(spec))
+    category = scene.category_of(scene.component_names(spec))
     if category == 'door':
         key = 'door:0x00000000'
-    elif category == 'trap' and levels._component(spec, 'CTrapSwitch') is not None:
+    elif category == 'trap' and spec_fields.component(spec, 'CTrapSwitch') is not None:
         key = 'trap_switch'
     else:
         key = CATEGORY_PIECES.get(category, '')

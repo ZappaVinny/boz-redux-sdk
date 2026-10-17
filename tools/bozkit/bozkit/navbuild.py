@@ -247,67 +247,6 @@ def _key(point):
     return tuple(round(value, 3) for value in point)
 
 
-def reachable_polys(tiles: list[navigation.TileData], seeds, links, *, horizontal=1.0,
-                    vertical=1.0) -> list[set[int]]:
-    """Per tile, the ground polygons reachable from *seeds* through shared edges and off-mesh
-    links. Unreached polygons are what the original tool left out (rooftops, closed spaces)."""
-    nodes = [(t, p) for t, tile in enumerate(tiles) for p, poly in enumerate(tile.polys)
-             if poly.kind == 0]
-    number = {node: i for i, node in enumerate(nodes)}
-    parent = list(range(len(nodes)))
-
-    def find(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    def union(i, j):
-        parent[find(i)] = find(j)
-
-    edges = {}
-    for t, p in nodes:
-        tile = tiles[t]
-        verts = tile.polys[p].vertices
-        for k in range(len(verts)):
-            edge = tuple(sorted((_key(tile.vertices[verts[k]]),
-                                 _key(tile.vertices[verts[(k + 1) % len(verts)]]))))
-            other = edges.setdefault(edge, number[(t, p)])
-            if other != number[(t, p)]:
-                union(other, number[(t, p)])
-    surfaces = _SurfaceIndex(tiles)
-    owner = {id(tiles[t].polys[p]): number[(t, p)] for t, p in nodes}
-
-    def nearest(point):
-        for radius in (0.0, horizontal):
-            for dx, dz in ((0, 0), (radius, 0), (-radius, 0), (0, radius), (0, -radius)):
-                found = surfaces.find((point[0] + dx, point[1], point[2] + dz), vertical)
-                if found is not None:
-                    return owner[id(found)]
-        return None
-
-    for start, end in links:
-        a, b = nearest(start), nearest(end)
-        if a is not None and b is not None:
-            union(a, b)
-    roots = {find(i) for i in (nearest(seed) for seed in seeds) if i is not None}
-    result = [set() for _ in tiles]
-    for (t, p), i in number.items():
-        if find(i) in roots:
-            result[t].add(p)
-    return result
-
-
-def _set_poly_flags(data: bytes, flags_by_poly: dict[int, int]) -> bytes:
-    """Patch BOZ polygon flags in place (u32 at +28 of each 40-byte polygon)."""
-    out = bytearray(data)
-    vert_count = struct.unpack_from('<i', data, 28)[0]
-    base = navigation._TILE_HEADER.size + _align(vert_count * 12)
-    for index, flags in flags_by_poly.items():
-        struct.pack_into('<I', out, base + index * POLY_STRIDE + 28, flags)
-    return bytes(out)
-
-
 POLY_STRIDE = 40
 
 
@@ -552,30 +491,3 @@ def _in_polygon(point, polygon) -> bool:
         sign = side
     return True
 
-
-def tag_doors(body: bytes, doors) -> bytes:
-    """Tag the polygons under each door as the game's shipped navmeshes do: flags | 2 and the
-    door's name hash. *doors*: (name hash, XZ footprint polygon in metres, min y, max y)."""
-    if not doors:
-        return body
-    mesh = navigation.decode(body)
-    for tile in mesh.tiles:
-        decoded = navigation.decode_tile(tile.data)
-        out = bytearray(tile.data)
-        vert_count = struct.unpack_from('<i', tile.data, 28)[0]
-        base = navigation._TILE_HEADER.size + _align(vert_count * 12)
-        changed = False
-        for index, poly in enumerate(decoded.polys):
-            if not poly.vertices:
-                continue
-            points = [decoded.vertices[i] for i in poly.vertices]
-            centre = tuple(sum(v[k] for v in points) / len(points) for k in range(3))
-            for name_hash, footprint, low, high in doors:
-                if low - 1.0 <= centre[1] <= high + 0.5 and _in_polygon((centre[0], centre[2]), footprint):
-                    struct.pack_into('<II', out, base + index * POLY_STRIDE + 28,
-                                     poly.flags | DOOR_FLAG, name_hash)
-                    changed = True
-                    break
-        if changed:
-            tile.data = bytes(out)
-    return navigation.encode(mesh)

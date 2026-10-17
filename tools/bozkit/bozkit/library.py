@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from . import blender_scene as scene
+from . import spec_fields
 from . import derbh, group, native, reflect, resources
 from . import maps
 from .hashing import iw_hash
@@ -145,9 +146,9 @@ def _cooked_preview(body: bytes, target: int):
                         for by in rows for bx in cols)
         w, h = len(cols) * 4, len(rows) * 4
     if body[23] == 0x27:
-        rgba = native._decode_etc1(data, w, h)
+        rgba = native.decode_etc1(data, w, h)
     elif body[23] == 0x34:
-        rgba = native._decode_dxt1(data, w, h)
+        rgba = native.decode_dxt1(data, w, h)
     else:
         raise ValueError('unsupported cooked texture platform')
     return Image.frombytes('RGBA', (w, h), rgba), (width, height)
@@ -396,8 +397,8 @@ def build(client_root: str | Path, folder: Path | None = None,
                     spec = resources.decode_entity_spec(resource.body)
                 except (ValueError, struct.error):
                     continue
-                category = scene._category(scene._component_names(spec))
-                model = scene._model_reference(spec) or 0
+                category = scene.category_of(scene.component_names(spec))
+                model = spec_fields.model_reference(spec) or 0
                 if weapons:
                     kind = 'weapon'
                 elif category == 'effect':
@@ -414,7 +415,7 @@ def build(client_root: str | Path, folder: Path | None = None,
                 if not model:
                     entry.candidates = _referenced_models(spec)
                 try:
-                    label, details = scene._describe(spec, category)
+                    label, details = scene.describe(spec, category)
                 except (ValueError, KeyError, TypeError, struct.error):
                     label, details = '', ''
                 if label and label != 'Entity':
@@ -506,7 +507,7 @@ def build(client_root: str | Path, folder: Path | None = None,
         except (ValueError, struct.error, IndexError):
             continue
         entry.triangles = len(model.triangles)
-        refs = scene._model_materials(body, material_ids)
+        refs = scene.model_materials(body, material_ids)
         user = model_users.get(entry.hash)
         if not entry.name and user:
             entry.label = f'Model of {user}'

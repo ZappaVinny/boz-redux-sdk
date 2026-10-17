@@ -378,7 +378,7 @@ class BOZ_OT_make_prefab(Operator):
             obj.matrix_basis = inverse @ matrices[obj]
             convert.move_to(obj, collection)   # parts sit with their prefab in the outliner
             if not obj.boz.part_name:
-                obj.boz.part_name = convert.clean_name(convert._without_suffix(obj.name))
+                obj.boz.part_name = convert.clean_name(convert.without_suffix(obj.name))
         convert.sync_part_names(link.map_scene())
         for other in context.selected_objects:
             other.select_set(False)
@@ -471,7 +471,7 @@ def place_library_prefab(scene, name: str, position, rotation=(0.0, 0.0, 0.0, 1.
         link.append_log(f"check {exc}")
         return None
     folder = root / "source" / "prefabs" / name
-    data = {mesh.name: convert._mesh_data(mesh, folder, mesh.name) for mesh in meshes}
+    data = {mesh.name: convert.mesh_data(mesh, folder, mesh.name) for mesh in meshes}
     prefab.position, prefab.rotation = tuple(position), tuple(rotation)
     obj = convert.prefab_object(prefab, scene.boz.base, scene, data)
     sync_all(scene)
@@ -683,7 +683,7 @@ class BOZ_PT_object(Panel):
                 box = layout.box()
                 box.label(text=obj.get("boz_description") or "One of the base level's entities",
                           icon="WORLD")
-                changed, moved = convert._base_changes(obj)
+                changed, moved = convert.base_changes(obj)
                 box.label(text="Changed in this map" if changed or moved or obj.get("boz_custom_model")
                           else "As the level has it")
                 box.label(text="Delete (X) takes it out of the map; Shift+D adds a copy")

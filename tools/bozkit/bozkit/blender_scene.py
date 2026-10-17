@@ -18,6 +18,8 @@ from pathlib import Path
 
 from . import collision, group, map_resources, native, navbuild, navigation, reflect, resources
 from .hashing import iw_hash
+from . import spec_fields
+from .spec_fields import (IDENTITY_ROTATION, UNIT_SCALE)
 
 SCHEMA = 2
 MODEL = iw_hash('CIwModel')
@@ -26,19 +28,8 @@ TEXTURE = iw_hash('CIwTexture')
 PORTAL = iw_hash('CIsPortal')
 ENTITY_SPEC = iw_hash('CIsEntitySpec')
 NAV_CONNECTION = iw_hash('CIsNavMeshConnection')
-TRANSFORM = iw_hash('CIsTransform')
-RENDERABLE_MODEL = iw_hash('CIsRenderableModel')
-RENDERABLE_ASSET = iw_hash('CIsRenderableAsset')
-LOCAL_POSITION = iw_hash('m_localPosition')
-LOCAL_ROTATION = iw_hash('m_localRotation')
-LOCAL_SCALE = iw_hash('m_localScale')
-ASSETS = iw_hash('assets')
-MODEL_REFERENCE = iw_hash('model')
 _VEC3 = iw_hash('CIwFVec3')
 _QUAT = iw_hash('CIwFQuat')
-_TRANSFORM_FIELDS = {LOCAL_POSITION: _VEC3, LOCAL_ROTATION: _QUAT, LOCAL_SCALE: _VEC3}
-IDENTITY_ROTATION = (0.0, 0.0, 0.0, 1.0)
-UNIT_SCALE = (1.0, 1.0, 1.0)
 
 # Entity markers: the first matching component names the marker's category.
 _COMPONENT_NAMES = [
@@ -300,7 +291,7 @@ def _identity(item: group.Resource) -> int:
     return item.name_hash if item.name_hash is not None else item.in_group_hash
 
 
-def _triangles(indices: list[int]) -> list[tuple[int, int, int]]:
+def triangle_list(indices: list[int]) -> list[tuple[int, int, int]]:
     return [tuple(indices[index:index + 3]) for index in range(0, len(indices), 3)]
 
 
@@ -309,7 +300,7 @@ def _group_name(path: str) -> str:
     return name[:-len('.group.bin')] if name.endswith('.group.bin') else Path(path).stem
 
 
-def _model_materials(body: bytes, known: set[int]) -> list[int]:
+def model_materials(body: bytes, known: set[int]) -> list[int]:
     """Decode the terminal CIwModel material-reference array, validated against known materials."""
     matches = []
     for offset in range(max(0, len(body) - 4096), len(body) - 3):
@@ -322,68 +313,13 @@ def _model_materials(body: bytes, known: set[int]) -> list[int]:
     return matches[0] if len(matches) == 1 else []
 
 
-def _collision_spec(item: group.Resource):
+def collision_spec(item: group.Resource):
     spec = resources.decode_entity_spec(item.body)
     matches = [component for component in spec.components
                if component.class_hash == resources.COLLISION_MESH_SPEC]
     if len(matches) != 1:
         raise ValueError('entity spec does not contain exactly one collision mesh')
     return spec, matches[0]
-
-
-def _property(blob: reflect.Blob, name_hash: int):
-    return next((prop for prop in blob.properties if prop.name_hash == name_hash), None)
-
-
-def _transform_blob(spec: resources.EntitySpec):
-    return next((component.blob for component in spec.components
-                 if component.blob and component.blob.class_hash == TRANSFORM), None)
-
-
-def _model_reference(spec: resources.EntitySpec) -> int | None:
-    """The single CIwModel a renderable spec draws, or None."""
-    for component in spec.components:
-        blob = component.blob
-        if not blob or blob.class_hash != RENDERABLE_MODEL:
-            continue
-        assets = _property(blob, ASSETS)
-        if assets is None or not assets.elements:
-            return None
-        hashes = set()
-        for asset in assets.elements:
-            if asset.class_hash != RENDERABLE_ASSET:
-                continue
-            prop = _property(asset, MODEL_REFERENCE)
-            value = reflect.typed_value(prop) if prop else None
-            if isinstance(value, int):
-                hashes.add(value)
-        return hashes.pop() if len(hashes) == 1 else None
-    return None
-
-
-def _local_transform(spec: resources.EntitySpec):
-    """Native (position, xyzw rotation, scale) of a spec; absent fields are the identity."""
-    blob = _transform_blob(spec)
-    values = {LOCAL_POSITION: (0.0, 0.0, 0.0), LOCAL_ROTATION: IDENTITY_ROTATION,
-              LOCAL_SCALE: UNIT_SCALE}
-    if blob is not None:
-        for name_hash, default in list(values.items()):
-            prop = _property(blob, name_hash)
-            value = reflect.typed_value(prop) if prop else None
-            if isinstance(value, list) and len(value) == len(default):
-                values[name_hash] = tuple(value)
-    return values[LOCAL_POSITION], values[LOCAL_ROTATION], values[LOCAL_SCALE]
-
-
-def _placed_model(spec: resources.EntitySpec):
-    """Return (model hash, native position, native xyzw quaternion) for a renderable entity."""
-    if _transform_blob(spec) is None:
-        return None
-    model_hash = _model_reference(spec)
-    if model_hash is None:
-        return None
-    position, rotation, _ = _local_transform(spec)
-    return model_hash, position, rotation
 
 
 def _spec_at(spec: resources.EntitySpec, path: tuple[int, ...]) -> resources.EntitySpec:
@@ -394,35 +330,16 @@ def _spec_at(spec: resources.EntitySpec, path: tuple[int, ...]) -> resources.Ent
     return spec
 
 
-def _quat_mul(a, b):
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return (aw * bx + ax * bw + ay * bz - az * by,
-            aw * by - ax * bz + ay * bw + az * bx,
-            aw * bz + ax * by - ay * bx + az * bw,
-            aw * bw - ax * bx - ay * by - az * bz)
-
-
 def rotation_to_blender(value):
     basis = (math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
     inverse = (-basis[0], -basis[1], -basis[2], basis[3])
-    return _quat_mul(_quat_mul(basis, value), inverse)
+    return spec_fields.quat_mul(spec_fields.quat_mul(basis, value), inverse)
 
 
 def rotation_from_blender(value):
     basis = (math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
     inverse = (-basis[0], -basis[1], -basis[2], basis[3])
-    return _quat_mul(_quat_mul(inverse, value), basis)
-
-
-def _close(a, b, tolerance=1e-5):
-    return len(a) == len(b) and all(math.isclose(x, y, abs_tol=tolerance, rel_tol=tolerance)
-                                    for x, y in zip(a, b))
-
-
-def _same_rotation(a, b) -> bool:
-    # q and -q are the same rotation; Blender may hand back either sign.
-    return _close(a, b) or _close(a, tuple(-value for value in b))
+    return spec_fields.quat_mul(spec_fields.quat_mul(inverse, value), basis)
 
 
 def _reconcile_model_positions(old: native.Model, edited):
@@ -520,7 +437,7 @@ def import_groups(paths, reference_paths=(), *, include_models: bool = False,
             stack = [spec]
             while stack:
                 node = stack.pop()
-                reference_hash = _model_reference(node)
+                reference_hash = spec_fields.model_reference(node)
                 if reference_hash is not None:
                     placed_models.add(reference_hash)
                     if not groups.find(MODEL, reference_hash):
@@ -534,22 +451,22 @@ def import_groups(paths, reference_paths=(), *, include_models: bool = False,
         entity_hash = _identity(item)
 
         def visit(node, node_path, parent_key):
-            position, rotation, scale = _local_transform(node)
+            position, rotation, scale = spec_fields.local_transform(node)
             key = f'{path}|{index}|{"/".join(map(str, node_path))}'
             suffix = ''.join(f'.{value}' for value in node_path)
-            reference_hash = _model_reference(node)
+            reference_hash = spec_fields.model_reference(node)
             found = groups.find(MODEL, reference_hash) if reference_hash is not None else None
             common = dict(location=to_blender(position), rotation=rotation_to_blender(rotation),
                           scale=scale_to_blender(scale), instance_resource_hash=entity_hash,
                           instance_resource_index=index, instance_source_group=path,
                           instance_path=node_path, key=key, parent_key=parent_key,
                           group_name=name)
-            names = _component_names(node)
-            category = _category(names)
-            label, description = _describe(node, category)
-            own_name = _blob_value(_component(node, 'CIsNamed'), 'name', None)
+            names = component_names(node)
+            category = category_of(names)
+            label, description = describe(node, category)
+            own_name = spec_fields.value(spec_fields.component_blob(node, 'CIsNamed'), 'name', None)
             link_info = dict(link_id=iw_hash(own_name) if isinstance(own_name, str) else 0,
-                             links=_node_links(node))
+                             links=node_links(node))
             if found is not None:
                 model_path, model_index, model_item = found
                 decoded = model(reference_hash)
@@ -561,7 +478,7 @@ def import_groups(paths, reference_paths=(), *, include_models: bool = False,
                     [to_blender(tuple(map(float, vertex))) for vertex in decoded.vertices],
                     list(decoded.triangles), uvs=decoded.uvs,
                     face_materials=decoded.face_materials,
-                    material_hashes=_model_materials(model_item.body, material_ids),
+                    material_hashes=model_materials(model_item.body, material_ids),
                     vertex_colours=decoded.vertex_colours, uvs2=decoded.uvs2,
                     mesh_key=f'{model_path}|{reference_hash:08x}',
                     category=category if functional else '', components=names,
@@ -605,7 +522,7 @@ def import_groups(paths, reference_paths=(), *, include_models: bool = False,
                         [to_blender(tuple(map(float, vertex))) for vertex in decoded.vertices],
                         list(decoded.triangles), uvs=decoded.uvs,
                         face_materials=decoded.face_materials,
-                        material_hashes=_model_materials(item.body, material_ids),
+                        material_hashes=model_materials(item.body, material_ids),
                         vertex_colours=decoded.vertex_colours, uvs2=decoded.uvs2,
                         key=f'{path}|model|{resource_index}', group_name=name,
                         mesh_key=f'{path}|{resource_hash:08x}'))
@@ -621,18 +538,18 @@ def import_groups(paths, reference_paths=(), *, include_models: bool = False,
                     key=f'{path}|portal|{resource_index}', group_name=name))
             elif include_collision and class_hash == ENTITY_SPEC:
                 try:
-                    spec, component = _collision_spec(item)
+                    spec, component = collision_spec(item)
                 except (ValueError, struct.error):
                     result.preserved += 1
                     continue
                 # Collision vertices are in the entity's local space, like placed models.
-                position, rotation, scale = _local_transform(spec)
+                position, rotation, scale = spec_fields.local_transform(spec)
                 collision_ids.add((path, resource_index))
                 mesh = collision.decode(component.extra)
                 result.meshes.append(SceneMesh(
                     'collision', ENTITY_SPEC, resource_hash, resource_index, path,
                     f'{name}:collision_{label}', f'{name} Collision',
-                    [to_blender(vertex) for vertex in mesh.vertices], _triangles(mesh.indices),
+                    [to_blender(vertex) for vertex in mesh.vertices], triangle_list(mesh.indices),
                     face_materials=list(mesh.materials), material_names=mesh.material_names,
                     location=to_blender(position), rotation=rotation_to_blender(rotation),
                     scale=scale_to_blender(scale), instance_resource_hash=resource_hash,
@@ -703,39 +620,28 @@ def import_groups(paths, reference_paths=(), *, include_models: bool = False,
     return result
 
 
-def _component_names(node: resources.EntitySpec) -> list[str]:
+def component_names(node: resources.EntitySpec) -> list[str]:
     return [COMPONENT_NAMES.get(component.type_hash, f'{component.type_hash:08x}')
             for component in node.components]
 
 
-def _category(names: list[str]) -> str:
+def category_of(names: list[str]) -> str:
     present = set(names)
     return next((category for category, members in MARKER_CATEGORIES if present & members),
                 'entity')
 
 
-def _blob_value(blob, name, default):
-    prop = _property(blob, iw_hash(name)) if blob else None
-    value = reflect.typed_value(prop) if prop else None
-    return default if value is None else value
-
-
-def _component(node, name):
-    return next((component.blob for component in node.components
-                 if component.type_hash == iw_hash(name)), None)
-
-
-def _describe(node: resources.EntitySpec, category: str) -> tuple[str, str]:
+def describe(node: resources.EntitySpec, category: str) -> tuple[str, str]:
     """A short label and a one-line description of what an entity does."""
     names = _names()
 
     def value(component, field, default=None):
-        result = _blob_value(_component(node, component), field, default)
+        result = spec_fields.value(spec_fields.component_blob(node, component), field, default)
         return names.get(result, result) if isinstance(result, int) and not isinstance(
             result, bool) else result
 
     def raw_string(component, field_hash):
-        blob = _component(node, component)
+        blob = spec_fields.component_blob(node, component)
         prop = next((p for p in blob.properties if p.name_hash == field_hash), None) if blob else None
         return reflect.typed_value(prop) if prop else None
 
@@ -760,7 +666,7 @@ def _describe(node: resources.EntitySpec, category: str) -> tuple[str, str]:
     elif category == 'power':
         label, details = 'Power switch', 'Power switch: turns on everything that needs power'
     elif category == 'trap':
-        if _component(node, 'CTrapSwitch'):
+        if spec_fields.component_blob(node, 'CTrapSwitch'):
             label = 'Trap switch'
             details = f'Trap switch, {value("CTrapSwitch", "m_Cost", "?")} points{needs_power}'
         else:
@@ -791,7 +697,7 @@ def _describe(node: resources.EntitySpec, category: str) -> tuple[str, str]:
             label, details = f'Zombie spawn ({kind})', f'Zombie spawn point, type {kind}'
     elif category == 'effect':
         emitter = value('CIsRenderableGFXEmitter', 'emitterSpec', None)
-        fog = ' with fog' if _component(node, 'CFogEffect') else ''
+        fog = ' with fog' if spec_fields.component_blob(node, 'CFogEffect') else ''
         label = 'Effect'
         details = f'Particle effect{fog}{f" ({emitter})" if isinstance(emitter, str) else ""}'
     elif category == 'interact':
@@ -830,7 +736,7 @@ def _u32_values(raw: bytes, is_list: bool = True) -> list[int] | None:
     return None
 
 
-def _node_links(node: resources.EntitySpec) -> list[dict]:
+def node_links(node: resources.EntitySpec) -> list[dict]:
     links = []
     for number, component in enumerate(node.components):
         name = COMPONENT_NAMES.get(component.type_hash) or _LINK_COMPONENTS.get(component.type_hash)
@@ -854,7 +760,7 @@ def _write_links(blobs, links) -> bool:
         blob = blobs.get(link['component'])
         if blob is None:
             raise ValueError('linked component no longer exists; re-import')
-        prop = _property(blob, iw_hash(link['field']))
+        prop = spec_fields.field(blob, iw_hash(link['field']))
         targets = [int(value) for value in link['targets']]
         if link['list']:
             raw = struct.pack(f'<I{len(targets)}I', len(targets), *targets)
@@ -918,22 +824,22 @@ def _shapes(node: resources.EntitySpec, parent: SceneMesh) -> list[SceneMesh]:
     result = []
     for number, component in enumerate(node.components):
         blob = component.blob
-        ghost = bool(_blob_value(blob, 'm_Ghost', False))
+        ghost = bool(spec_fields.value(blob, 'm_Ghost', False))
         if component.type_hash == COLLISION_BOX:
-            half = _blob_value(blob, 'm_halfAxis', [0.0, 0.0, 0.0])
-            centre = _blob_value(blob, 'm_Offset', None) or _blob_value(blob, 'm_boxCentre',
+            half = spec_fields.value(blob, 'm_halfAxis', [0.0, 0.0, 0.0])
+            centre = spec_fields.value(blob, 'm_Offset', None) or spec_fields.value(blob, 'm_boxCentre',
                                                                          [0.0, 0.0, 0.0])
             shape, location, scale = 'box', to_blender(centre), scale_to_blender(half)
         elif component.type_hash == COLLISION_SPHERE:
-            radius = _blob_value(blob, 'm_Radius', 0.0)
+            radius = spec_fields.value(blob, 'm_Radius', 0.0)
             shape, location, scale = 'sphere', (0.0, 0.0, 0.0), (radius,) * 3
         elif component.type_hash == COLLISION_CAPSULE:
-            radius = _blob_value(blob, 'm_Radius', 0.0)
-            half_height = _blob_value(blob, 'm_height', 0.0) / 2
+            radius = spec_fields.value(blob, 'm_Radius', 0.0)
+            half_height = spec_fields.value(blob, 'm_height', 0.0) / 2
             shape, location, scale = 'capsule', (0.0, 0.0, 0.0), (radius, radius, half_height)
         elif component.type_hash == POI:
-            reach = _blob_value(blob, 'm_MaxDistance', 0.0)
-            height = _blob_value(blob, 'm_HeightOffset', 0.0)
+            reach = spec_fields.value(blob, 'm_MaxDistance', 0.0)
+            height = spec_fields.value(blob, 'm_HeightOffset', 0.0)
             shape, location, scale = 'reach', (0.0, 0.0, height), (reach, reach, 1.0)
         else:
             continue
@@ -953,7 +859,7 @@ def _shapes(node: resources.EntitySpec, parent: SceneMesh) -> list[SceneMesh]:
 
 
 def _set_float(blob, name, value):
-    prop = _property(blob, iw_hash(name))
+    prop = spec_fields.field(blob, iw_hash(name))
     if prop is None:
         prop = reflect.Property(blob.class_hash, _FLOAT, iw_hash(name), b'')
         blob.properties.append(prop)
@@ -961,7 +867,7 @@ def _set_float(blob, name, value):
 
 
 def _set_vec3(blob, name, value):
-    prop = _property(blob, iw_hash(name))
+    prop = spec_fields.field(blob, iw_hash(name))
     if prop is None:
         prop = reflect.Property(blob.class_hash, _VEC3, iw_hash(name), b'')
         blob.properties.append(prop)
@@ -975,59 +881,52 @@ def _apply_shape(node: resources.EntitySpec, edit: SceneEdit) -> bool:
     blob = node.components[edit.shape_component].blob
     if blob is None:
         raise ValueError('shape component has no properties')
-    if not _same_rotation(edit.rotation, IDENTITY_ROTATION):
+    if not spec_fields.same_rotation(edit.rotation, IDENTITY_ROTATION):
         raise ValueError(f'{edit.shape} shapes cannot be rotated relative to their entity')
     scale = [abs(value) for value in edit.scale]
     before = reflect.encode(blob)
     if edit.shape == 'box':
-        old_centre = _blob_value(blob, 'm_Offset', None) or _blob_value(blob, 'm_boxCentre',
+        old_centre = spec_fields.value(blob, 'm_Offset', None) or spec_fields.value(blob, 'm_boxCentre',
                                                                          [0.0, 0.0, 0.0])
-        old_half = _blob_value(blob, 'm_halfAxis', [0.0, 0.0, 0.0])
+        old_half = spec_fields.value(blob, 'm_halfAxis', [0.0, 0.0, 0.0])
         centre, half = from_blender(edit.location), scale_from_blender(scale)
-        if not _close(half, old_half):
+        if not spec_fields.close(half, old_half):
             _set_vec3(blob, 'm_halfAxis', half)
-        if not _close(centre, old_centre):
-            name = 'm_boxCentre' if _property(blob, iw_hash('m_boxCentre')) else 'm_Offset'
+        if not spec_fields.close(centre, old_centre):
+            name = 'm_boxCentre' if spec_fields.field(blob, iw_hash('m_boxCentre')) else 'm_Offset'
             _set_vec3(blob, name, centre)
     else:
-        if not _close(edit.location[:2], (0.0, 0.0)) or (
-                edit.shape != 'reach' and not _close(edit.location[2:], (0.0,))):
+        if not spec_fields.close(edit.location[:2], (0.0, 0.0)) or (
+                edit.shape != 'reach' and not spec_fields.close(edit.location[2:], (0.0,))):
             raise ValueError(f'{edit.shape} shapes stay centred on their entity; move the entity')
         if edit.shape == 'sphere':
-            if not _close((scale[0], scale[1]), (scale[2], scale[2])):
+            if not spec_fields.close((scale[0], scale[1]), (scale[2], scale[2])):
                 raise ValueError('collision spheres must be scaled uniformly')
-            if not _close((scale[0],), (_blob_value(blob, 'm_Radius', 0.0),)):
+            if not spec_fields.close((scale[0],), (spec_fields.value(blob, 'm_Radius', 0.0),)):
                 _set_float(blob, 'm_Radius', scale[0])
         elif edit.shape == 'capsule':
-            if not _close((scale[0],), (scale[1],)):
+            if not spec_fields.close((scale[0],), (scale[1],)):
                 raise ValueError('capsule radius must be the same on both horizontal axes')
-            if not _close((scale[0],), (_blob_value(blob, 'm_Radius', 0.0),)):
+            if not spec_fields.close((scale[0],), (spec_fields.value(blob, 'm_Radius', 0.0),)):
                 _set_float(blob, 'm_Radius', scale[0])
-            if not _close((scale[2] * 2,), (_blob_value(blob, 'm_height', 0.0),)):
+            if not spec_fields.close((scale[2] * 2,), (spec_fields.value(blob, 'm_height', 0.0),)):
                 _set_float(blob, 'm_height', scale[2] * 2)
         elif edit.shape == 'reach':
-            if not _close((scale[0],), (scale[1],)):
+            if not spec_fields.close((scale[0],), (scale[1],)):
                 raise ValueError('interaction reach must be a circle (equal X and Y scale)')
-            if not _close((scale[0],), (_blob_value(blob, 'm_MaxDistance', 0.0),)):
+            if not spec_fields.close((scale[0],), (spec_fields.value(blob, 'm_MaxDistance', 0.0),)):
                 _set_float(blob, 'm_MaxDistance', scale[0])
-            if not _close(edit.location[2:], (_blob_value(blob, 'm_HeightOffset', 0.0),)):
+            if not spec_fields.close(edit.location[2:], (spec_fields.value(blob, 'm_HeightOffset', 0.0),)):
                 _set_float(blob, 'm_HeightOffset', edit.location[2])
         else:
             raise ValueError(f'unknown shape {edit.shape!r}')
     return reflect.encode(blob) != before
 
 
-def _rotate(q, v):
-    x, y, z, w = q
-    return ((1 - 2 * (y * y + z * z)) * v[0] + 2 * (x * y - z * w) * v[1] + 2 * (x * z + y * w) * v[2],
-            2 * (x * y + z * w) * v[0] + (1 - 2 * (x * x + z * z)) * v[1] + 2 * (y * z - x * w) * v[2],
-            2 * (x * z - y * w) * v[0] + 2 * (y * z + x * w) * v[1] + (1 - 2 * (x * x + y * y)) * v[2])
-
-
 def _to_world(chain, vertex):
     """Apply object transforms (Blender basis, innermost first) to a local vertex."""
     for location, rotation, scale in chain:
-        vertex = _rotate(rotation, tuple(vertex[i] * scale[i] for i in range(3)))
+        vertex = spec_fields.rotate(rotation, tuple(vertex[i] * scale[i] for i in range(3)))
         vertex = tuple(vertex[i] + location[i] for i in range(3))
     return vertex
 
@@ -1035,7 +934,7 @@ def _to_world(chain, vertex):
 def _to_local(chain, vertex):
     for location, rotation, scale in reversed(chain):
         inverse = (-rotation[0], -rotation[1], -rotation[2], rotation[3])
-        vertex = _rotate(inverse, tuple(vertex[i] - location[i] for i in range(3)))
+        vertex = spec_fields.rotate(inverse, tuple(vertex[i] - location[i] for i in range(3)))
         vertex = tuple(vertex[i] / scale[i] if scale[i] else 0.0 for i in range(3))
     return vertex
 
@@ -1225,7 +1124,7 @@ def _assemble_collision(mesh: collision.CollisionMesh, edits, entity_transform,
             slot = triangle * 3 + corner
             original = mesh.indices[slot]
             position = corners[triangle][corner]
-            if _close(position, mesh.vertices[original], 1e-2):
+            if spec_fields.close(position, mesh.vertices[original], 1e-2):
                 position = mesh.vertices[original]
             if original not in placed:
                 placed[original] = position
@@ -1286,29 +1185,6 @@ def _validate_edit(edit: SceneEdit) -> None:
                              'vertices')
 
 
-def _set_transform(spec: resources.EntitySpec, position, rotation, scale) -> bool:
-    """Write a native local transform into a spec; returns whether any value changed."""
-    blob = _transform_blob(spec)
-    current = _local_transform(spec)
-    wanted = {LOCAL_POSITION: (position, current[0]), LOCAL_ROTATION: (rotation, current[1]),
-              LOCAL_SCALE: (scale, current[2])}
-    changed = False
-    for name_hash, (value, old) in wanted.items():
-        same = _same_rotation(value, old) if name_hash == LOCAL_ROTATION else _close(value, old)
-        if same:
-            continue
-        if blob is None:
-            raise ValueError('entity has no CIsTransform component to move')
-        prop = _property(blob, name_hash)
-        if prop is None:
-            # Reflection reads properties by name, so an absent default can be added.
-            prop = reflect.Property(TRANSFORM, _TRANSFORM_FIELDS[name_hash], name_hash, b'')
-            blob.properties.append(prop)
-        reflect.set_typed_value(prop, tuple(value))
-        changed = True
-    return changed
-
-
 def _model_edit_key(edit: SceneEdit):
     return (tuple(edit.vertices), tuple(edit.faces), tuple(edit.uvs), tuple(edit.uvs2),
             tuple(edit.face_materials))
@@ -1316,14 +1192,6 @@ def _model_edit_key(edit: SceneEdit):
 
 NAVMESH = iw_hash('CIsNavMesh')
 DOOR = iw_hash('CDoor')
-
-
-def _native_apply(chain, point):
-    """Apply native (position, xyzw rotation, scale) transforms, innermost first."""
-    for position, rotation, scale in chain:
-        point = _rotate(rotation, tuple(point[i] * scale[i] for i in range(3)))
-        point = tuple(point[i] + position[i] for i in range(3))
-    return point
 
 
 _BOX_FACES = [(0, 2, 1), (1, 2, 3), (4, 5, 6), (5, 7, 6), (0, 1, 4), (1, 5, 4),
@@ -1347,10 +1215,10 @@ def navmesh_input(parsed: dict[str, group.Group]):
                     continue
                 meshes = [c for c in spec.components if c.class_hash == resources.COLLISION_MESH_SPEC]
                 if len(meshes) == 1:
-                    chain = [_local_transform(spec)]
+                    chain = [spec_fields.local_transform(spec)]
                     mesh = collision.decode(meshes[0].extra)
                     base = len(vertices)
-                    vertices += [tuple(v / 100 for v in _native_apply(chain, vertex))
+                    vertices += [tuple(v / 100 for v in spec_fields.apply_chain(chain, vertex))
                                  for vertex in mesh.vertices]
                     triangles += [(base + mesh.indices[i], base + mesh.indices[i + 1],
                                    base + mesh.indices[i + 2]) for i in range(0, len(mesh.indices), 3)]
@@ -1358,21 +1226,21 @@ def navmesh_input(parsed: dict[str, group.Group]):
                 stack = [(spec, [], False)]
                 while stack:
                     node, parents, in_door = stack.pop()
-                    chain = [_local_transform(node)] + parents
+                    chain = [spec_fields.local_transform(node)] + parents
                     door = in_door or any(c.type_hash == DOOR for c in node.components)
                     for component in node.components:
                         blob = component.blob
                         if component.type_hash != COLLISION_BOX or door or \
-                                _blob_value(blob, 'm_Ghost', False):
+                                spec_fields.value(blob, 'm_Ghost', False):
                             continue
-                        half = _blob_value(blob, 'm_halfAxis', [0.0, 0.0, 0.0])
-                        centre = _blob_value(blob, 'm_Offset', None) or _blob_value(
+                        half = spec_fields.value(blob, 'm_halfAxis', [0.0, 0.0, 0.0])
+                        centre = spec_fields.value(blob, 'm_Offset', None) or spec_fields.value(
                             blob, 'm_boxCentre', [0.0, 0.0, 0.0])
                         base = len(vertices)
                         for corner in range(8):
                             local = tuple(centre[i] + (half[i] if corner >> i & 1 else -half[i])
                                           for i in range(3))
-                            vertices.append(tuple(v / 100 for v in _native_apply(chain, local)))
+                            vertices.append(tuple(v / 100 for v in spec_fields.apply_chain(chain, local)))
                         # outward-facing counter-clockwise, then swapped into the game's winding
                         triangles += [(base + a, base + c, base + b) for a, b, c in _BOX_FACES]
                     stack.extend((child, chain, door) for _, _, child in node.children)
@@ -1506,8 +1374,8 @@ def _entity_nodes(parsed):
 
 
 def _name_prop(node):
-    blob = _component(node, 'CIsNamed')
-    return _property(blob, iw_hash('name')) if blob else None
+    blob = spec_fields.component_blob(node, 'CIsNamed')
+    return spec_fields.field(blob, iw_hash('name')) if blob else None
 
 
 def _areas(parsed):
@@ -1548,7 +1416,7 @@ def _apply_copies(parsed, copies, resource, changed) -> int:
             if edit.kind == 'shape':
                 _apply_shape(target, edit)
                 continue
-            _set_transform(target, from_blender(edit.location), rotation_from_blender(edit.rotation),
+            spec_fields.set_transform(target, from_blender(edit.location), rotation_from_blender(edit.rotation),
                            scale_from_blender(edit.scale))
             if edit.links:
                 _write_links({n: c.blob for n, c in enumerate(target.components)}, edit.links)
@@ -1629,7 +1497,7 @@ def _apply_deletions(parsed, deletions, resource, changed) -> int:
     for _, _, item, _, node_path, node in _entity_nodes(parsed):
         if (id(item), node_path) in doomed_nodes:
             continue
-        for link in _node_links(node):
+        for link in node_links(node):
             if link['kind'] != 'member' and doomed_names & set(link['targets']):
                 prop = _name_prop(node)
                 who = reflect.typed_value(prop) if prop else f'{_identity(item):08x}'
@@ -1833,12 +1701,12 @@ def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path],
         if len(main) > 1:
             raise ValueError(f'duplicate edit for collision {group_edits[0].resource_hash:#010x}')
         item = resource(source, ENTITY_SPEC, index, group_edits[0].resource_hash, 'collision')
-        spec, component = _collision_spec(item)
+        spec, component = collision_spec(item)
         mesh = collision.decode(component.extra)
         if main:
             entity_transform = (main[0].location, main[0].rotation, main[0].scale)
         else:
-            position, rotation, scale = _local_transform(spec)
+            position, rotation, scale = spec_fields.local_transform(spec)
             entity_transform = (to_blender(position), rotation_to_blender(rotation),
                                 scale_to_blender(scale))
         if _assemble_collision(mesh, group_edits, entity_transform, dropped.get(key, frozenset())):
@@ -1867,9 +1735,9 @@ def export_groups(edits: list[SceneEdit], outputs: dict[str | Path, str | Path],
             entity_specs[entity_key] = (item, resources.decode_entity_spec(item.body), [False])
         item, root, dirty = entity_specs[entity_key]
         node = _spec_at(root, path)
-        if edit.kind == 'placed_model' and _model_reference(node) != edit.resource_hash:
+        if edit.kind == 'placed_model' and spec_fields.model_reference(node) != edit.resource_hash:
             raise ValueError('placed model reference changed')
-        if _set_transform(node, from_blender(edit.location), rotation_from_blender(edit.rotation),
+        if spec_fields.set_transform(node, from_blender(edit.location), rotation_from_blender(edit.rotation),
                           scale_from_blender(edit.scale)):
             dirty[0] = True
     for edit in shape_edits:

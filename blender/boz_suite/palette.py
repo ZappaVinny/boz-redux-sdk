@@ -134,7 +134,7 @@ def realize() -> None:
     scene = link.map_scene()
     for obj in [o for o in scene.objects if "boz_asset_kind" in o]:
         kind, source = obj["boz_asset_kind"], obj.get("boz_source", "")
-        position, rotation, _scale = convert._transform(obj)
+        position, rotation, _scale = convert.game_transform(obj)
         label = obj.name.split(".")[0]
         made = None
         if kind == "piece":

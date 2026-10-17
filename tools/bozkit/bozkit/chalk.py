@@ -13,7 +13,7 @@ import random
 import struct
 from dataclasses import dataclass
 
-from . import blender_scene as scene
+from . import spec_fields
 from . import group, levels, native, resources
 from . import maps
 from .hashing import iw_hash
@@ -44,18 +44,18 @@ def compose(position, rotation, scale, decal: Decal):
     """World (position, rotation, scale) of *decal* for a wall buy at *position*, *rotation*,
     with the placement's relative *scale*."""
     offset = tuple(decal.position[i] * scale[i] for i in range(3))
-    turned = scene._rotate(rotation, offset)
+    turned = spec_fields.rotate(rotation, offset)
     return (tuple(position[i] + turned[i] for i in range(3)),
-            scene._quat_mul(rotation, decal.rotation),
+            spec_fields.quat_mul(rotation, decal.rotation),
             tuple(decal.scale[i] * scale[i] for i in range(3)))
 
 
-def _weapon_of(spec) -> int | None:
+def weapon_of(spec) -> int | None:
     for _cls, _reserved, child in spec.children:
-        renderable = levels._component(child, 'CIsRenderableModel')
+        renderable = spec_fields.component(child, 'CIsRenderableModel')
         if renderable is None or renderable.blob is None:
             continue
-        for element in levels._blob_prop(renderable.blob, 'assets').elements or ():
+        for element in spec_fields.prop(renderable.blob, 'assets').elements or ():
             for prop in element.properties:
                 if prop.name_hash in (iw_hash('name'), iw_hash('Name')):
                     from . import reflect
@@ -83,11 +83,11 @@ def find_decals(pack, cache_path=None) -> dict[int, Decal]:
             continue
         wall_buys = []
         for item, spec in _specs(group.parse(pack.read(statics))):
-            if levels._component(spec, 'CWeaponChalkOutline') is None:
+            if spec_fields.component(spec, 'CWeaponChalkOutline') is None:
                 continue
-            weapon = _weapon_of(spec)
+            weapon = weapon_of(spec)
             if weapon:
-                position, rotation, _scale = scene._local_transform(spec)
+                position, rotation, _scale = spec_fields.local_transform(spec)
                 wall_buys.append((weapon, position, rotation))
         if not wall_buys:
             continue
@@ -109,9 +109,9 @@ def find_decals(pack, cache_path=None) -> dict[int, Decal]:
                     except (ValueError, struct.error, IndexError):
                         pass
             for item, spec in _specs(parsed):
-                model = scene._model_reference(spec)
+                model = spec_fields.model_reference(spec)
                 if model is not None:
-                    quads.append((path, model, *scene._local_transform(spec), model in two_triangles))
+                    quads.append((path, model, *spec_fields.local_transform(spec), model in two_triangles))
         for weapon, position, rotation in wall_buys:
             best = None
             for path, model, q_position, q_rotation, q_scale, is_quad in quads:
@@ -124,8 +124,8 @@ def find_decals(pack, cache_path=None) -> dict[int, Decal]:
                 continue
             _distance, path, model, q_position, q_rotation, q_scale = best
             inverse = _conjugate(rotation)
-            offset = scene._rotate(inverse, tuple(q_position[i] - position[i] for i in range(3)))
-            found[weapon] = Decal(path, model, tuple(offset), scene._quat_mul(inverse, q_rotation),
+            offset = spec_fields.rotate(inverse, tuple(q_position[i] - position[i] for i in range(3)))
+            found[weapon] = Decal(path, model, tuple(offset), spec_fields.quat_mul(inverse, q_rotation),
                                   tuple(q_scale))
     if cache_path is not None:
         try:

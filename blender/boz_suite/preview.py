@@ -15,6 +15,7 @@ from bpy.types import Operator, Panel
 from bpy.props import EnumProperty
 
 from ._bozkit import blender_scene, collision, group, levels, library, world
+from ._bozkit import spec_fields
 
 from . import convert, meshes, scene_view
 from . import link
@@ -34,16 +35,16 @@ def _scene_meshes(statics: group.Group, name: str) -> list:
                 out.append(blender_scene.navmesh_meshes(path, item, index, name))
             elif resource_type.class_hash == levels.ENTITY_SPEC:
                 try:
-                    spec, component = blender_scene._collision_spec(item)
+                    spec, component = blender_scene.collision_spec(item)
                 except (ValueError, KeyError, AttributeError, struct.error):
                     continue
-                position, rotation, scale = blender_scene._local_transform(spec)
+                position, rotation, scale = spec_fields.local_transform(spec)
                 mesh = collision.decode(component.extra)
                 out.append(blender_scene.SceneMesh(
                     "collision", levels.ENTITY_SPEC, item.in_group_hash, index, path,
                     f"{name}:collision {index}", f"{name} Collision",
                     [blender_scene.to_blender(v) for v in mesh.vertices],
-                    blender_scene._triangles(mesh.indices),
+                    blender_scene.triangle_list(mesh.indices),
                     face_materials=list(mesh.materials), material_names=mesh.material_names,
                     location=blender_scene.to_blender(position),
                     rotation=blender_scene.rotation_to_blender(rotation),

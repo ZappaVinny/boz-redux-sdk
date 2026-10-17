@@ -384,21 +384,6 @@ def encode_clip(clip: Clip, skeleton: int, bones, keys_of, template: bytes | Non
     return anim.encode_anim(animation, template)
 
 
-def asset_skeleton(model) -> list[anim.Bone]:
-    """The asset's bones in its own space (the editor's gun armature, before the fit): positions
-    in the asset's units relative to the parent, no turn."""
-    by_name = {b.name: b for b in model.bones}
-    bones = []
-    for number, name in enumerate(bone_names(model)):
-        bone = by_name[name]
-        parent = bone.parent if bone.parent in by_name else ''
-        head = tuple(bone.head)
-        offset = tuple(h - p for h, p in zip(head, by_name[parent].head)) if parent else head
-        bones.append(anim.Bone(iw_hash(name), iw_hash(parent) if parent else 0, offset,
-                               (1.0, 0.0, 0.0, 0.0), None, number))
-    return bones
-
-
 def _fit_parts(fit: dict):
     scale = float(fit.get('scale', 1.0))
     rotation = _normalise(tuple(fit.get('rotation', (1.0, 0.0, 0.0, 0.0))))

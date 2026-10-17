@@ -48,7 +48,7 @@ ARM_NAMES = ("root", "view", "view tip", "torso",
              "upper arm R", "forearm R", "wrist R", "finger R 1", "finger R 1 tip", "finger R 2",
              "finger R 2 tip", "thumb R", "thumb R tip", TAG)
 HIDDEN = {"root", "view", "view tip", "wrist L", "wrist R", "gun root", "ik L", "ik R"}
-_state: dict = {"key": None, "rig": None, "asset": None, "cache": {}, "items": None,
+editor_state: dict = {"key": None, "rig": None, "asset": None, "cache": {}, "items": None,
                 "shown": None, "guard": False, "busy": False, "preview": "", "frame": 0,
                 "baked": {}, "edits": {"arms": [], "gun": []}, "length": 0, "dirty": False,
                 "clipboard": None, "state": None}
@@ -159,13 +159,13 @@ def load(context) -> bool:
     """Read the selected weapon's skeletons and animations (cached by weapon)."""
     import json
     item, weapon = _weapon()
-    if item is None or wt()._pack() is None:
+    if item is None or wt().game_pack() is None:
         return False
     level = weapon.level or wt().base_level(context)
     key = (item.name, level, weapon.source, json.dumps(weapon.model, sort_keys=True))
-    if _state["key"] == key and _state["rig"] is not None:
+    if editor_state["key"] == key and editor_state["rig"] is not None:
         return True
-    rig = viewmodel.Rig(wt()._pack().read, level, weapon.source)
+    rig = viewmodel.Rig(wt().game_pack().read, level, weapon.source)
     asset, error = None, ""
     if weapon.model.get("asset"):
         try:
@@ -175,26 +175,26 @@ def load(context) -> bool:
         except (assets.AssetError, KeyError, ValueError) as exc:
             error = str(exc)
     fit = weapon.model.get("fit") or {}
-    _state.update(key=key, rig=rig, asset=asset, error=error, cache={}, items=None,
+    editor_state.update(key=key, rig=rig, asset=asset, error=error, cache={}, items=None,
                   bones=Bones(rig, asset, fit), fit=fit, bone_map=weapon.model.get("bones") or {})
     return True
 
 
 def states():
     """[(state hash, label, frames, looping)] of the weapon's animations."""
-    rig = _state["rig"]
+    rig = editor_state["rig"]
     if rig is None:
         return []
-    if _state["items"] is None:
+    if editor_state["items"] is None:
         out = []
-        for view_state in rig.states():
-            arms = rig._anim(rig.arm_anims, rig.arm_states, view_state.name)
-            gun = rig._anim(rig.gun_anims, rig.gun_states, view_state.name)
+        for anim_state in rig.states():
+            arms = rig._anim(rig.arm_anims, rig.arm_states, anim_state.name)
+            gun = rig._anim(rig.gun_anims, rig.gun_states, anim_state.name)
             length = max((weapon_anim.frame_of(a.duration or (a.keyframes[-1].time if a.keyframes else 0))
                           for a in (arms, gun) if a is not None), default=0)
-            out.append((view_state.name, view_state.label, length, view_state.looping))
-        _state["items"] = out
-    return _state["items"]
+            out.append((anim_state.name, anim_state.label, length, anim_state.looping))
+        editor_state["items"] = out
+    return editor_state["items"]
 
 
 def current_state():
@@ -208,10 +208,10 @@ def _original(part: str, state: int):
     """The original clip of a part: arms by arm bone; the gun by bone of the rig's gun skeleton
     (the stock motion moved onto your model's own skeleton). The idle one where it has none."""
     key = ("original", part, state)
-    cache = _state["cache"]
+    cache = editor_state["cache"]
     if key in cache:
         return cache[key]
-    rig = _state["rig"]
+    rig = editor_state["rig"]
     clip = None
     if part == "arms":
         found = rig._anim(rig.arm_anims, rig.arm_states, state) or \
@@ -222,9 +222,9 @@ def _original(part: str, state: int):
         found = rig._anim(rig.gun_anims, rig.gun_states, state) or \
             rig._anim(rig.gun_anims, rig.gun_states, rig.idle())
         if found is not None:
-            if _state["asset"] is not None:
-                follow = weapon_anim.follow_list(_state["asset"], rig.gun_bones, _state["bone_map"])
-                clip = weapon_anim.retarget(rig.gun_bones, found, _state["bones"].gun_bones, follow)
+            if editor_state["asset"] is not None:
+                follow = weapon_anim.follow_list(editor_state["asset"], rig.gun_bones, editor_state["bone_map"])
+                clip = weapon_anim.retarget(rig.gun_bones, found, editor_state["bones"].gun_bones, follow)
             else:
                 clip = weapon_anim.stock_clip(found, rig.gun_bones)
     cache[key] = clip
@@ -233,25 +233,25 @@ def _original(part: str, state: int):
 
 def _gun_keys_to_game(values: dict) -> dict:
     """Stored gun pose values ({clip key: key}) as {gun bone index: key} in game space."""
-    if _state["asset"] is not None:
-        names = set(weapon_anim.bone_names(_state["asset"]))
+    if editor_state["asset"] is not None:
+        names = set(weapon_anim.bone_names(editor_state["asset"]))
         named = {k: v for k, v in values.items() if k in names}
-        clip = weapon_anim.gun_clip_to_game(weapon_anim.Clip([(0, named)]), _state["asset"], _state["fit"])
+        clip = weapon_anim.gun_clip_to_game(weapon_anim.Clip([(0, named)]), editor_state["asset"], editor_state["fit"])
         return {i: v for i, v in clip.frames[0][1].items() if i != 0}
     return {int(k): v for k, v in values.items() if str(k).isdigit()}
 
 
 def _gun_game_to_keys(values: dict) -> dict:
     """{gun bone index: game key} as stored pose values (your model's: by name, its own space)."""
-    if _state["asset"] is not None:
-        clip = weapon_anim.game_clip_to_asset(weapon_anim.Clip([(0, values)]), _state["asset"], _state["fit"])
+    if editor_state["asset"] is not None:
+        clip = weapon_anim.game_clip_to_asset(weapon_anim.Clip([(0, values)]), editor_state["asset"], editor_state["fit"])
         return clip.frames[0][1]
     return {str(i): v for i, v in values.items()}
 
 
 def _arm_parts(locals_: dict) -> tuple:
     """(arms values, gun values) to store from rig-wide game locals (and grips)."""
-    bones = _state["bones"]
+    bones = editor_state["bones"]
     arms = {str(i): v for i, v in locals_.items() if i < bones.arm_count and i != bones.tag}
     gun = {"TAG_WEAPON": locals_[bones.tag]}
     gun.update(_gun_game_to_keys({i - bones.gun_start: v for i, v in locals_.items()
@@ -261,8 +261,8 @@ def _arm_parts(locals_: dict) -> tuple:
 
 def frame_locals(state: int, frame: int, entry: dict | None = None, edits: dict | None = None) -> tuple:
     """({rig bone index: game local}, {side: grip local}, IK on) of *state* at *frame*."""
-    bones = _state["bones"]
-    edits = _state["edits"] if edits is None else edits
+    bones = editor_state["bones"]
+    edits = editor_state["edits"] if edits is None else edits
     entry = entry or {}
     out, grips = {}, {}
     defaults_arms = {i: bones.binds[i] for i in range(bones.arm_count)}
@@ -364,7 +364,7 @@ def _edit_mode(view, obj, mode: str) -> None:
 def _build_rig(view):
     """The one armature: arms, the gun under TAG_WEAPON, grips and IK."""
     from mathutils import Vector
-    bones = _state["bones"]
+    bones = editor_state["bones"]
     _remove(RIG)
     data = bpy.data.armatures.new(RIG)
     obj = _link(view, bpy.data.objects.new(RIG, data))
@@ -415,7 +415,7 @@ def _build_rig(view):
     data.show_names = True
     obj.show_in_front = True
     obj.hide_select = False
-    _state["rests"] = {b.name: (b.parent.matrix_local.inverted() @ b.matrix_local if b.parent
+    editor_state["rests"] = {b.name: (b.parent.matrix_local.inverted() @ b.matrix_local if b.parent
                                 else b.matrix_local.copy()) for b in data.bones}
     return obj
 
@@ -481,8 +481,8 @@ def show_preview(context) -> str:
     store(context)
     if not load(context):
         return "No weapon selected"
-    rig = _state["rig"]
-    bones = _state["bones"]
+    rig = editor_state["rig"]
+    bones = editor_state["bones"]
     view = view_scene()
     item, weapon = _weapon()
     wm = context.window_manager
@@ -490,7 +490,7 @@ def show_preview(context) -> str:
         _remove(obj.name)
     rig_obj = _build_rig(view)
     rig_obj.matrix_basis = arms_matrix(weapon.arms)       # Position on screen (saved)
-    _state["arms_basis"] = [list(r) for r in rig_obj.matrix_basis]
+    editor_state["arms_basis"] = [list(r) for r in rig_obj.matrix_basis]
     arm_names = bones.names[:bones.arm_count]
     base = game.model_mesh(rig.arms_path, rig.arm_model_hash) if rig.arm_model is not None else None
     if base is not None:
@@ -500,12 +500,12 @@ def show_preview(context) -> str:
                    _skin_weights(rig.arm_skin, rig.arm_model, len(data.vertices), arm_names))
     tag_rest = to_bl(game_matrix(*bones.worlds({})[bones.tag]))
     gun_names = bones.names[bones.gun_start:]
-    if _state["asset"] is not None:
+    if editor_state["asset"] is not None:
         from . import assets_tab
         data = assets_tab.build_mesh(weapon.model["asset"], GUN, unit_scale=1.0)
         if data is not None:
-            data.transform(tag_rest @ fit_matrix(_state["fit"]))   # rest: in the hand, fitted
-            model = _state["asset"]
+            data.transform(tag_rest @ fit_matrix(editor_state["fit"]))   # rest: in the hand, fitted
+            model = editor_state["asset"]
             order = {name: i + 1 for i, name in enumerate(weapon_anim.bone_names(model))}
             remap = [order.get(b.name, 0) for b in model.bones]
             weights = [[(gun_names[remap[b]] if b < len(remap) else gun_names[0], w) for b, w in vertex]
@@ -521,24 +521,24 @@ def show_preview(context) -> str:
             _skin_mesh(view, GUN, data, rig_obj,
                        _skin_weights(rig.gun_skin, rig.gun_model, len(data.vertices), gun_names))
     _camera(view)
-    _state["shown"] = item.name
-    _state["preview"] = f"{item.label}: " + ("your model, " if _state["asset"] is not None else "") + \
+    editor_state["shown"] = item.name
+    editor_state["preview"] = f"{item.label}: " + ("your model, " if editor_state["asset"] is not None else "") + \
         "first-person view"
-    _state["guard"] = True
+    editor_state["guard"] = True
     try:
         wm.boz_anim_state = str(rig.idle())
     except TypeError:
         pass
     finally:
-        _state["guard"] = False
+        editor_state["guard"] = False
     show_state(context, rig.idle())
     apply_visibility(context)
     refresh_model_panel(context)
     for window in wm.windows:
         if window.workspace.name in WORKSPACES:
             window.workspace[VIEW_KEY] = False
-    _state["frame_gun"] = True
-    return _state["preview"]
+    editor_state["frame_gun"] = True
+    return editor_state["preview"]
 
 
 def _pending_preview():
@@ -605,7 +605,7 @@ def show_state(context, state: int) -> None:
     entry = _entry(state)
     edits = {part: list(entry.get("edits", {}).get(part, [])) for part in ("arms", "gun")}
     original = max((s[2] for s in states() if s[0] == state), default=0)
-    _state.update(edits=edits, entry=entry, state=state, dirty=False,
+    editor_state.update(edits=edits, entry=entry, state=state, dirty=False,
                   length=int(entry.get("length") or original) or 1)
     bake(context)
 
@@ -615,13 +615,13 @@ def bake(context) -> None:
     where either part is yours."""
     view = view_scene()
     rig_obj = view.objects.get(RIG)
-    state = _state.get("state")
+    state = editor_state.get("state")
     if rig_obj is None or state is None:
         return
-    bones = _state["bones"]
-    rests = _state["rests"]
-    entry = _state.get("entry") or {}
-    length = max(1, _state["length"])
+    bones = editor_state["bones"]
+    rests = editor_state["rests"]
+    entry = editor_state.get("entry") or {}
+    length = max(1, editor_state["length"])
     names = bones.names + [f"hand {side}" for side in GRIPS]
     tracks = {name: [[] for _ in range(7)] for name in names}
     influence = []
@@ -674,21 +674,21 @@ def bake(context) -> None:
     rig_obj.animation_data_create()
     rig_obj.animation_data.action = action
     rig_obj.animation_data.action_slot = slot
-    _state["baked"] = baked
-    _state["busy"] = True
+    editor_state["baked"] = baked
+    editor_state["busy"] = True
     try:
         view.frame_start, view.frame_end = 0, length
         if view.frame_current > length:
             view.frame_current = 0
         view.frame_set(view.frame_current)
-        _state["frame"] = view.frame_current
-        _state["guard"] = True
+        editor_state["frame"] = view.frame_current
+        editor_state["guard"] = True
         try:
             context.window_manager.boz_anim_length = length
         finally:
-            _state["guard"] = False
+            editor_state["guard"] = False
     finally:
-        _state["busy"] = False
+        editor_state["busy"] = False
 
 
 # --- Changes: kept when you leave a frame ----------------------------------------------------
@@ -696,7 +696,7 @@ def bake(context) -> None:
 def _group_of(name: str) -> str | None:
     if name.startswith("hand "):
         return "arms"
-    bones = _state["bones"]
+    bones = editor_state["bones"]
     index = bones.index.get(name)
     if index is None or name == "gun root":
         return None
@@ -706,8 +706,8 @@ def _group_of(name: str) -> str | None:
 def _current_values(rig_obj, group: str) -> dict:
     """The group's pose as stored values: arms by arm bone ("3") and grip ("hand L"); the gun by
     TAG_WEAPON and your model's bone names (its own space) or the stock gun's numbers."""
-    bones = _state["bones"]
-    rests = _state["rests"]
+    bones = editor_state["bones"]
+    rests = editor_state["rests"]
     values, gun = {}, {}
     for pose_bone in rig_obj.pose.bones:
         name = pose_bone.name
@@ -730,7 +730,7 @@ def _current_values(rig_obj, group: str) -> dict:
 
 def _group_changed(rig_obj, group: str, frame: int) -> bool:
     from mathutils import Quaternion, Vector
-    baked = _state["baked"].get(frame, {})
+    baked = editor_state["baked"].get(frame, {})
     for pose_bone in rig_obj.pose.bones:
         if _group_of(pose_bone.name) != group or pose_bone.name not in baked:
             continue
@@ -746,59 +746,59 @@ def capture(context=None, frame: int | None = None) -> bool:
     """Keep what you changed at *frame* (the frame shown): a pose of that part, held from there."""
     view = bpy.data.scenes.get(link.VIEW_SCENE)
     rig_obj = view.objects.get(RIG) if view else None
-    if rig_obj is None or _state.get("state") is None or _state["busy"] or not _state["baked"]:
+    if rig_obj is None or editor_state.get("state") is None or editor_state["busy"] or not editor_state["baked"]:
         return False
-    frame = _state["frame"] if frame is None else frame
+    frame = editor_state["frame"] if frame is None else frame
     changed = False
     for group in ("arms", "gun"):
         if _group_changed(rig_obj, group, frame):
-            _state["edits"][group] = weapon_anim.add_pose(_state["edits"][group], frame,
+            editor_state["edits"][group] = weapon_anim.add_pose(editor_state["edits"][group], frame,
                                                           _current_values(rig_obj, group))
             changed = True
     if changed:
-        _state["dirty"] = True
+        editor_state["dirty"] = True
         store_edits()
         bake(context or bpy.context)
     return changed
 
 
 def _stored_edits() -> dict:
-    return {part: list(changes) for part, changes in _state["edits"].items()}
+    return {part: list(changes) for part, changes in editor_state["edits"].items()}
 
 
 def store_edits() -> None:
     """Write the changes now (the result at every frame follows when you save: store())."""
     item, _weapon_ = _weapon()
-    state = _state.get("state")
-    if item is None or state is None or wt().source_dir() is None or item.name != _state.get("shown"):
+    state = editor_state.get("state")
+    if item is None or state is None or wt().source_dir() is None or item.name != editor_state.get("shown"):
         return
     labels = {s[0]: s[1] for s in states()}
-    entry = _state.get("entry") or {}
+    entry = editor_state.get("entry") or {}
     weapon_anim.save_state(wt().source_dir(), item.name, state, labels.get(state, ""),
                            {part: entry.get(part) for part in ("arms", "gun")}, _stored_edits(),
-                           _state["length"])
+                           editor_state["length"])
 
 
 def store(context=None) -> bool:
     """Save the animation shown: its changes and the result at every frame (the IK baked in)."""
     view = bpy.data.scenes.get(link.VIEW_SCENE)
     rig_obj = view.objects.get(RIG) if view else None
-    if rig_obj is None or _state.get("state") is None or _state.get("shown") is None:
+    if rig_obj is None or editor_state.get("state") is None or editor_state.get("shown") is None:
         return False
     capture(context)
-    if not _state["dirty"]:
+    if not editor_state["dirty"]:
         return False
     item, _weapon_ = _weapon()
-    if item is None or item.name != _state["shown"] or wt().source_dir() is None:
+    if item is None or item.name != editor_state["shown"] or wt().source_dir() is None:
         return False
-    bones = _state["bones"]
-    state = _state["state"]
+    bones = editor_state["bones"]
+    state = editor_state["state"]
     shown = view.frame_current
     arms_frames, gun_frames = [], []
     depsgraph = view.view_layers[0].depsgraph
-    _state["busy"] = True
+    editor_state["busy"] = True
     try:
-        for frame in range(0, max(1, _state["length"]) + 1):
+        for frame in range(0, max(1, editor_state["length"]) + 1):
             view.frame_set(frame)
             depsgraph.update()
             evaluated = rig_obj.evaluated_get(depsgraph)
@@ -814,19 +814,19 @@ def store(context=None) -> bool:
             gun_frames.append((frame, _gun_game_to_keys(gun_keys)))
         view.frame_set(shown)
     finally:
-        _state["busy"] = False
+        editor_state["busy"] = False
     labels = {s[0]: s[1] for s in states()}
     weapon_anim.save_state(wt().source_dir(), item.name, state, labels.get(state, ""),
                            {"arms": weapon_anim.Clip(arms_frames), "gun": weapon_anim.Clip(gun_frames)},
-                           _stored_edits(), _state["length"])
-    _state["dirty"] = False
-    _state["entry"] = _entry(state)
+                           _stored_edits(), editor_state["length"])
+    editor_state["dirty"] = False
+    editor_state["entry"] = _entry(state)
     return True
 
 
 @bpy.app.handlers.persistent
 def _before_frame(scene, _depsgraph=None):
-    if scene.name == link.VIEW_SCENE and not _state["busy"]:
+    if scene.name == link.VIEW_SCENE and not editor_state["busy"]:
         try:
             capture()
         except (ReferenceError, RuntimeError, KeyError, AttributeError) as exc:
@@ -835,8 +835,8 @@ def _before_frame(scene, _depsgraph=None):
 
 @bpy.app.handlers.persistent
 def _after_frame(scene, _depsgraph=None):
-    if scene.name == link.VIEW_SCENE and not _state["busy"]:
-        _state["frame"] = scene.frame_current
+    if scene.name == link.VIEW_SCENE and not editor_state["busy"]:
+        editor_state["frame"] = scene.frame_current
 
 
 @bpy.app.handlers.persistent
@@ -878,30 +878,30 @@ def _state_items(self, context):
     items = [(str(name), label + ("  (edited)" if name in edited else ""),
               f"{frames} frames, {frames / weapon_anim.FPS:.1f} s" + (", loops" if looping else ""))
              for name, label, frames, looping in states()]
-    _state["enum_items"] = items or [("0", "No animations", "")]
-    return _state["enum_items"]
+    editor_state["enum_items"] = items or [("0", "No animations", "")]
+    return editor_state["enum_items"]
 
 
 def _state_changed(self, context):
-    if _state["guard"]:
+    if editor_state["guard"]:
         return
     store(context)
     name = current_state()
-    if name is not None and _state["rig"] is not None:
-        _state["busy"] = True
+    if name is not None and editor_state["rig"] is not None:
+        editor_state["busy"] = True
         try:
             view_scene().frame_current = 0
         finally:
-            _state["busy"] = False
+            editor_state["busy"] = False
         show_state(context, name)
 
 
 def _length_changed(self, context):
-    if _state["guard"] or _state.get("state") is None:
+    if editor_state["guard"] or editor_state.get("state") is None:
         return
     capture(context)
-    _state["length"] = max(1, context.window_manager.boz_anim_length)
-    _state["dirty"] = True
+    editor_state["length"] = max(1, context.window_manager.boz_anim_length)
+    editor_state["dirty"] = True
     store_edits()
     bake(context)
 
@@ -943,7 +943,7 @@ class BOZ_OT_weapon_step(Operator):
         if self.to_change:
             capture(context)
             frames = sorted({f for part in ("arms", "gun")
-                             for f in weapon_anim.change_frames(_state["edits"][part])} - {here})
+                             for f in weapon_anim.change_frames(editor_state["edits"][part])} - {here})
             targets = [f for f in frames if (f > here if self.forward else f < here)]
             if not targets:
                 return {"CANCELLED"}
@@ -964,8 +964,8 @@ class BOZ_OT_weapon_original(Operator):
     def execute(self, context):
         capture(context)
         frame = view_scene().frame_current
-        _state["edits"][self.part] = weapon_anim.add_original(_state["edits"][self.part], frame)
-        _state["dirty"] = True
+        editor_state["edits"][self.part] = weapon_anim.add_original(editor_state["edits"][self.part], frame)
+        editor_state["dirty"] = True
         store_edits()
         bake(context)
         return {"FINISHED"}
@@ -990,7 +990,7 @@ class BOZ_OT_weapon_copy_pose(Operator):
     def execute(self, context):
         capture(context)
         wm = context.window_manager
-        state = _state.get("state")
+        state = editor_state.get("state")
         frame = view_scene().frame_current
         rig_obj = bpy.data.objects.get(RIG)
         if state is None or rig_obj is None:
@@ -999,8 +999,8 @@ class BOZ_OT_weapon_copy_pose(Operator):
             copied = _original_values(state, frame)
         else:
             copied = {group: _current_values(rig_obj, group) for group in ("arms", "gun")}
-        _state["clipboard"] = {part: copied[part] for part in _parts_of(wm.boz_copy_part)}
-        self.report({"INFO"}, f"Copied the {' and '.join(_state['clipboard'])} pose of frame {frame}")
+        editor_state["clipboard"] = {part: copied[part] for part in _parts_of(wm.boz_copy_part)}
+        self.report({"INFO"}, f"Copied the {' and '.join(editor_state['clipboard'])} pose of frame {frame}")
         return {"FINISHED"}
 
 
@@ -1011,17 +1011,17 @@ class BOZ_OT_weapon_paste_pose(Operator):
 
     @classmethod
     def poll(cls, context):
-        return bool(_state.get("clipboard"))
+        return bool(editor_state.get("clipboard"))
 
     def execute(self, context):
         capture(context)
         frame = view_scene().frame_current
         rig_obj = bpy.data.objects.get(RIG)
-        for part, values in _state["clipboard"].items():
+        for part, values in editor_state["clipboard"].items():
             current = _current_values(rig_obj, part)
             current.update(values)
-            _state["edits"][part] = weapon_anim.add_pose(_state["edits"][part], frame, current)
-        _state["dirty"] = True
+            editor_state["edits"][part] = weapon_anim.add_pose(editor_state["edits"][part], frame, current)
+        editor_state["dirty"] = True
         store_edits()
         bake(context)
         return {"FINISHED"}
@@ -1036,16 +1036,16 @@ class BOZ_OT_weapon_copy_frames(Operator):
     def execute(self, context):
         capture(context)
         wm = context.window_manager
-        state = _state.get("state")
+        state = editor_state.get("state")
         if state is None:
             return {"CANCELLED"}
         start, end = sorted((wm.boz_copy_from, wm.boz_copy_to))
         at = view_scene().frame_current
         last = _original_values(state, end)
         for part in _parts_of(wm.boz_copy_part):
-            _state["edits"][part] = weapon_anim.copy_frames(_state["edits"][part], at, start, end, last[part])
-        _state["length"] = max(_state["length"], at + (end - start) + 1)
-        _state["dirty"] = True
+            editor_state["edits"][part] = weapon_anim.copy_frames(editor_state["edits"][part], at, start, end, last[part])
+        editor_state["length"] = max(editor_state["length"], at + (end - start) + 1)
+        editor_state["dirty"] = True
         store_edits()
         bake(context)
         return {"FINISHED"}
@@ -1061,7 +1061,7 @@ class BOZ_OT_weapon_reset_anim(Operator):
 
     def execute(self, context):
         item, _weapon_ = _weapon()
-        state = _state.get("state")
+        state = editor_state.get("state")
         if item is None or state is None:
             return {"CANCELLED"}
         weapon_anim.save_state(wt().source_dir(), item.name, state, "", {}, {"arms": [], "gun": []}, 0)
@@ -1076,14 +1076,14 @@ class BOZ_OT_weapon_anim_save(Operator):
 
     def execute(self, context):
         capture(context)
-        _state["dirty"] = _state["dirty"] or bool(_state["edits"]["arms"] or _state["edits"]["gun"])
+        editor_state["dirty"] = editor_state["dirty"] or bool(editor_state["edits"]["arms"] or editor_state["edits"]["gun"])
         store(context)
         self.report({"INFO"}, "Saved")
         return {"FINISHED"}
 
 
 def timeline_text(part: str) -> str:
-    changes = _state["edits"].get(part, [])
+    changes = editor_state["edits"].get(part, [])
     if not changes:
         return "original"
     pieces = []
@@ -1132,16 +1132,16 @@ def _position_changed() -> None:
     view = bpy.data.scenes.get(link.VIEW_SCENE)
     rig_obj = view.objects.get(RIG) if view else None
     item, weapon = _weapon()
-    if rig_obj is None or weapon is None or _state["guard"]:
+    if rig_obj is None or weapon is None or editor_state["guard"]:
         return
     basis = [list(r) for r in rig_obj.matrix_basis]
-    if basis == _state.get("arms_basis"):
+    if basis == editor_state.get("arms_basis"):
         return
     location, rotation, scale = from_bl(rig_obj.matrix_basis).decompose()
     if max(abs(c - 1.0) for c in scale) > 1e-4:      # it only moves and turns
         from mathutils import Matrix
         rig_obj.matrix_basis = to_bl(Matrix.Translation(location) @ rotation.to_matrix().to_4x4())
-    _state["arms_basis"] = [list(r) for r in rig_obj.matrix_basis]
+    editor_state["arms_basis"] = [list(r) for r in rig_obj.matrix_basis]
     weapon.arms = {"location": [round(c, 3) for c in location],
                    "rotation": [round(c, 6) for c in rotation]}
     wt().save(bpy.context, weapon)
@@ -1177,7 +1177,7 @@ class BOZ_OT_weapon_arms_reset(Operator):
         rig_obj = bpy.data.objects.get(RIG)
         if rig_obj is not None:
             rig_obj.matrix_basis = arms_matrix({})
-            _state["arms_basis"] = [list(r) for r in rig_obj.matrix_basis]
+            editor_state["arms_basis"] = [list(r) for r in rig_obj.matrix_basis]
         return {"FINISHED"}
 
 
@@ -1200,7 +1200,7 @@ def _fit_edit_changed(self, context):
     view = view_scene()
     rig_obj = view.objects.get(RIG)
     item, weapon = _weapon()
-    if wm.boz_fit_edit and rig_obj is not None and _state.get("asset") is not None:
+    if wm.boz_fit_edit and rig_obj is not None and editor_state.get("asset") is not None:
         stop_playing()
         if wm.boz_arms_edit:
             wm.boz_arms_edit = False
@@ -1216,7 +1216,7 @@ def _fit_edit_changed(self, context):
             _hang_from_tag(fit_obj, rig_obj)
             fit_obj.matrix_basis = fit_matrix(weapon.model.get("fit") or {})
             _select(view, fit_obj)
-        rig = _state["rig"]
+        rig = editor_state["rig"]
         base = game.model_mesh(rig.weapons_path, rig.gun_model_hash) if rig.gun_model is not None else None
         if base is not None:
             ghost_data = base.copy()
@@ -1256,7 +1256,7 @@ def _picked(*_args) -> None:
             wm.boz_arms_edit = True
         else:
             _select(view, view.objects.get(RIG))
-    elif active.name == GUN and _state.get("asset") is not None and not wm.boz_fit_edit:
+    elif active.name == GUN and editor_state.get("asset") is not None and not wm.boz_fit_edit:
         wm.boz_fit_edit = True
 
 
@@ -1277,17 +1277,17 @@ def _after_load(_dummy=None):
 def _sync_fit_fields(fit: dict) -> None:
     from mathutils import Quaternion
     wm = bpy.context.window_manager
-    _state["guard"] = True
+    editor_state["guard"] = True
     try:
         wm.boz_fit_location = fit.get("location", (0.0, 0.0, 0.0))
         wm.boz_fit_rotation = Quaternion(fit.get("rotation", (1.0, 0.0, 0.0, 0.0))).to_euler()
         wm.boz_fit_scale = float(fit.get("scale", 1.0))
     finally:
-        _state["guard"] = False
+        editor_state["guard"] = False
 
 
 def _fit_fields_changed(self, context):
-    if _state["guard"]:
+    if editor_state["guard"]:
         return
     item, weapon = _weapon()
     if weapon is None or not weapon.model.get("asset"):
@@ -1311,7 +1311,7 @@ def _model_items(self, context):
     for asset in assets_tab.defs():
         if asset.kind == "weapon" and source is not None and assets.has_game(source, asset.name):
             items.append((asset.name, asset.name, "Your asset (Assets tab), with its own bones"))
-    _state["model_items"] = items
+    editor_state["model_items"] = items
     return items
 
 
@@ -1320,7 +1320,7 @@ def auto_model(context, asset_name: str, keep_bones: dict | None = None) -> dict
     stock bone its original motion comes from."""
     item, weapon = _weapon()
     level = weapon.level or wt().base_level(context)
-    stock = viewmodel.Rig(wt()._pack().read, level, weapon.source)
+    stock = viewmodel.Rig(wt().game_pack().read, level, weapon.source)
     model, _textures = assets.load_game(wt().source_dir(), asset_name)
     fit = weapon_model.auto_fit({b.name: b.head for b in model.bones}, model.vertices,
                                 stock.gun_bones, stock.gun_model.vertices if stock.gun_model else [])
@@ -1333,7 +1333,7 @@ def auto_model(context, asset_name: str, keep_bones: dict | None = None) -> dict
 
 
 def _model_choice_changed(self, context):
-    if _state["guard"]:
+    if editor_state["guard"]:
         return
     item, weapon = _weapon()
     if item is None:
@@ -1348,19 +1348,19 @@ def _model_choice_changed(self, context):
 class BOZ_WeaponBone(PropertyGroup):
     """One of your model's bones and the stock bone its original motion comes from."""
     def _items(self, context):
-        rig = _state.get("rig")
+        rig = editor_state.get("rig")
         if rig is None or not rig.gun_bones:
             return [("#0", "root", "")]
         key = ("bones", id(rig))
-        if _state.get("bone_items_key") != key:
-            _state["bone_items_key"] = key
-            _state["bone_items"] = [(weapon_model.bone_key(rig.gun_bones, i),
+        if editor_state.get("bone_items_key") != key:
+            editor_state["bone_items_key"] = key
+            editor_state["bone_items"] = [(weapon_model.bone_key(rig.gun_bones, i),
                                      f"{i}: {weapon_model.bone_label(rig.gun_bones, i)}", "")
                                     for i in range(len(rig.gun_bones))]
-        return _state["bone_items"]
+        return editor_state["bone_items"]
 
     def _changed(self, context):
-        if _state["guard"]:
+        if editor_state["guard"]:
             return
         item, weapon = _weapon()
         if weapon is None or not weapon.model.get("asset"):
@@ -1378,18 +1378,18 @@ def refresh_model_panel(context) -> None:
     wm = context.window_manager
     item, weapon = _weapon()
     model = weapon.model if weapon else {}
-    _state["guard"] = True
+    editor_state["guard"] = True
     try:
         choice = model.get("asset") or "STOCK"
         if choice in {i[0] for i in _model_items(None, context)}:
             wm.boz_weapon_model = choice
     finally:
-        _state["guard"] = False
+        editor_state["guard"] = False
     _sync_fit_fields(model.get("fit") or {})
-    _state["guard"] = True
+    editor_state["guard"] = True
     try:
         wm.boz_weapon_bones.clear()
-        asset_model = _state.get("asset") if model.get("asset") else None
+        asset_model = editor_state.get("asset") if model.get("asset") else None
         labels = {"tag_clip": "Magazine", "tag_flash": "Muzzle", "tag_brass": "Shells",
                   "tag_weapon": "Body"}
         for bone in asset_model.bones if asset_model is not None else []:
@@ -1401,7 +1401,7 @@ def refresh_model_panel(context) -> None:
             except TypeError:
                 pass
     finally:
-        _state["guard"] = False
+        editor_state["guard"] = False
 
 
 class BOZ_OT_weapon_auto_fit(Operator):
@@ -1494,14 +1494,14 @@ def setup_view(window) -> bool:
         if animation:
             area_free = area == largest and len(views) > 1
             space.region_3d.view_perspective = "PERSP" if area_free else "CAMERA"
-            if area_free and _state.get("frame_gun"):
+            if area_free and editor_state.get("frame_gun"):
                 _frame_area(area)
         elif not wm.boz_view_free:
             space.region_3d.view_perspective = "CAMERA"
         area.tag_redraw()
     if animation:
-        _state.pop("frame_gun", None)
-    elif wm.boz_view_free and _state.pop("frame_gun", False):
+        editor_state.pop("frame_gun", None)
+    elif wm.boz_view_free and editor_state.pop("frame_gun", False):
         for area in views:
             _frame_area(area)
     rig_obj = view.objects.get(RIG)
@@ -1540,7 +1540,7 @@ def refresh_view(window) -> None:
 
 def _view_changed(self, context):
     apply_visibility(context)
-    _state["frame_gun"] = True
+    editor_state["frame_gun"] = True
     for window in context.window_manager.windows:
         if window.workspace.name in WORKSPACES:
             setup_view(window)
@@ -1574,7 +1574,7 @@ def draw_view_header(self, context):
                  else "VIEW_CAMERA", toggle=True)
     row.prop(wm, "boz_view_arms", text="", icon="HIDE_OFF" if wm.boz_view_arms else "HIDE_ON", toggle=True)
     row.prop(wm, "boz_view_bones", text="", icon="BONE_DATA", toggle=True)
-    if _state.get("rig") is not None:
+    if editor_state.get("rig") is not None:
         layout.operator(BOZ_OT_weapon_anim_play.bl_idname, text="",
                         icon="PAUSE" if wm.boz_anim_playing else "PLAY")
 
@@ -1621,11 +1621,11 @@ class BOZ_PT_weapon_model(_ViewPanel, Panel):
         box.label(text="Model", icon="MESH_DATA")
         box.prop(wm, "boz_weapon_model", text="")
         if wm.boz_weapon_model == "STOCK":
-            if len(_state.get("model_items") or ()) <= 1:
+            if len(editor_state.get("model_items") or ()) <= 1:
                 box.label(text="Import a Weapon asset in the Assets tab to use your own")
             return
-        if _state.get("error"):
-            box.label(text=_state["error"], icon="ERROR")
+        if editor_state.get("error"):
+            box.label(text=editor_state["error"], icon="ERROR")
         row = box.row(align=True)
         row.prop(wm, "boz_fit_edit", text="Fit model in hand", toggle=True)
         row.operator(BOZ_OT_weapon_auto_fit.bl_idname, icon="SNAP_ON")
@@ -1652,7 +1652,7 @@ class BOZ_PT_weapon_animations(_ViewPanel, Panel):
         wm = context.window_manager
         view = bpy.data.scenes.get(link.VIEW_SCENE)
         animation_tab = context.workspace.name == "Animation"
-        if _state.get("rig") is None or view is None:
+        if editor_state.get("rig") is None or view is None:
             layout.label(text="Select a weapon in the Weapons tab", icon="INFO")
             return
         layout.prop(wm, "boz_anim_state", text="")

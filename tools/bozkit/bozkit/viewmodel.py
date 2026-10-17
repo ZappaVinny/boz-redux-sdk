@@ -14,6 +14,7 @@ import math
 from dataclasses import dataclass
 
 from . import anim, group as group_module, levels, resources, weapons
+from . import spec_fields
 from . import maps
 from .hashing import iw_hash
 
@@ -78,11 +79,11 @@ class Rig:
         self.arms_path = f'ingame/characters/arms/arms_{gear}.group.bin'
         gun_data = _by_class(group_module.parse(read(self.weapons_path)))
         arm_data = _by_class(group_module.parse(read(self.arms_path)))
-        spec_body = gun_data.get(weapons.ENTITY_SPEC, {}).get(weapons._hash_of(weapon))
+        spec_body = gun_data.get(weapons.ENTITY_SPEC, {}).get(weapons.hash_of(weapon))
         if spec_body is None:
             raise KeyError(f'{level} has no weapon {weapon}')
-        blob = weapons._weapon_blob(resources.decode_entity_spec(spec_body))
-        asset = weapons._prop(blob, 'renderableAsset')
+        blob = weapons.weapon_blob(resources.decode_entity_spec(spec_body))
+        asset = spec_fields.prop(blob, 'renderableAsset')
         gun_model = weapons.get_value(asset.nested, 'model') if asset is not None and asset.nested else None
         gun_skel_hash = weapons.get_value(blob, 'skel')
 

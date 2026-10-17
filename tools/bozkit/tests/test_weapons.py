@@ -92,7 +92,7 @@ def names_in(parsed):
 class WeaponTests(unittest.TestCase):
     def test_values_and_defaults(self):
         spec = resources.decode_entity_spec(weapon_body('mp40', 32, 2))
-        blob = weapons._weapon_blob(spec)
+        blob = weapons.weapon_blob(spec)
         self.assertEqual(weapons.get_value(blob, 'm_clipSize'), 32)
         self.assertEqual(weapons.get_value(blob, 'behaviour'), 2)
         self.assertEqual(weapons.get_value(blob, 'm_damage.m_headDamage'), 70)
@@ -102,7 +102,7 @@ class WeaponTests(unittest.TestCase):
         weapons.set_value(blob, 'm_damage.m_torsoDamage', 150)
         weapons.set_value(blob, 'm_falloff.m_startDistance', 300)    # a struct it did not have
         weapons.set_value(blob, 'recoil', 3)
-        again = weapons._weapon_blob(resources.decode_entity_spec(resources.encode_entity_spec(spec)))
+        again = weapons.weapon_blob(resources.decode_entity_spec(resources.encode_entity_spec(spec)))
         self.assertEqual([weapons.get_value(again, k) for k in (
             'autoROF', 'm_damage.m_headDamage', 'm_damage.m_torsoDamage',
             'm_falloff.m_startDistance', 'recoil')], [900, 70, 150, 300, 3])

@@ -51,7 +51,7 @@ _state: dict = {"levels": {}, "refreshing": False, "items": {}}
 
 # --- Data --------------------------------------------------------------------------------
 
-def _pack():
+def game_pack():
     from . import game
     models = game.game_models()
     return models.pack if models is not None else None
@@ -61,7 +61,7 @@ def level_weapons(level: str) -> list:
     """The game's weapons of a level (cached), [] without the asset library."""
     level = maps.gear(level)
     if level not in _state["levels"]:
-        pack = _pack()
+        pack = game_pack()
         try:
             _state["levels"][level] = wp.read_level(pack, level) if pack is not None else []
         except (KeyError, OSError, ValueError, library.LibraryError):
@@ -105,7 +105,7 @@ def project_index(context) -> list[str]:
 
 
 def game_weapon(level: str, name: str):
-    target = wp._hash_of(name)
+    target = wp.hash_of(name)
     return next((w for w in level_weapons(level) if w.name_hash == target), None)
 
 
@@ -738,7 +738,7 @@ def _draw_group(layout, context, group: str) -> None:
         if spec.kind == "readonly":
             values, _base = current_values(context, selected(scene).name)
             value = values.get(spec.key) or 0
-            shown = wp._names().get(value, f"0x{value:08x}") if value else "none"
+            shown = wp.known_names().get(value, f"0x{value:08x}") if value else "none"
             line.label(text=f"{text}: {shown}")
         elif spec.kind == "int":
             line.prop(row, "value_int", text=text)
@@ -795,8 +795,8 @@ class BOZ_PT_weapon_properties(_WeaponsPanel, Panel):
             layout.label(text=f"From {weapon.level}: its sounds and effects may be missing here",
                          icon="IMPORT")
         from . import weapon_view
-        if weapon_view._state.get("preview"):
-            layout.label(text=weapon_view._state["preview"], icon="VIEW_CAMERA")
+        if weapon_view.editor_state.get("preview"):
+            layout.label(text=weapon_view.editor_state["preview"], icon="VIEW_CAMERA")
         layout.prop(scene, "boz_weapon_display")
         start, _reserve = start_weapon()
         is_start = start == item.name
@@ -845,7 +845,7 @@ def update_icon_preview(context) -> None:
     if item is not None and source is not None:
         weapon = weapon_def(context, item.name)
         try:
-            picture = hud_icons.preview(_pack(), source, weapon, base_level(context))
+            picture = hud_icons.preview(game_pack(), source, weapon, base_level(context))
         except (hud_icons.IconError, OSError, ValueError, KeyError):
             picture = None
     image = bpy.data.images.get(ICON_IMAGE)

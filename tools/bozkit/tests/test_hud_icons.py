@@ -22,15 +22,6 @@ class HudIconTests(unittest.TestCase):
         with self.assertRaises(hud_icons.IconError):
             hud_icons.fit(Image.new('RGBA', (10, 10)))
 
-    def test_free_slots_skip_used_pixels(self):
-        sheet = Image.new('RGBA', (400, 130), (0, 0, 0, 0))
-        sheet.paste((255, 255, 255, 255), (0, 0, 200, 130))             # the left half is used
-        slots = hud_icons.free_slots(sheet)
-        self.assertTrue(slots)
-        for x, y in slots:
-            self.assertGreaterEqual(x, 200)
-            self.assertLessEqual(x + hud_icons.SLOT[0], 400)
-
     def test_uv_round_trip(self):
         blob = reflect.Blob(PLAYER_WEAPON)
         self.assertIsNone(hud_icons.uv_of(blob))

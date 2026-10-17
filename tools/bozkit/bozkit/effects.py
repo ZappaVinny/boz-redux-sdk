@@ -103,7 +103,7 @@ def catalog(read, names, known: dict | None = None) -> list[Entry]:
     """Every effect and projectile of the game: the shared effects, each map's own effect groups
     and each map's projectiles (labelled by the weapons that fire them)."""
     from . import resources, weapons
-    known = dict(weapons._names() if known is None else known)
+    known = dict(weapons.known_names() if known is None else known)
     names = list(names)
     out = []
 
@@ -317,7 +317,7 @@ def apply(read, source: Path, groups: dict, map_name: str, pack, scripts: Path |
         if spawned and not item.changed:
             item.hash = spawned            # the map holds it under a name of its own
     known = {u.hash for u in used}
-    names = weapons._names()
+    names = weapons.known_names()
     extra: list[dict] = []
     for value in bundle_module.script_names(scripts, registry) if scripts else []:
         if value in known:

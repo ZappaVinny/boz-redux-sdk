@@ -126,7 +126,7 @@ class Registry:
         if entry.cls == MODEL:
             from . import blender_scene
             try:
-                return list(blender_scene._model_materials(body, self.material_ids))
+                return list(blender_scene.model_materials(body, self.material_ids))
             except Exception:   # noqa: BLE001 - unreadable model: nothing to follow
                 return out
         if entry.cls == MATERIAL:
@@ -140,7 +140,7 @@ class Registry:
                 spec = resources.decode_entity_spec(body)
             except Exception:   # noqa: BLE001
                 return self._words(body)
-            out = world._spec_hashes(spec)
+            out = world.spec_hashes(spec)
             for component in _components(spec):
                 out += self.runtime.get(component.type_hash, [])
             return [h for h in out if h in self.by_hash]
@@ -148,7 +148,7 @@ class Registry:
             from . import world
             blob = resources.decode_reflected(body)
             if blob is not None:
-                return [h for h in world._blob_hashes(blob) if h in self.by_hash]
+                return [h for h in world.blob_hashes(blob) if h in self.by_hash]
         return self._words(body)
 
     def _words(self, body: bytes) -> list[int]:

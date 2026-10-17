@@ -126,7 +126,7 @@ def default_material():
             edge = x % 32 in (0, 31) or y % 32 in (0, 31)
             value = 96 if edge else 150 + ((x // 32 + y // 32) % 2) * 20
             bgra += bytes((value, value, value, 255))
-    image = convert._image_from_texture(DEFAULT_TEXTURE, world.Texture(size, size, bytes(bgra)), None)
+    image = convert.image_from_texture(DEFAULT_TEXTURE, world.Texture(size, size, bytes(bgra)), None)
     return convert.material_for(DEFAULT_TEXTURE, image)
 
 
