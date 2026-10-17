@@ -18,7 +18,7 @@ from pathlib import Path
 from . import project as sdk_project
 
 SETTINGS_FILE = 'settings.json'
-# The data packs the client needs, with their sizes (runtime/src/launcher/game_files.cpp).
+# The data packs the client needs, with their sizes (the client's src/launcher/game_files.cpp).
 PACKS = {'blackops_etc.dz': 487603915, 'blackops_gles1.dz': 337594086}
 DEVELOPER_MOD = 'developer'
 
@@ -264,7 +264,7 @@ def _launcher_names() -> tuple[str, ...]:
 def client_kind(root: Path) -> str:
     """'release' (an unpacked client download), 'checkout' (the boz-redux repo) or ''."""
     root = Path(root)
-    if (root / 'runtime' / 'scripts' / 'run-launcher.sh').is_file():
+    if (root / 'scripts' / 'run-launcher.sh').is_file():
         return 'checkout'
     if any((root / name).is_file() for name in _launcher_names()):
         return 'release'
@@ -371,7 +371,7 @@ def client_status(root: str | Path) -> ClientStatus:
 def launcher_command(root: Path) -> list[str] | None:
     """The command that opens the client's own launcher."""
     root = Path(root)
-    script = root / 'runtime' / 'scripts' / 'run-launcher.sh'
+    script = root / 'scripts' / 'run-launcher.sh'
     if script.is_file():
         return ['bash', str(script)]
     for name in _launcher_names():
@@ -383,7 +383,7 @@ def launcher_command(root: Path) -> list[str] | None:
 def game_command(root: Path) -> list[str] | None:
     """The command that starts the game itself (no launcher)."""
     root = Path(root)
-    script = root / 'runtime' / 'scripts' / 'run-desktop.sh'
+    script = root / 'scripts' / 'run-desktop.sh'
     if script.is_file():
         return ['bash', str(script), str(root)]
     for name in ('codboz_s3e_loader.exe', 'codboz_s3e_loader'):

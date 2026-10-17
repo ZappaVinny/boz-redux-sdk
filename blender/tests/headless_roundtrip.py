@@ -329,7 +329,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert abs(crate.location.z - 8.0) < 1e-5, tuple(crate.location)
 
     # Build & Run: saves, writes the one-shot autostart request and starts the client.
-    fake = client / 'runtime' / 'scripts'
+    fake = client / 'scripts'
     fake.mkdir(parents=True)
     started = directory / 'started.txt'
     (fake / 'run-desktop.sh').write_text(f'echo "$@" > {started}\n')

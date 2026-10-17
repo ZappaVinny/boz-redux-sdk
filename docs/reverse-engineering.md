@@ -12,7 +12,7 @@ the converted binary and anything under `re/` stay on your machine (`re/` is git
 
 - Ghidra 12.1 or newer (Java scripts only, no PyGhidra needed).
 - Python 3.11+.
-- The game set up by the client ([boz-redux](https://github.com/ZappaVinny/boz-redux): its launcher, or `runtime/scripts/setup-game.sh`), linked into this repo as `game` (`ln -s ../boz-redux game`, see `sdk.toml`).
+- The game set up by the client ([boz-redux](https://github.com/ZappaVinny/boz-redux): its launcher, or `scripts/setup-game.sh`), linked into this repo as `game` (`ln -s ../boz-redux game`, see `sdk.toml`).
 
 ## Build the project
 
