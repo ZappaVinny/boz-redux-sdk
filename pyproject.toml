@@ -23,5 +23,9 @@ package-dir = {"" = "tools/bozkit"}
 [tool.setuptools.packages.find]
 where = ["tools/bozkit"]
 
+[tool.setuptools.package-data]
+bozkit = ["branding/*.png", "branding/*.svg", "branding/*.ico", "branding/icons/*.png",
+          "branding/fonts/*.ttf", "branding/fonts/OFL.txt"]
+
 [tool.setuptools.data-files]
 "share/boz-redux-sdk/lib/boz" = ["lib/boz/*.lua"]

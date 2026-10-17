@@ -3,7 +3,9 @@ settings. bozkit.desktop starts it."""
 from __future__ import annotations
 
 import html
+import importlib.metadata
 import time
+import tomllib
 from pathlib import Path
 
 from PySide6.QtCore import QFile, QSize, Qt, QThread, QTimer, QUrl, Signal
@@ -17,35 +19,50 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComb
                                QTextBrowser, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
                                QWidget)
 
+from . import desktop_style as style
 from . import library as asset_library
 from . import maps
 from . import project as sdk_project
 from . import sdkhome
 
 APP_NAME = 'BOZ Redux SDK'
+
+
+def _sdk_version() -> str:
+    try:
+        return importlib.metadata.version('boz-redux-sdk')
+    except importlib.metadata.PackageNotFoundError:
+        manifest = sdkhome.sdk_root() / 'pyproject.toml'
+        try:
+            return tomllib.loads(manifest.read_text(encoding='utf-8'))['project']['version']
+        except (OSError, KeyError, tomllib.TOMLDecodeError):
+            return ''
+
+
+SDK_VERSION = _sdk_version()
 MISSING_DATA = ('Game data not installed. Open the client launcher → Game files → Install, then '
                 'Download. Maps can\'t be built without it; script-only projects still work.')
 COMING = 'Coming in a later SDK update'
 
 
-def heading(text: str, size: int = 16) -> QLabel:
-    label = QLabel(text)
-    font = label.font()
-    font.setPointSize(size)
-    font.setBold(True)
-    label.setFont(font)
+def heading(text: str, size: int = 18) -> QLabel:
+    label = QLabel(text.upper())
+    label.setObjectName('heading' if size >= 16 else 'subheading')
     return label
 
 
 def muted(text: str) -> QLabel:
     label = QLabel(text)
     label.setWordWrap(True)
-    label.setStyleSheet('color: palette(placeholder-text);')
+    label.setObjectName('muted')
     return label
 
 
-def button(text: str, callback=None, tooltip: str = '', enabled: bool = True) -> QPushButton:
+def button(text: str, callback=None, tooltip: str = '', enabled: bool = True,
+           primary: bool = False) -> QPushButton:
     widget = QPushButton(text)
+    if primary:
+        widget.setProperty('primary', True)
     if callback:
         widget.clicked.connect(callback)
     if tooltip:
@@ -64,13 +81,12 @@ def kind_icon(kind: str, size: int = 48) -> QIcon:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor('#7a3b2e' if kind == 'map' else '#2e5a7a' if kind else '#555'))
+    painter.setBrush(QColor(style.RED if kind == 'map' else style.LINE if kind else style.RAISED))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.drawRoundedRect(0, 0, size, size, 8, 8)
     painter.setPen(QColor('white'))
-    font = QFont()
-    font.setBold(True)
-    font.setPixelSize(size // 2)
+    font = style.heading_font(10)
+    font.setPixelSize(size * 3 // 5)
     painter.setFont(font)
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter,
                      {'map': 'M', 'script': 'S'}.get(kind, '?'))
@@ -89,7 +105,8 @@ def open_path(path: Path) -> None:
 
 
 def check_mark(ok: bool) -> str:
-    return '<span style="color:#4caf50">✔</span>' if ok else '<span style="color:#e57373">✘</span>'
+    return (f'<span style="color:{style.OK}">✔</span>' if ok
+            else f'<span style="color:{style.ERROR}">✘</span>')
 
 
 class WelcomeDialog(QDialog):
@@ -101,6 +118,11 @@ class WelcomeDialog(QDialog):
         self.setMinimumWidth(620)
         self.settings = settings
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 24, 28, 20)
+        layout.setSpacing(12)
+        logo = QLabel()
+        logo.setPixmap(style.logo_pixmap(96, self.devicePixelRatioF()))
+        layout.addWidget(logo, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(heading('Welcome'))
         layout.addWidget(muted(
             'The SDK makes maps and mods for the BOZ Redux client. Choose the folder you '
@@ -327,7 +349,7 @@ class ProjectsPage(QWidget):
         top = QHBoxLayout()
         top.addWidget(heading('Projects'))
         top.addStretch(1)
-        top.addWidget(button('New project…', window.new_project))
+        top.addWidget(button('New project…', window.new_project, primary=True))
         top.addWidget(button('Add existing…', window.add_existing,
                              'Add a project folder (one with boz-project.toml) to the list'))
         layout.addLayout(top)
@@ -517,16 +539,16 @@ class ProjectPage(QWidget):
         if project.kind == 'map':
             widgets = [button('Open in Editor', self.open_editor,
                               'Opens the map in the BOZ Redux editor (Blender)'),
-                       button('▶ Build && Run', self.run_in_game,
-                              'Compiles the map into a mod, installs it with the Developer '
-                              'mod and starts the game straight into the level'),
+                       button('▶  Build && Run', self.run_in_game,
+                              'Compiles the map into a mod, installs it into the client and '
+                              'starts the game straight into the level', primary=True),
                        button('Open folder', self.open_folder)]
         else:
             widgets = [button('Open folder', self.open_folder,
                               'Opens VS Code if it is installed, else your file manager'),
-                       button('▶ Run in game', self.run_in_game,
+                       button('▶  Run in game', self.run_in_game,
                               'Installs this mod and the Developer mod into the client, '
-                              'then starts the game')]
+                              'then starts the game', primary=True)]
         widgets.append(coming('Export…'))
         for widget in widgets:
             self.actions.addWidget(widget)
@@ -938,9 +960,12 @@ class LearnPage(QWidget):
                                'to read as examples.'))
         grid = QGridLayout()
         docs = sdkhome.sdk_root() / 'docs'
-        entries = [('Making mods (guide)', docs / 'making-mods.md'),
+        entries = [('Introduction', docs / 'README.md'),
+                   ('Getting started', docs / 'getting-started.md'),
+                   ('Lua mods', docs / 'lua-mods.md'),
+                   ('The map editor', docs / 'map-editor.md'),
+                   ('Weapons, models, effects and sounds', docs / 'weapons-and-assets.md'),
                    ('Standard library (boz.*)', docs / 'standard-library.md'),
-                   ('Client Lua API', docs / 'lua-api.md'),
                    ('Console commands and variables', docs / 'console-reference.md')]
         for row, (label, path) in enumerate(entries):
             grid.addWidget(QLabel(label), row, 0)
@@ -1041,15 +1066,33 @@ class Window(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
-        self.resize(1100, 720)
+        self.resize(1180, 760)
+        self.setMinimumSize(980, 640)
         self.settings = sdkhome.Settings.load()
         self.client_status: sdkhome.ClientStatus | None = None
         self.library_worker = None
         central = QWidget()
         outer = QHBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        sidebar = QWidget()
+        sidebar.setObjectName('sidebar')
+        sidebar.setFixedWidth(210)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(0, 22, 0, 14)
+        side.setSpacing(10)
+        logo = QLabel()
+        logo.setPixmap(style.logo_pixmap(76, self.devicePixelRatioF()))
+        logo.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        side.addWidget(logo)
         self.nav = QListWidget()
-        self.nav.setFixedWidth(170)
+        self.nav.setObjectName('nav')
         self.nav.setIconSize(QSize(20, 20))
+        side.addWidget(self.nav, 1)
+        version = QLabel(f'SDK {SDK_VERSION}  ·  game 1.0.11')
+        version.setObjectName('version')
+        version.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        side.addWidget(version)
         self.stack = QStackedWidget()
         self.projects = ProjectsPage(self)
         self.project_page = ProjectPage(self)
@@ -1068,8 +1111,12 @@ class Window(QMainWindow):
             self.stack.addWidget(page)
         self.stack.addWidget(self.project_page)
         self.nav.currentRowChanged.connect(self.nav_changed)
-        outer.addWidget(self.nav)
-        outer.addWidget(self.stack, 1)
+        outer.addWidget(sidebar)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(26, 20, 26, 14)
+        content_layout.addWidget(self.stack)
+        outer.addWidget(content, 1)
         self.setCentralWidget(central)
         self.statusBar()
         self.status_progress = QProgressBar()
