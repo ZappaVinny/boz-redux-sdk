@@ -3,6 +3,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -90,6 +91,13 @@ def names_in(parsed):
 
 
 class WeaponTests(unittest.TestCase):
+    def setUp(self):
+        # Only the test's own names: the user's name cache and asset library stay out of it.
+        names = {iw_hash(name): name for name in ('colt45', 'mp40')}
+        patcher = mock.patch.object(weapons, 'known_names', return_value=names)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_values_and_defaults(self):
         spec = resources.decode_entity_spec(weapon_body('mp40', 32, 2))
         blob = weapons.weapon_blob(spec)
