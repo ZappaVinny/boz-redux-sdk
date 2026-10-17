@@ -21,4 +21,15 @@ function hash.name(text)
     return h
 end
 
+--- A hash from a name, a "0x..." hash or a number (returned as it is).
+function hash.of(value)
+    if type(value) == "number" then
+        return value
+    end
+    if value:sub(1, 2):lower() == "0x" then
+        return tonumber(value:sub(3), 16)
+    end
+    return hash.name(value)
+end
+
 return hash

@@ -8,6 +8,8 @@
 
 local flash = {}
 
+local core = require("boz.core")
+
 local hooked = false
 
 --- Shows ActionScript trace() output and gameswf warnings in boz-log.txt as "[flash] ...".
@@ -18,12 +20,12 @@ function flash.capture_log()
     hooked = true
     local buffer = game.alloc(4096)
     local args = game.alloc(32)
-    hook.add("gameswf_LogMsg", {before = function(call)
+    hook.add(core.sym("gameswf_LogMsg"), {before = function(call)
         -- The variadic arguments: r1..r3 then the caller's stack words.
         for i = 2, 8 do
             game.write("u32", args + (i - 2) * 4, call:arg(i))
         end
-        game.call("vsnprintf", buffer, 4096, call:arg(1), args)
+        core.call("vsnprintf", buffer, 4096, call:arg(1), args)
         local text = game.read("string", buffer, 4096):gsub("%s+$", "")
         if text ~= "" then
             log("[flash] " .. text)

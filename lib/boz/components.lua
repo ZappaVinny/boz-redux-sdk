@@ -10,17 +10,12 @@
 
 local components = {}
 
---- The local player's entity (CLevelManager +0x1a0) and its id, or nil outside a Zombies match.
+local core = require("boz.core")
+local symbols = require("boz.symbol_data")
+
+--- The local player's entity and its id, or nil outside a Zombies match (boz.map.player).
 function components.local_player()
-    local level = game.read("ptr", "CLevelManager::s_instance")
-    if level == 0 then
-        return nil
-    end
-    local entity = game.read("ptr", level + 0x1a0)
-    if entity == 0 then
-        return nil
-    end
-    return entity, game.read("u32", entity + 4)
+    return require("boz.map").player()
 end
 
 --- The address of a component table by its gamedef name ("CPerkManager::s_table") or class
@@ -29,13 +24,12 @@ function components.table(name)
     if type(name) == "number" then
         return name
     end
-    local full = name:find("::s_table", 1, true) and name or name .. "::s_table"
-    local address = game.symbol(full)
+    local class_name = name:gsub("::s_table$", "")
+    local address = core.sym(class_name .. "::s_table")
     if address then
         return address
     end
-    local ok, data = pcall(require, "boz.symbol_data")
-    local offset = ok and data.tables[full:gsub("::s_table$", "")]
+    local offset = symbols.tables[class_name]
     return offset and game.base() + offset or nil
 end
 
@@ -46,7 +40,7 @@ function components.find(table_name, id)
     if not address then
         return nil
     end
-    local component = game.call("CIsComponentTableBase::Find", address, id)
+    local component = core.call("CIsComponentTableBase::Find", address, id)
     return component ~= 0 and component or nil
 end
 

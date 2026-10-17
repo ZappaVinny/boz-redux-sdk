@@ -19,23 +19,12 @@
 
 local audio = {}
 
+local core = require("boz.core")
 local hash = require("boz.hash")
 
-local FALLBACK = {["CIwSoundManager::s_instance"] = 0x4535d8, ["CIwSoundManager::Play"] = 0x0d6dae + 1,
-                  ["CSoundSequenceManager::s_instance"] = 0x460cf8, ["CSoundSequenceManager::Play"] = 0x1f9fe8 + 1,
-                  ["CMusicManager::s_instance"] = 0x463654, ["Music_Play"] = 0x1b9d1c + 1,
-                  ["Music_Pause"] = 0x1b9bbe + 1, ["Music_Resume"] = 0x1b9bc2 + 1,
-                  ["Music_SetVolume"] = 0x1b9bc6 + 1}
 local MUSIC_TRACK = 4
 
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
-local function singleton(name)
-    local value = game.read("ptr", sym(name .. "::s_instance"))
-    return value ~= 0 and value or nil
-end
+local singleton = core.singleton
 
 local function id(name)
     return type(name) == "number" and name or hash.name(name)
@@ -57,7 +46,7 @@ function audio.play(name, position)
         game.write("i32", scratch + 8, math.floor(position.z or position[3] or 0))
         at = scratch
     end
-    game.call(sym("CIwSoundManager::Play"), manager, id(name), at, 0, 0)
+    core.call("CIwSoundManager::Play", manager, id(name), at, 0, 0)
     return true
 end
 
@@ -67,7 +56,7 @@ function audio.sequence(name)
     if not manager then
         return false
     end
-    game.call(sym("CSoundSequenceManager::Play"), manager, id(name), 0x1000, 0)
+    core.call("CSoundSequenceManager::Play", manager, id(name), 0x1000, 0)
     return true
 end
 
@@ -81,7 +70,7 @@ function audio.music(file, options)
         return false
     end
     local path = file:find("/", 1, true) and file or "blackops-music/" .. file
-    game.call(sym("Music_Play"), manager, path, options.loop and 1 or 0, options.fade and 0 or 1,
+    core.call("Music_Play", manager, path, options.loop and 1 or 0, options.fade and 0 or 1,
               hook.float_bits(options.volume or 1.0), options.lock and 1 or 0)
     return true
 end
@@ -92,13 +81,14 @@ function audio.music_track()
     return manager and game.read("u32", manager + MUSIC_TRACK) or 0
 end
 
---- Pauses and resumes the music.
+--- Pauses the music.
 function audio.pause_music()
-    game.call(sym("Music_Pause"), singleton("CMusicManager") or 0)
+    core.call("Music_Pause", singleton("CMusicManager") or 0)
     return true
 end
+--- Resumes the music.
 function audio.resume_music()
-    game.call(sym("Music_Resume"), singleton("CMusicManager") or 0)
+    core.call("Music_Resume", singleton("CMusicManager") or 0)
     return true
 end
 
@@ -108,7 +98,7 @@ function audio.music_volume(volume)
     if not manager then
         return false
     end
-    game.call(sym("Music_SetVolume"), manager, math.floor(math.max(0, math.min(1, volume)) * 4096))
+    core.call("Music_SetVolume", manager, math.floor(math.max(0, math.min(1, volume)) * 4096))
     return true
 end
 

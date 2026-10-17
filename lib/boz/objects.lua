@@ -24,8 +24,8 @@
 -- - "enter"/"exit": CIsCollisionObject::OnCollisionEnter/OnCollisionExit (this, other) run
 --   when two collision objects start or stop touching; ghost volumes (triggers) get them too.
 -- - "use": Poi_SendUse runs when the player presses use at the point of interest in reach
---   (entity at CLevelManager +0x214).
--- - "damage": CHealth::Damage(health, amount, attacker) on objects with health.
+--   (boz.map.nearest_poi).
+-- - "damage": CHealth::Damage(health, amount, attacker name hash) on objects with health.
 -- - "hit": CEasterEgg::OnEvent runs when a weapon hits a skull (Hit volumes are made from the
 --   musical easter egg's skulls); for objects with "hit" handlers the game's handling is skipped,
 --   so they stay out of the level's own easter egg.
@@ -33,67 +33,28 @@
 --   +0x5c/+0x60/+0x64 (game centimetres, y up); CIsTransform::UpdateWorld refreshes it when the
 --   transform moved.
 
+local core = require("boz.core")
 local hash = require("boz.hash")
 local components = require("boz.components")
+local map = require("boz.map")
 
 local objects = {}
 
--- Image offsets of what is used here, for clients whose game definition predates these names.
-local FALLBACK = {
-    ["CIsEntityDB::FindEntity"] = 0x0bd514 + 1,
-    ["CIsRenderableModel::SetVisible"] = 0x22c5a8 + 1,
-    ["CIsCollisionObject::Enable"] = 0x052c78 + 1,
-    ["CIsCollisionObject::Disable"] = 0x052df4 + 1,
-    ["CIsCollisionObject::OnCollisionEnter"] = 0x052c10 + 1,
-    ["CIsCollisionObject::OnCollisionExit"] = 0x052c58 + 1,
-    ["NavMesh_SetTagOpen"] = 0x0a3a0c + 1,
-    ["Poi_SendUse"] = 0x19fd48 + 1,
-    ["CHealth::Damage"] = 0x199754 + 1,
-    ["CEasterEgg::OnEvent"] = 0x17cdb8 + 1,
-    ["CIsRenderableModel::s_table"] = 0x4712e4,
-    ["CIsCollisionBox::s_table"] = 0x4519ac,
-    ["CIsCollisionSphere::s_table"] = 0x451da4,
-    ["CIsCollisionCapsule::s_table"] = 0x451aec,
-    ["CIsCollisionMesh::s_table"] = 0x451c50,
-    ["CIsHierarchy::s_table"] = 0x457a5c,
-    ["CEntityFlags::s_table"] = 0x4669cc,
-    ["CAIControllerZombie::s_table"] = 0x460d24,
-    ["CIsTransform::s_table"] = 0x45c2e8,
-    ["CIsTransform::UpdateWorld"] = 0x0c2488 + 1,
-}
-local COLLISION_TABLES = {"CIsCollisionBox::s_table", "CIsCollisionSphere::s_table",
-                          "CIsCollisionCapsule::s_table", "CIsCollisionMesh::s_table"}
-local LEVEL_PLAYER = 0x1a0      -- CLevelManager: the local player's entity
-local LEVEL_NEAREST_POI = 0x214 -- CLevelManager: the point of interest in reach
+local COLLISION_CLASSES = {"CIsCollisionBox", "CIsCollisionSphere", "CIsCollisionCapsule", "CIsCollisionMesh"}
 local LEVEL_NAVMESH = 0x290     -- CLevelManager: the level's NavMesh resource
 local COMPONENT_ENTITY = 0xc
 local ENTITY_ID = 4
 local HIERARCHY_CHILDREN = 0x24
 local TRANSFORM_POSITION = 0x5c
 
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
-local function find_component(table_name, entity)
+local function find_component(class_name, entity)
     if entity == 0 then
         return nil
     end
-    local found = game.call("CIsComponentTableBase::Find", sym(table_name),
-                            game.read("u32", entity + ENTITY_ID))
-    return found ~= 0 and found or nil
+    return components.find(class_name, game.read("u32", entity + ENTITY_ID))
 end
 
-local function level_manager()
-    local level = game.read("ptr", "CLevelManager::s_instance")
-    return level ~= 0 and level or nil
-end
-
--- The current level, to drop cached entities when another one loads.
-local function level_key()
-    local level = level_manager()
-    return level and game.read("ptr", level + LEVEL_PLAYER) or 0
-end
+local level_key = map.level_key
 
 local Object = {}
 Object.__index = Object
@@ -131,7 +92,7 @@ function Object:entity_pointer()
     local key = level_key()
     if self.level ~= key or (key ~= 0 and self.entity == 0) then
         self.level = key
-        self.entity = key ~= 0 and game.call(sym("CIsEntityDB::FindEntity"), self.hash) or 0
+        self.entity = key ~= 0 and core.call("CIsEntityDB::FindEntity", self.hash) or 0
     end
     return self.entity
 end
@@ -147,7 +108,7 @@ local function each_entity(entity, fn, depth)
         return
     end
     fn(entity)
-    local hierarchy = find_component("CIsHierarchy::s_table", entity)
+    local hierarchy = find_component("CIsHierarchy", entity)
     if not hierarchy then
         return
     end
@@ -170,9 +131,9 @@ end
 --- Shows or hides the object's models (its collision and behaviour stay). Returns the object.
 function Object:set_visible(visible)
     each_entity(self:entity_pointer(), function(entity)
-        local model = find_component("CIsRenderableModel::s_table", entity)
+        local model = find_component("CIsRenderableModel", entity)
         if model then
-            game.call(sym("CIsRenderableModel::SetVisible"), model, visible and 1 or 0)
+            core.call("CIsRenderableModel::SetVisible", model, visible and 1 or 0)
         end
     end)
     return self
@@ -191,12 +152,12 @@ end
 --- Switches the object's collision on or off (players and bullets pass through it when off).
 --- Returns the object.
 function Object:set_collision(enabled)
-    local target = sym(enabled and "CIsCollisionObject::Enable" or "CIsCollisionObject::Disable")
+    local target = enabled and "CIsCollisionObject::Enable" or "CIsCollisionObject::Disable"
     local function switch(entity)
-        for _, table_name in ipairs(COLLISION_TABLES) do
-            local shape = find_component(table_name, entity)
+        for _, class_name in ipairs(COLLISION_CLASSES) do
+            local shape = find_component(class_name, entity)
             if shape then
-                game.call(target, shape)
+                core.call(target, shape)
             end
         end
     end
@@ -206,11 +167,24 @@ function Object:set_collision(enabled)
     return self
 end
 
+-- Doors call NavMesh_SetTagOpen when they start: the navmesh it is given keeps this working if
+-- the level manager's pointer moves in another game version.
+local function capture_navmesh()
+    if captured_navmesh ~= nil then
+        return
+    end
+    captured_navmesh = false
+    hook.add(core.sym("NavMesh_SetTagOpen"), {before = function(call)
+        captured_navmesh = {resource = call:arg(1), level = level_key()}
+    end})
+end
+
 local function navmesh()
+    capture_navmesh()
     if captured_navmesh and captured_navmesh.level == level_key() then
         return captured_navmesh.resource
     end
-    local level = level_manager()   -- Level_Load stores the NavMesh resource here
+    local level = map.level_manager()   -- Level_Load stores the NavMesh resource here
     local resource = level and game.read("ptr", level + LEVEL_NAVMESH) or 0
     return resource ~= 0 and resource or nil
 end
@@ -222,7 +196,7 @@ function objects.set_navmesh(tag, open)
     if not resource then
         return false
     end
-    game.call(sym("NavMesh_SetTagOpen"), resource, hash.name(tag), open and 1 or 0)
+    core.call("NavMesh_SetTagOpen", resource, hash.name(tag), open and 1 or 0)
     return true
 end
 
@@ -243,22 +217,18 @@ function Object:close_navmesh()
     return self:set_navmesh(false)
 end
 
--- Positions
-
 --- The world position of a CIsTransform component: {x, y, z} in game centimetres (y is up).
 function objects.transform_position(transform)
     if transform == 0 then
         return nil
     end
-    game.call(sym("CIsTransform::UpdateWorld"), transform)
-    return {x = game.read("f32", transform + TRANSFORM_POSITION),
-            y = game.read("f32", transform + TRANSFORM_POSITION + 4),
-            z = game.read("f32", transform + TRANSFORM_POSITION + 8)}
+    core.call("CIsTransform::UpdateWorld", transform)
+    return core.read_vec3(transform + TRANSFORM_POSITION)
 end
 
 --- The world position of an entity (pointer), or nil when it has no transform.
 function objects.position_of(entity)
-    local transform = find_component("CIsTransform::s_table", entity or 0)
+    local transform = find_component("CIsTransform", entity or 0)
     return transform and objects.transform_position(transform)
 end
 
@@ -296,8 +266,6 @@ function Object:near(target, distance)
     return d ~= nil and d <= distance
 end
 
--- Event plumbing: one hook per event type, installed when the first handler is added.
-
 local function object_of(entity)
     if entity == 0 then
         return nil
@@ -331,12 +299,10 @@ local function root_object(entity)
 end
 
 local function who_is(entity)
-    local level = level_manager()
-    local player = level and game.read("ptr", level + LEVEL_PLAYER) or 0
     return {
         entity = entity,
-        player = entity ~= 0 and entity == player,
-        zombie = find_component("CAIControllerZombie::s_table", entity) ~= nil,
+        player = entity ~= 0 and entity == map.player(),
+        zombie = find_component("CAIControllerZombie", entity) ~= nil,
     }
 end
 
@@ -354,7 +320,7 @@ local function fire(event, object, ...)
 end
 
 local function collision_hook(event, target)
-    hook.add(sym(target), {before = function(call)
+    hook.add(core.sym(target), {before = function(call)
         local this, other = call:arg(1), call:arg(2)
         if this == 0 or other == 0 then
             return
@@ -370,34 +336,31 @@ local INSTALL = {
     enter = function() collision_hook("enter", "CIsCollisionObject::OnCollisionEnter") end,
     exit = function() collision_hook("exit", "CIsCollisionObject::OnCollisionExit") end,
     use = function()
-        hook.add(sym("Poi_SendUse"), {before = function()
-            local level = level_manager()
-            local entity = level and game.read("ptr", level + LEVEL_NEAREST_POI) or 0
-            -- The game keeps an entity pointer here (CIsEntityDB::GetEntity reads its +4).
-            local object = object_of(entity)
+        hook.add(core.sym("Poi_SendUse"), {before = function()
+            local object = object_of(map.nearest_poi())
             if object then
-                fire("use", object, who_is(game.read("ptr", level + LEVEL_PLAYER)))
+                fire("use", object, who_is(map.player() or 0))
             end
         end})
     end,
     hit = function()
-        hook.add(sym("CEasterEgg::OnEvent"), {before = function(call)
+        hook.add(core.sym("CEasterEgg::OnEvent"), {before = function(call)
             local egg = call:arg(1)
             local object = egg ~= 0 and object_of(game.read("ptr", egg + COMPONENT_ENTITY))
             if object and handlers.hit and handlers.hit[object] then
-                local level = level_manager()
-                fire("hit", object, who_is(level and game.read("ptr", level + LEVEL_PLAYER) or 0))
+                fire("hit", object, who_is(map.player() or 0))
                 call:skip()
             end
         end})
     end,
     damage = function()
-        hook.add(sym("CHealth::Damage"), {before = function(call)
+        hook.add(core.sym("CHealth::Damage"), {before = function(call)
             local health = call:arg(1)
             local object = health ~= 0 and object_of(game.read("ptr", health + COMPONENT_ENTITY))
             if object then
-                fire("damage", object, {amount = call:arg_signed(2),
-                                        attacker = who_is(call:arg(3))})
+                local attacker = call:arg(3)
+                local entity = attacker ~= 0 and require("boz.entities").find(attacker) or 0
+                fire("damage", object, {amount = call:arg_signed(2), attacker = who_is(entity or 0)})
             end
         end})
     end,
@@ -424,11 +387,5 @@ end
 function objects.on(name, event, fn)
     return objects.get(name):on(event, fn)
 end
-
--- Doors call NavMesh_SetTagOpen when they start: remember the navmesh in case the level
--- manager's pointer moves in another game version.
-hook.add(sym("NavMesh_SetTagOpen"), {before = function(call)
-    captured_navmesh = {resource = call:arg(1), level = level_key()}
-end})
 
 return objects

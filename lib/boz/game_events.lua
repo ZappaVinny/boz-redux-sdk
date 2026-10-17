@@ -8,7 +8,8 @@
 -- Handlers get {name, id, subject, sender, a, b}: the subject that sent it (a CIsSubject inside
 -- a manager or component), the object it is on behalf of, and the event's two arguments (their
 -- meaning is per event: docs/game-events.md). A handler that returns true stops the event (no
--- observer gets it): use with care.
+-- observer gets it): use with care. Most events reach several subjects (the sender's, then the
+-- managers' that pass it on); on()'s dedupe options call a handler once per event.
 --
 -- How it works: every event passes through CIsSubject::Dispatch(subject, event, a, b, sender),
 -- which calls the observers subscribed to it; this hooks Dispatch while anything listens (a hook
@@ -17,10 +18,8 @@
 
 local game_events = {}
 
+local core = require("boz.core")
 local hash = require("boz.hash")
-
-local DISPATCH = 0x0c1194 + 1           -- CIsSubject::Dispatch (Thumb), for older game definitions
-local NOTIFY_VIRTUAL = 0x0c12f8 + 1     -- CIsSubject::NotifyVirtual
 
 local names_by_id = nil
 local listeners = {}        -- id -> {fn = true}; 0 -> every event
@@ -85,17 +84,43 @@ end
 
 local function ensure_hook()
     if hook_handle == nil and count > 0 then
-        hook_handle = hook.add(game.symbol("CIsSubject::Dispatch") or (game.base() + DISPATCH),
-                               {before = on_dispatch})
+        hook_handle = hook.add(core.sym("CIsSubject::Dispatch"), {before = on_dispatch})
     elseif hook_handle ~= nil and count == 0 then
         hook.remove(hook_handle)
         hook_handle = nil
     end
 end
 
+local frame, counting = 0, false
+
+-- fn, called once per event: the same key (default: the event's arguments) within `frames`
+-- frames (math.huge: ever) is the same event.
+local function deduplicated(fn, key_of, frames)
+    if not counting then
+        counting = true
+        events.on("frame", function() frame = frame + 1 end)
+    end
+    local seen = {}
+    return function(event)
+        local key = key_of and key_of(event) or (tostring(event.a) .. ":" .. tostring(event.b))
+        local last = seen[key]
+        if last and frame - last <= frames then
+            return
+        end
+        seen[key] = frame
+        return fn(event)
+    end
+end
+
 --- Calls fn(event) every time the game sends the event (a name, or "*" for every event: slow,
---- for exploring). Returns a handle for off().
-function game_events.on(name, fn)
+--- for exploring). Options: dedupe_frames (call fn once for an event that reaches several
+--- subjects: the same event within this many frames is skipped; math.huge: once ever),
+--- dedupe_key (fn(event) -> what makes two events the same; default its two arguments).
+--- Returns a handle for off().
+function game_events.on(name, fn, options)
+    if options and (options.dedupe_frames or options.dedupe_key) then
+        fn = deduplicated(fn, options.dedupe_key, options.dedupe_frames or 1)
+    end
     local id = name == "*" and 0 or game_events.id(name)
     listeners[id] = listeners[id] or {}
     listeners[id][fn] = true
@@ -123,8 +148,7 @@ function game_events.send(subject, name, a, b, c)
     if not subject or subject == 0 then
         return false
     end
-    game.call(game.symbol("CIsSubject::NotifyVirtual") or (game.base() + NOTIFY_VIRTUAL),
-              subject, game_events.id(name), a or 0, b or 0, c or 0)
+    core.call("CIsSubject::NotifyVirtual", subject, game_events.id(name), a or 0, b or 0, c or 0)
     return true
 end
 

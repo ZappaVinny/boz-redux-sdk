@@ -12,20 +12,18 @@
 
 local game_rules = {}
 
-local LEVEL_NAME = 0x55                 -- CLevelManager: the level's name
-local LEVEL_LOAD = 0x1aae4c + 1         -- Level_Load (Thumb), when the gamedef has no name
-local REPEAT_HEALTH = 0x2142cc + 1      -- CWaveRepeatable::GetZombieHealth(wave, round)
-local STRING_EQUALS = 0x18cc3c + 1      -- String_Equals(a, b): the level manager's level name checks
+local core = require("boz.core")
+local map = require("boz.map")
+
 local BEHAVES_LIKE = {kino = true, ascension = true, callofthedead = true}
-local WAVE_HEALTH, WAVE_HEALTH_MULT, WAVE_START = 0x78, 0xa4, 0xac
+local WAVE_HEALTH, WAVE_HEALTH_MULT, WAVE_START = 0x78, 0xa4, 0xac   -- CWaveRepeatable
 
 local started = false
 local saved = {}          -- cvar -> the game's value before the map changed it
 local active = false      -- the map's level is the one loaded
 
 local function level_name()
-    local level = game.read("ptr", "CLevelManager::s_instance")
-    return level ~= 0 and string.lower(game.read("string", level + LEVEL_NAME, 64) or "") or ""
+    return map.name() or ""
 end
 
 --- True while the map's own level is loaded (after start()).
@@ -62,14 +60,12 @@ function game_rules.start(data)
     started = true
     local wanted = string.lower(data.level or "")
     local cvars = data.cvars or {}
-    local target = game.symbol("Level_Load") or (game.base() + LEVEL_LOAD)
-    hook.add(target, {before = function()
+    hook.add(core.sym("Level_Load"), {before = function()
         active = wanted == "" or level_name() == wanted
         set_cvars(cvars, active)
     end})
     if data.grow_health then
-        local health = game.symbol("CWaveRepeatable::GetZombieHealth") or (game.base() + REPEAT_HEALTH)
-        hook.add(health, {after = function(call)
+        hook.add(core.sym("CWaveRepeatable::GetZombieHealth"), {after = function(call)
             if not active then
                 return
             end
@@ -87,30 +83,20 @@ function game_rules.start(data)
         -- The level manager's own checks of the level's name (String_Equals: Ascension's round
         -- effects, Call of the Dead's snow camera and start, Kino's teleport start) answer as if
         -- the map were that one. Checks the game makes with strcmp elsewhere stay the map's own.
-        local equals = game.symbol("String_Equals") or (game.base() + STRING_EQUALS)
-        hook.add(equals, {after = function(call)
+        hook.add(core.sym("String_Equals"), {after = function(call)
             if not active or call:result() ~= 0 then
                 return
             end
-            local level = game.read("ptr", "CLevelManager::s_instance")
-            if level ~= 0 and call:arg(1) == level + LEVEL_NAME and
+            if call:arg(1) == map.name_address() and
                     string.lower(game.read("string", call:arg(2), 32) or "") == like then
                 call:set_result(1)
             end
         end})
     end
     if data.power_on then
-        local objects = require("boz.objects")
-        local powered = nil
-        events.on("frame", function()
-            local level = objects.level()
-            if level == 0 then
-                powered = nil
-                return
-            end
-            if level ~= powered and active then
-                powered = level
-                require("boz.console").exec("SwitchPowerOn")
+        map.on_level_start(function()
+            if active then
+                map.power_on()
             end
         end)
     end

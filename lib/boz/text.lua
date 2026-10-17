@@ -9,11 +9,13 @@
 -- How it works: menus and labels hash the id and ask Localise_GetString for the text; a hook
 -- answers for the mod's ids.
 
+local core = require("boz.core")
 local hash = require("boz.hash")
 
 local text = {}
 
 local strings = {}   -- id hash -> address of the text (kept for the whole session)
+local cstrings = {}  -- text -> address
 local hooked = false
 
 local function store(value)
@@ -24,13 +26,24 @@ local function store(value)
     return address
 end
 
+--- The address of a zero-terminated copy of a text in game memory, for game functions that keep
+--- the pointer (labels, prompts). The same text gives the same address; it is never freed.
+function text.cstring(value)
+    local address = cstrings[value]
+    if not address then
+        address = store(value)
+        cstrings[value] = address
+    end
+    return address
+end
+
 --- Adds (or replaces) the text for a string id. Returns the id's hash.
 function text.add(id, value)
     local h = hash.name(id)
     strings[h] = store(value)
     if not hooked then
         hooked = true
-        hook.add("Localise_GetString", {before = function(call)
+        hook.add(core.sym("Localise_GetString"), {before = function(call)
             local address = strings[call:arg(1)]
             if address then
                 call:skip(address)

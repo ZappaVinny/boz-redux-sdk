@@ -3,6 +3,7 @@
 --   score.get()          the player's points        score.add(500)   score.spend(950)
 --   score.set(10000)     score.points_for("SUBJECT_ZOMBIE_SCORE_KILL_HEAD")
 --   score.on_change(fn)  fn(points, delta) after every change
+--   score.free_purchases(3)   purchases cost nothing for 3 seconds
 --
 -- How it works: CScoreManager (singleton) keeps each player's points in a map keyed by the
 -- player's name hash (Entity_GetNameHash of its entity record; +0x40; earned points for stats at
@@ -14,33 +15,21 @@
 
 local score = {}
 
-local FALLBACK = {["CScoreManager::s_instance"] = 0x461080, ["CScoreManager::GetLocalScore"] = 0x1f6148 + 1,
-                  ["CScoreManager::AddScore"] = 0x1f73e0 + 1, ["CScoreManager::OnScoreChanged"] = 0x1f61c0 + 1,
-                  ["CScoreManager::GetConfig"] = 0x1f77e0 + 1, ["ScoreConfig_GetScore"] = 0x1f632e + 1}
-
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
-local function call(...)
-    return (game.call(...) or 0) & 0xffffffff
-end
+local core = require("boz.core")
 
 --- The score manager (CScoreManager), or nil outside a match.
 function score.manager()
-    local manager = game.read("ptr", sym("CScoreManager::s_instance"))
-    return manager ~= 0 and manager or nil
+    return core.singleton("CScoreManager")
 end
 
 local function player_id()
-    local player = require("boz.components").local_player()
-    return player and require("boz.entities").name_hash(player) or nil
+    return require("boz.player").name_hash()
 end
 
 --- The local player's points, or nil outside a match.
 function score.get()
     local manager = score.manager()
-    return manager and call(sym("CScoreManager::GetLocalScore"), manager) or nil
+    return manager and core.call("CScoreManager::GetLocalScore", manager) or nil
 end
 
 --- Gives the player points (negative takes them, never below 0). counts: also count them as
@@ -50,7 +39,7 @@ function score.add(points, counts)
     if not manager or not id then
         return nil
     end
-    call(sym("CScoreManager::AddScore"), manager, id, math.floor(points) & 0xffffffff, counts and 1 or 0)
+    core.call("CScoreManager::AddScore", manager, id, math.floor(points) & 0xffffffff, counts and 1 or 0)
     return score.get()
 end
 
@@ -79,11 +68,11 @@ function score.points_for(action)
     if not manager then
         return nil
     end
-    local config = call(sym("CScoreManager::GetConfig"), manager)
+    local config = core.call("CScoreManager::GetConfig", manager)
     if config == 0 then
         return 0
     end
-    return call(sym("ScoreConfig_GetScore"), config, require("boz.hash").name(action))
+    return core.call("ScoreConfig_GetScore", config, require("boz.hash").name(action))
 end
 
 local changes, hooked = {}, false
@@ -93,7 +82,7 @@ function score.on_change(fn)
     table.insert(changes, fn)
     if not hooked then
         hooked = true
-        hook.add(sym("CScoreManager::OnScoreChanged"), {after = function(c)
+        hook.add(core.sym("CScoreManager::OnScoreChanged"), {after = function(c)
             local id = player_id()
             if id and c:arg(3) == id then
                 for _, handler in ipairs(changes) do
@@ -103,6 +92,34 @@ function score.on_change(fn)
         end})
     end
     return fn
+end
+
+local free = {left = 0, before = nil, watching = false}
+
+local function count_down(dt)
+    if free.left <= 0 then
+        return
+    end
+    free.left = free.left - (dt or 0)
+    if free.left <= 0 then
+        require("boz.console").register("UnlimitedScore", free.before or "false", "bool")
+        free.before = nil
+    end
+end
+
+--- Makes purchases cost nothing for `seconds` from now (the UnlimitedScore cvar: the score
+--- manager skips every charge), then restores the cvar. Calling it again extends the time.
+function score.free_purchases(seconds)
+    local console = require("boz.console")
+    if free.left <= 0 then
+        free.before = console.get("UnlimitedScore") or "false"
+        console.register("UnlimitedScore", "true", "bool")
+    end
+    free.left = math.max(free.left, seconds)
+    if not free.watching then
+        free.watching = true
+        events.on("frame", count_down)
+    end
 end
 
 return score

@@ -1,59 +1,10 @@
 -- boz.weapons and weapon scripts against a fake game: lua5.4 lib/tests/weapons_test.lua (from the
 -- SDK root).
-package.path = "lib/?.lua;" .. package.path
-
-local memory, symbols, functions, hooks, calls, frames = {}, {}, {}, {}, {}, {}
-local next_symbol = 0x1000
-
-local function address(name)
-    if not symbols[name] then
-        next_symbol = next_symbol + 0x10
-        symbols[name] = next_symbol
-    end
-    return symbols[name]
-end
-
-game = {
-    base = function() return 0x4a000000 end,
-    symbol = function(name) return address(name) end,
-    read = function(_, at)
-        if type(at) == "string" then at = address(at) end
-        return memory[at] or 0
-    end,
-    write = function(_, at, value) memory[at] = value end,
-    alloc = function(size) return 0x900000 end,
-    call = function(target, ...)
-        if type(target) == "string" then target = address(target) end
-        for name, at in pairs(symbols) do
-            if at == target and functions[name] then
-                table.insert(calls, {name, ...})
-                return functions[name](...)
-            end
-        end
-        error("unexpected call " .. tostring(target))
-    end,
-}
-hook = {add = function(target, handlers)
-    hooks[target] = hooks[target] or {}
-    table.insert(hooks[target], handlers)
-end}
-events = {on = function(name, fn) if name == "frame" then table.insert(frames, fn) end end}
-function log(message) print("log: " .. message) end
-settings = {get = function(_, default) return default end, set = function() end}
-
-local function run_hook(name, args)
-    for _, handlers in ipairs(hooks[address(name)] or {}) do
-        if handlers.before then
-            handlers.before({arg = function(_, i) return args[i] or 0 end,
-                             arg_signed = function(_, i) return args[i] or 0 end,
-                             skip = function() end})
-        end
-    end
-end
-
-local function check(condition, message)
-    if not condition then error("FAILED: " .. message, 2) end
-end
+package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+local fake = require("fake_game").install({strict = true})
+local memory, symbols, functions, hooks, calls, frames = fake.memory, fake.symbols, fake.functions, fake.hooks,
+    fake.calls, fake.frames
+local address, run_hook, frame, check, called = fake.address, fake.run_hook, fake.frame, fake.check, fake.called
 
 local hash = require("boz.hash")
 local LEVEL, PLAYER, MANAGER = 0x8000, 0x8100, 0xa000
@@ -71,7 +22,7 @@ local components = require("boz.components")
 components.each = function(tbl)
     local done = false
     return function()
-        if not done and tbl == address("CWeaponManager::s_table") then done = true; return MANAGER end
+        if not done and (tbl == "CWeaponManager" or tbl == address("CWeaponManager::s_table")) then done = true; return MANAGER end
     end
 end
 components.local_player = function() return PLAYER, 1 end
@@ -138,9 +89,12 @@ run_hook("CPlayerController::FireWeapon", {})
 run_hook("CWeaponManager::SetReloading", {MANAGER, 1, 1})
 check(seen.fire == 7 and seen.reload, "on_fire (clip) and on_reload")
 check(table.concat(bus, " ") == "equipped:mp40_heavy fired:mp40_heavy", "bus events (" .. table.concat(bus, " ") .. ")")
+memory[HEAVY + 0x2c] = 6
+run_hook("CPlayerController::FireWeaponAimed", {})
+check(seen.fire == 6, "an aimed shot fires too")
 memory[MANAGER + 0x1e0] = MP40
 run_hook("CPlayerController::FireWeapon", {})
-check(seen.fire == 7, "another weapon's shots do not reach this script")
+check(seen.fire == 6, "another weapon's shots do not reach this script")
 os.execute("rm -rf " .. dir)
 
 -- The starting weapon: set right before the game gives it, on this map only.

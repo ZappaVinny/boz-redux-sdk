@@ -15,6 +15,7 @@
 
 local stats = {}
 
+local core = require("boz.core")
 local hash = require("boz.hash")
 
 stats.NAMES = {"STAT_ZOMBIESKILLED", "STAT_HEADSHOTS", "STAT_REVIVED", "STAT_COMRADESREVIVED",
@@ -27,28 +28,14 @@ stats.ACHIEVEMENTS = {"BOCanYouFlyBobby", "BOCanineCaution", "BOChimpOnBarbie", 
                       "BOQuietOnSet", "BORagingRomero", "BORussianRoulette", "BOThrustMaster",
                       "BOWeHaveAProblem", "BOWhackAZombie"}
 
-local FALLBACK = {["CStatsManager::s_instance"] = 0x46107c, ["CAchievementDB::s_instance"] = 0x461088,
-                  ["Stats_Get"] = 0x19e554 + 1, ["Stats_Add"] = 0x1fcb7a + 1, ["Stats_GetMode"] = 0x1fc760 + 1,
-                  ["Achievement_SetProgress"] = 0x11ce00 + 1}
 local TARGET, PROGRESS = 0x24, 0x28
 
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
-local function call(...)
-    return (game.call(...) or 0) & 0xffffffff
-end
-
-local function singleton(name)
-    local value = game.read("ptr", sym(name .. "::s_instance"))
-    return value ~= 0 and value or nil
-end
+local singleton = core.singleton
 
 --- A stat's value (this mode's), or nil when the game has no stats manager.
 function stats.get(name)
     local manager = singleton("CStatsManager")
-    return manager and call(sym("Stats_Get"), manager, name) or nil
+    return manager and core.call("Stats_Get", manager, name) or nil
 end
 
 --- Adds to a stat. Returns the new value.
@@ -57,7 +44,7 @@ function stats.add(name, amount)
     if not manager then
         return nil
     end
-    call(sym("Stats_Add"), manager, call(sym("Stats_GetMode")), hash.name(name), math.floor(amount) & 0xffffffff)
+    core.call("Stats_Add", manager, core.call("Stats_GetMode"), hash.name(name), math.floor(amount) & 0xffffffff)
     return stats.get(name)
 end
 
@@ -89,7 +76,7 @@ function stats.set_progress(name, value)
     if not a then
         return false
     end
-    call(sym("Achievement_SetProgress"), a, math.floor(value))
+    core.call("Achievement_SetProgress", a, math.floor(value))
     return true
 end
 

@@ -17,7 +17,7 @@ client set up with the game. No C, Ghidra or reverse engineering is needed for m
 | Layer | What it is | You |
 | --- | --- | --- |
 | **Client** | The program that runs the game: emulator, window, sound, controls, file loading, and the Lua runtime with its low-level functions (`game`, `hook`, `events`, `ui`, ...). | use it |
-| **Standard lib** (`boz.*`) | Lua modules that turn the game's internals into plain functions: `player.set_fov(90)`, `pause_settings.add_slider{...}`, `console.set(...)`. | use it |
+| **Standard lib** (`boz.*`) | Lua modules that turn the game's internals into plain functions: `camera.set_fov(90)`, `pause_settings.add_slider{...}`, `console.set(...)`. | use it |
 | **Your mod** | A folder with a manifest, scripts and optional replacement files. | write it |
 
 Two rules keep mods working and keep official project history clean:
@@ -167,12 +167,12 @@ Values are strings, numbers or booleans.
 
 ### Add a setting to the pause menu
 
-The pause menu's Settings page gets new rows that look exactly like the game's own. This is
-the Redux mod's field of view setting, complete:
+The pause menu's Settings page gets new rows that look exactly like the game's own. This is a
+field of view setting, complete:
 
 ```lua
 local pause_settings = require("boz.pause_settings")
-local player = require("boz.player")
+local camera = require("boz.camera")
 
 local function saved_fov()
     local value = settings.get("fov")
@@ -186,11 +186,11 @@ pause_settings.add_slider{
     get = saved_fov,
     set = function(value)
         settings.set("fov", value)
-        player.set_fov(value)
+        camera.set_fov(value)
     end,
 }
 
-player.set_fov(saved_fov())   -- apply the saved value from the start
+camera.set_fov(saved_fov())   -- apply the saved value from the start
 ```
 
 A checkbox works the same way:

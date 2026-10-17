@@ -18,9 +18,10 @@
 
 local iwui = require("boz.iwui")
 local text = require("boz.text")
-local hash = require("boz.hash")
 
 local pause_settings = {}
+
+local core = require("boz.core")
 
 local FULL = 4096              -- the page's sliders run 0..4096
 local COLUMN_GAP = 1.15        -- the new column starts this many slider widths right of the game's
@@ -199,20 +200,17 @@ local function call_set(entry, value)
 end
 
 local function play_click()
-    local sound = game.read("ptr", "CIwSoundManager::s_instance")
-    if sound ~= 0 then
-        game.call("CIwSoundManager::Play", sound, hash.name("menu_press"), 0, 0, 0)
-    end
+    require("boz.audio").play("menu_press")
 end
 
 local function install()
     installed = true
-    hook.add("CIngameStateOptions::Enter", {after = build_page})
-    hook.add("CIngameStateOptions::Exit", {before = function()
+    hook.add(core.sym("CIngameStateOptions::Enter"), {after = build_page})
+    hook.add(core.sym("CIngameStateOptions::Exit"), {before = function()
         live = {}
         built_panel = nil
     end})
-    hook.add("CIngameStateOptions::OnLODChanged", {before = function(call)
+    hook.add(core.sym("CIngameStateOptions::OnLODChanged"), {before = function(call)
         local entry = live[call:arg(2)]
         if entry then
             local fraction = math.max(0, math.min(1, call:arg_signed(3) / FULL))
@@ -224,7 +222,7 @@ local function install()
             call:skip()
         end
     end})
-    hook.add("CIngameStateOptions::OnAutoAim", {before = function(call)
+    hook.add(core.sym("CIngameStateOptions::OnAutoAim"), {before = function(call)
         local entry = live[call:arg(2)]
         if entry then
             local ok, on = pcall(entry.get)

@@ -13,58 +13,49 @@
 -- (CPerk +0x7c powered, +0x7d lit, and the machine's own "power_switch_on" event for its lights
 -- and jingle).
 
+local core = require("boz.core")
 local hash = require("boz.hash")
+local map = require("boz.map")
 
 local world = {}
 
 local NO_POWER = hash.name("boz_no_power")
 local POWER_ON = hash.name("power_switch_on")
--- CPerk::Init (component vtable slot 22) and its fields, from the 1.0.11 image.
-local PERK_INIT_OFFSET = 0x1ca960 + 1   -- Thumb
-local PERK_POWER_SWITCH = 0x90          -- powerSwitch (reflected)
+local PERK_POWER_SWITCH = 0x90          -- CPerk powerSwitch (reflected)
 local PERK_POWERED = 0x7c               -- checked by CPerk::Interact
 local PERK_LIT = 0x7d
 local PERK_SUBJECT = 0x20               -- the machine's CIsNetworkSubject
+-- What the game gives on other maps (the PlayerStartWeapon and PlayerStartAmmo defaults).
+local GAME_START_WEAPON, GAME_START_AMMO = "colt45", 40
 
 local started = false
-local applied_level = nil
-
-local function perk_init_address()
-    return game.symbol("CPerk::Init") or (game.base() + PERK_INIT_OFFSET)
-end
 
 local function power_unpowered_perks()
-    hook.add(perk_init_address(), {after = function(call)
+    hook.add(core.sym("CPerk::Init"), {after = function(call)
         local perk = call:arg(1)
         if game.read("u32", perk + PERK_POWER_SWITCH) ~= NO_POWER then
             return
         end
         game.write("u8", perk + PERK_POWERED, 1)
         game.write("u8", perk + PERK_LIT, 1)
-        game.call("CIsSubject::NotifyVirtual", perk + PERK_SUBJECT, POWER_ON, 0, 0, 0)
+        core.call("CIsSubject::NotifyVirtual", perk + PERK_SUBJECT, POWER_ON, 0, 0, 0)
     end})
 end
 
 -- The weapon players start with: WeaponManager_GiveStartWeapons gives the PlayerStartWeapon
 -- cvar's weapon with PlayerStartAmmo spare rounds (the game registers both when the first player
 -- spawns; registering them first makes a value stick). Set just before it runs, on this map only:
--- the mod stays enabled on other maps, which get the game's Colt and 40 rounds back.
-local START_GIVE_OFFSET = 0x220a24 + 1
-local LEVEL_NAME = 0x55   -- CLevelManager: the level's name
-
+-- the mod stays enabled on other maps, which get the game's own back.
 local function start_weapon(data)
     local wanted = data.start_weapon
     if type(wanted) ~= "table" or not wanted.name then
         return
     end
     local console = require("boz.console")
-    local target = game.symbol("WeaponManager_GiveStartWeapons") or (game.base() + START_GIVE_OFFSET)
-    hook.add(target, {before = function()
-        local level = game.read("ptr", "CLevelManager::s_instance")
-        local name = level ~= 0 and game.read("string", level + LEVEL_NAME, 64) or ""
-        local ours = wanted.level == nil or string.lower(name) == string.lower(wanted.level)
-        console.register("PlayerStartWeapon", ours and wanted.name or "colt45", "string")
-        console.register("PlayerStartAmmo", tostring(ours and (wanted.reserve or 40) or 40), "int")
+    hook.add(core.sym("WeaponManager_GiveStartWeapons"), {before = function()
+        local ours = wanted.level == nil or map.name() == string.lower(wanted.level)
+        console.register("PlayerStartWeapon", ours and wanted.name or GAME_START_WEAPON, "string")
+        console.register("PlayerStartAmmo", tostring(ours and (wanted.reserve or GAME_START_AMMO) or GAME_START_AMMO), "int")
     end})
 end
 
@@ -78,16 +69,7 @@ local function start_state()
     require("boz.hooks").start(data.hooks)
     local objects = require("boz.objects")
     local prefabs = require("boz.prefabs")
-    events.on("frame", function()
-        local level = objects.level()
-        if level == 0 then
-            applied_level = nil   -- between levels: the next one starts fresh
-            return
-        end
-        if level == applied_level then
-            return
-        end
-        applied_level = level
+    map.on_level_start(function()
         for _, name in ipairs(data.hidden or {}) do
             objects.get(name):hide()
         end

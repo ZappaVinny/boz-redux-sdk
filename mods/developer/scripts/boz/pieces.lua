@@ -12,32 +12,31 @@
 -- piece:send(event), piece:cost(), piece:use_free() (opens, buys, spins without points); boxes
 -- :spawn_box() / :despawn_box() (pieces.move_box(to)), Pack-a-Punch
 -- :spawn_pack_a_punch() / :despawn_pack_a_punch(), barricades :fix_barricade()
--- (pieces.fix_all_barricades()).
+-- (pieces.fix_all_barricades()), doors :is_open() (pieces.open_all_doors()).
 -- The fields are the game's (reflected): docs/toolkit-fields.md explains them; boz.reflect has the
 -- rest.
 --
 -- How it works: each kind is a component class (its table lists them). "Use" is what the game does
--- when the player presses use at a point of interest (Poi_SendUse: the entity at CLevelManager
--- +0x214 broadcasts the interact event with the player's name hash); the piece reacts as if the
--- player used it (paying, opening, buying).
+-- when the player presses use at a point of interest (Poi_SendUse: the point of interest in reach,
+-- boz.map.nearest_poi, broadcasts the interact event with the player's name hash); the piece
+-- reacts as if the player used it (checking the points, paying, opening, buying). A free use
+-- credits the cost first (the piece checks the points a frame before it charges them), uses it a
+-- frame later with purchases free (boz.score.free_purchases) and takes the credit back.
 
 local pieces = {}
 
+local core = require("boz.core")
 local reflect = require("boz.reflect")
 local entities = require("boz.entities")
-local components = require("boz.components")
+local map = require("boz.map")
 
 pieces.CLASSES = {"CMysteryBox", "CPerk", "CDoor", "CTrap", "CTrapSwitch", "CWeaponChalkOutline",
                   "CPackAPunch", "CPowerSwitch", "CBarricade", "CLunarLander", "CLunarLanderStation",
                   "CTurret", "CFlinger", "CTeleporter", "CTeleportMainframe", "CCentrifuge", "CLighthouse",
                   "CRocketLauncher", "CMonkeyLander", "CZipLine", "CEasterEgg"}
 
-local FALLBACK = {["Poi_SendUse"] = 0x19fd48 + 1}
-local NEAREST_POI = 0x214
-
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
+--- A door's m_DoorState when it is open.
+pieces.DOOR_OPEN = 2
 
 local Piece = {}
 Piece.__index = Piece
@@ -74,14 +73,12 @@ end
 --- Uses it as the player would (the game charges the cost and does the rest). Returns true when
 --- the use was sent.
 function Piece:use()
-    local level = game.read("ptr", "CLevelManager::s_instance")
-    if level == 0 then
+    local before = map.set_nearest_poi(self.entity)
+    if not before then
         return false
     end
-    local before = game.read("u32", level + NEAREST_POI)
-    game.write("u32", level + NEAREST_POI, self.entity)
-    game.call(sym("Poi_SendUse"), 0, 0)
-    game.write("u32", level + NEAREST_POI, before)
+    core.call("Poi_SendUse", 0, 0)
+    map.set_nearest_poi(before)
     return true
 end
 
@@ -96,66 +93,40 @@ function Piece:cost()
     return fields and self:get(fields[1]) or nil
 end
 
-local UNKNOWN_COST = 50000
-local REFUND_TIME = 3            -- seconds a free use refunds charges for (traps charge late)
+local UNKNOWN_COST = 50000      -- credit for a piece whose cost is not a reflected field
+local FREE_SECONDS = 3          -- traps charge a while after the use
 
--- Free uses waiting for the credited points to count (the score updates on the next frame), and
--- the time left to refund their charges.
-local pending, refunding, watching = {}, 0, false
-local last_charge, frame = {}, 0
+local pending, watching = {}, false
 
-local function on_charge(event)
-    if refunding <= 0 then
-        return
-    end
-    local player = components.local_player()
-    local id = player and entities.name_hash(player)
-    if not id or (event.b or 0) & 0xffffffff ~= id & 0xffffffff then
-        return
-    end
-    -- One charge reaches several subjects: refund it once.
-    local key = tostring(event.a)
-    if last_charge[key] and frame - last_charge[key] <= 1 then
-        return
-    end
-    last_charge[key] = frame
-    require("boz.score").add(event.a)
-end
-
-local function run_pending(dt)
+local function run_pending()
     local score = require("boz.score")
-    refunding = refunding - (dt or 0)
-    frame = frame + 1
     for i = #pending, 1, -1 do
         local job = pending[i]
         job.frames = job.frames + 1
         if job.frames == 2 then
-            refunding = REFUND_TIME
+            score.free_purchases(FREE_SECONDS)
             job.piece:use()
         elseif job.frames >= 5 then
-            score.add(-job.credit)                -- the credit goes; charges come back on their own
+            score.add(-job.credit)
             table.remove(pending, i)
         end
     end
 end
 
 --- Uses it for free: opens a door, buys the perk, spins the box, buys the wall weapon, switches
---- a trap on, ... without the player losing points: the cost is credited (the game checks it a
---- frame later), the use happens on the next frame, every charge to the player for the next
---- few seconds is refunded and the credit is taken back. Returns true when queued.
+--- a trap on, ... without the player losing points (purchases are free for a few seconds around
+--- the use). Returns true when queued.
 function Piece:use_free()
     local score = require("boz.score")
     if not score.get() then
         return false
     end
-    -- A piece whose cost is not a reflected field (trap switches, teleporters) gets plenty.
     local credit = self:cost() or UNKNOWN_COST
     score.add(credit)
     table.insert(pending, {piece = self, credit = credit, frames = 0})
     if not watching then
         watching = true
         events.on("frame", run_pending)
-        require("boz.game_events").on("SUBJECT_CHARGE_POINTS", on_charge)
     end
     return true
 end
@@ -178,12 +149,11 @@ end
 --- Adds a weapon (name or hash) to a mystery box's pool (SUBJECT_MB_ADD_WEAPON), or takes one out
 --- (SUBJECT_MB_REMOVE_WEAPON). The map's own pool is the Weapons tab's; this lasts the match.
 function Piece:add_box_weapon(weapon)
-    local id = type(weapon) == "number" and weapon or require("boz.hash").name(weapon)
-    return self:send("SUBJECT_MB_ADD_WEAPON", id)
+    return self:send("SUBJECT_MB_ADD_WEAPON", require("boz.hash").of(weapon))
 end
+--- Takes a weapon out of a mystery box's pool (SUBJECT_MB_REMOVE_WEAPON).
 function Piece:remove_box_weapon(weapon)
-    local id = type(weapon) == "number" and weapon or require("boz.hash").name(weapon)
-    return self:send("SUBJECT_MB_REMOVE_WEAPON", id)
+    return self:send("SUBJECT_MB_REMOVE_WEAPON", require("boz.hash").of(weapon))
 end
 
 --- Pack-a-Punch: brings it out (SUBJECT_PACKAPUNCH_SPAWN) or puts it away.
@@ -193,14 +163,44 @@ function Piece:despawn_pack_a_punch() return self:send("SUBJECT_PACKAPUNCH_DESPA
 --- A barricade: puts one board back (SUBJECT_BARRICADE_FIX).
 function Piece:fix_barricade() return self:send("SUBJECT_BARRICADE_FIX") end
 
---- Moves the mystery box to another box spot (a piece of CMysteryBox, or the spot's entity name),
---- putting the current one away. Returns true when sent.
+--- A door: true once it is open.
+function Piece:is_open()
+    return self:get("m_DoorState") == pieces.DOOR_OPEN
+end
+
+--- Opens every closed door for free. Returns how many were opened.
+function pieces.open_all_doors()
+    local opened = 0
+    for door in pieces.each("CDoor") do
+        if not door:is_open() then
+            door:use_free()
+            opened = opened + 1
+        end
+    end
+    return opened
+end
+
+--- Moves the mystery box to another box spot (a piece of CMysteryBox, or the spot's entity name;
+--- nil: a random other spot), putting the current one away. Returns true when sent, or false and
+--- why.
 function pieces.move_box(to)
+    local current = pieces.active_box()
+    if to == nil then
+        local others = {}
+        for box in pieces.each("CMysteryBox") do
+            if not current or box.entity ~= current.entity then
+                table.insert(others, box)
+            end
+        end
+        if #others == 0 then
+            return false, "the map has no other box spot"
+        end
+        to = others[math.random(#others)]
+    end
     local target = type(to) == "string" and pieces.of(to, "CMysteryBox") or to
     if not target then
-        return false
+        return false, "no box spot " .. tostring(to)
     end
-    local current = pieces.active_box()
     if current and current.entity ~= target.entity then
         current:despawn_box()
     end
@@ -248,6 +248,8 @@ function pieces.of(target, class_name)
     return component and make(entity, class_name, component) or nil
 end
 
+--- Every piece of a kind: mystery boxes, perk machines, doors, traps, wall buys, power switches;
+--- pack_a_punch() is the map's Pack-a-Punch machine (nil without one).
 function pieces.boxes() return pieces.list("CMysteryBox") end
 function pieces.perks() return pieces.list("CPerk") end
 function pieces.doors() return pieces.list("CDoor") end

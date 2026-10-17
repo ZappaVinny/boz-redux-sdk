@@ -1,10 +1,8 @@
--- boz.player: the local player in a Zombies match: health, place, stance, speed, perks and field
--- of view.
+-- boz.player: the local player in a Zombies match: health, place, stance, speed and perks.
 --
 --   local player = require("boz.player")
 --   player.give_all_perks()
---   player.set_fov(90)                  -- kept across matches; aiming down sights still zooms
---   player.health()  player.set_health(500, true)  player.god(true)
+--   player.health()  player.set_health(500, true)  player.set_god(true)
 --   player.position()  player.teleport({x = 0, y = 250, z = 0})
 --   player.downed()  player.stance()  player.set_speed("SprintSpeed", 1.5)
 --
@@ -15,16 +13,23 @@
 -- variables read every step (WalkSpeed, SprintSpeed, CrouchSpeed, ProneSpeed and their Aim* and
 -- Perked* (Stamin-Up) forms, LastStandSpeed); UnlimitedHealth makes it invulnerable.
 
+local core = require("boz.core")
 local components = require("boz.components")
+local map = require("boz.map")
 
 local player = {}
 
 --- True while a Zombies match with a local player is running.
 function player.in_match()
-    return components.local_player() ~= nil
+    return map.player() ~= nil
 end
 
--- Health, place, stance, speed -----------------------------------------------------------------
+--- The player's name hash (Entity_GetNameHash of its entity record): how scores, kills and
+--- events name the player. nil outside a match.
+function player.name_hash()
+    local entity = map.player()
+    return entity and require("boz.entities").name_hash(entity) or nil
+end
 
 local HEALTH, MAX_HEALTH = 0x48, 0x44   -- CHealth: health; the most it can be now (Juggernog doubles it)
 local STANCE, STATE = 0x1f4, 0x1d4
@@ -33,23 +38,16 @@ player.SPEEDS = {"WalkSpeed", "AimWalkSpeed", "SprintSpeed", "CrouchSpeed", "Aim
                  "ProneSpeed", "AimProneSpeed", "PerkedWalkSpeed", "PerkedAimWalkSpeed",
                  "PerkedSprintSpeed", "PerkedCrouchSpeed", "PerkedAimCrouchSpeed", "PerkedProneSpeed",
                  "PerkedAimProneSpeed", "LastStandSpeed"}
-local FALLBACK = {["CHealth::SetHealth"] = 0x19a20c + 1, ["CPlayerController::SetStance"] = 0x1db634 + 1,
-                  ["PerkManager_SetOwned"] = 0x1cbac4 + 1, ["PerkManager_ShowIcon"] = 0x1cbeb8 + 1,
-                  ["PerkManager_LayoutIcons"] = 0x1cc028 + 1, ["PerkManager_ResetAll"] = 0x1cbff4 + 1,
-                  ["CHealth::SetMaxHealth"] = 0x19972c + 1}
 -- The HUD icon of each perk (player.PERKS order).
 local PERK_ICONS = {"Perk_Deadshot_Image", "Perk_Double_Tap_Image", "Perk_Juggernog_Image",
                     "Perk_StaminUp_Image", "Perk_PHD_Flopper_Image", "Perk_Revival_Image",
                     "Perk_Speed_Cola_Image"}
-local OWNED_PERKS = 0x4c     -- CPerkManager: the owned perks (a network bool array; bits at +0x58)
+local OWNED_PERKS, OWNED_BITS = 0x4c, 0x58   -- CPerkManager: the owned perks (a network bool array) and their bits
+local JUGGERNOG = 3
 
 local function component(name)
-    local _, id = components.local_player()
+    local _, id = map.player()
     return id and components.find(name, id) or nil
-end
-
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
 end
 
 --- The player's health and the most it can have, or nil outside a match.
@@ -68,28 +66,33 @@ function player.set_health(value, raise_max)
         return false
     end
     if raise_max and value > game.read("i32", h + MAX_HEALTH) then
-        game.call(sym("CHealth::SetMaxHealth"), h, math.floor(value))
+        core.call("CHealth::SetMaxHealth", h, math.floor(value))
     end
-    game.call(sym("CHealth::SetHealth"), h, hook.float_bits(value), 0, 0)
+    core.call("CHealth::SetHealth", h, hook.float_bits(value), 0, 0)
     -- The game ignores the change while the player is invulnerable (god mode, just hit): set it.
     game.write("f32", h + HEALTH, math.min(value, game.read("i32", h + MAX_HEALTH)))
     return true
 end
 
 --- Makes the player take no damage (true) or normal damage again (the UnlimitedHealth cvar).
-function player.god(on)
+function player.set_god(on)
     return require("boz.console").register("UnlimitedHealth", on and "true" or "false", "bool")
+end
+
+--- True while the player takes no damage.
+function player.god()
+    return require("boz.console").get("UnlimitedHealth") == "true"
 end
 
 --- The player's position {x, y, z} (game centimetres, y up: the camera, about 136 above the feet).
 function player.position()
-    local entity = components.local_player()
+    local entity = map.player()
     return entity and require("boz.entities").position(entity) or nil
 end
 
 --- Moves the player (a position like player.position()'s).
 function player.teleport(position)
-    local entity = components.local_player()
+    local entity = map.player()
     return entity ~= nil and require("boz.entities").set_position(entity, position)
 end
 
@@ -115,7 +118,7 @@ function player.set_stance(name)
     if not controller or not value or value == 8 then
         return false
     end
-    game.call(sym("CPlayerController::SetStance"), controller, value)
+    core.call("CPlayerController::SetStance", controller, value)
     return true
 end
 
@@ -152,11 +155,14 @@ function player.set_speed(name, value)
 end
 
 --- Unlimited sprint (true) or the game's stamina again (the UnlimitedStamina cvar).
-function player.unlimited_stamina(on)
+function player.set_unlimited_stamina(on)
     return require("boz.console").register("UnlimitedStamina", on and "true" or "false", "bool")
 end
 
--- Perks ---------------------------------------------------------------------------------------
+--- True while sprinting is unlimited.
+function player.unlimited_stamina()
+    return require("boz.console").get("UnlimitedStamina") == "true"
+end
 
 --- The perk names, in the game's order.
 player.PERKS = {"Deadshot", "Double Tap", "Juggernog", "Stamin-Up", "PHD Flopper", "Quick Revive", "Speed Cola"}
@@ -171,7 +177,7 @@ function player.perks()
     if not manager then
         return nil
     end
-    local owned, result = game.read("u32", manager + 0x58), {}
+    local owned, result = game.read("u32", manager + OWNED_BITS), {}
     for i, name in ipairs(player.PERKS) do
         if owned & (1 << (i - 1)) ~= 0 then
             result[name] = true
@@ -188,8 +194,8 @@ function player.give_perk(name)
     end
     for i, perk in ipairs(player.PERKS) do
         if perk == name then
-            if game.read("u32", manager + 0x58) & (1 << (i - 1)) == 0 then
-                game.call("CPerkManager::GainPerk", manager, i - 1, 1)
+            if game.read("u32", manager + OWNED_BITS) & (1 << (i - 1)) == 0 then
+                core.call("CPerkManager::GainPerk", manager, i - 1, 1)
             end
             return true
         end
@@ -222,18 +228,18 @@ function player.take_perk(name)
     end
     for i, perk in ipairs(player.PERKS) do
         local bit = 1 << (i - 1)
-        local owned = game.read("u32", manager + 0x58)
+        local owned = game.read("u32", manager + OWNED_BITS)
         if perk == name and owned & bit ~= 0 then
-            game.call(sym("PerkManager_SetOwned"), manager + OWNED_PERKS, owned & ~bit)
-            game.call(sym("PerkManager_ShowIcon"), manager, PERK_ICONS[i], 0)
-            game.call(sym("PerkManager_LayoutIcons"), manager)
-            if i == 3 then
+            core.call("PerkManager_SetOwned", manager + OWNED_PERKS, owned & ~bit)
+            core.call("PerkManager_ShowIcon", manager, PERK_ICONS[i], 0)
+            core.call("PerkManager_LayoutIcons", manager)
+            if i == JUGGERNOG then
                 local health = component("CHealth")
                 if health then
                     local max = game.read("i32", health + MAX_HEALTH) // 2
-                    game.call(sym("CHealth::SetMaxHealth"), health, max)
-                    if game.read("f32", health + 0x48) > max then
-                        game.call(sym("CHealth::SetHealth"), health, hook.float_bits(max), 0, 0)
+                    core.call("CHealth::SetMaxHealth", health, max)
+                    if game.read("f32", health + HEALTH) > max then
+                        core.call("CHealth::SetHealth", health, hook.float_bits(max), 0, 0)
                     end
                 end
             end
@@ -249,72 +255,7 @@ function player.take_all_perks()
     if not manager then
         return false
     end
-    game.call(sym("PerkManager_ResetAll"), manager)
-    return true
-end
-
--- Field of view -------------------------------------------------------------------------------
--- CWeaponManager::UpdateFov eases the current FOV (+0xc0) up toward the base FOV (+0xc4, copied
--- from the map's camera at match start) or down to the weapon's sights; it never lowers the
--- current FOV by itself and skips the camera write once it arrived. Changing the base and setting
--- the current FOV just below it makes the next update land on the new value.
-
-local BASE_FOV, CURRENT_FOV, AIMING, PLAYER_ENTITY = 0xc4, 0xc0, 0xbc, 0x48
-local fov = {manager = nil, default = nil, wanted = nil}
-
-local function weapon_manager()
-    local entity = components.local_player()
-    if not entity then
-        return nil
-    end
-    -- The weapon manager sits on a child of the player entity; +0x48 points back at the player.
-    local only, count = nil, 0
-    for manager in components.each("CWeaponManager::s_table") do
-        if game.read("ptr", manager + PLAYER_ENTITY) == entity then
-            return manager
-        end
-        only, count = manager, count + 1
-    end
-    return count == 1 and only or nil
-end
-
-local function apply(manager, degrees, now)
-    game.write("f32", manager + BASE_FOV, degrees)
-    if now and not game.read("bool", manager + AIMING) then
-        game.write("f32", manager + CURRENT_FOV, degrees - 0.01)
-    end
-end
-
-events.on("frame", function()
-    local manager = weapon_manager()
-    if manager ~= fov.manager then
-        fov.manager = manager
-        fov.default = manager and game.read("f32", manager + BASE_FOV)
-        if manager and fov.wanted then
-            apply(manager, fov.wanted, true)
-        end
-    elseif manager and fov.wanted then
-        game.write("f32", manager + BASE_FOV, fov.wanted)   -- keep it (the game resets it per match)
-    end
-end)
-
---- The field of view in degrees and the map's default, or nil outside a match.
-function player.fov()
-    if not fov.manager then
-        return nil
-    end
-    return fov.wanted or fov.default, fov.default
-end
-
---- Sets the field of view in degrees (aiming down sights still zooms); nil restores the map's
---- default. The value is kept across matches. Returns false outside a match (it still applies
---- when the next match starts).
-function player.set_fov(degrees)
-    fov.wanted = degrees
-    if not fov.manager then
-        return false
-    end
-    apply(fov.manager, degrees or fov.default, true)
+    core.call("PerkManager_ResetAll", manager)
     return true
 end
 

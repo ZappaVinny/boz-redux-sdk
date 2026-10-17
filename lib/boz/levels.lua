@@ -1,12 +1,12 @@
 -- boz.levels: start levels (Zombies maps) without going through the menus.
 --
---   levels.start("kino")      levels.autostart()
+--   levels.start("kino")      levels.autostart_from_settings()
 --
 -- How it works: the front end's StartLevel console command starts a single-player match on a
 -- level by name (it sends the game's own start-game event). The command only works once the
 -- front end is running, so levels.start waits for the Flash menu's first ActionScript call and a
--- short settling time. levels.autostart reads a one-shot request from the mod's settings: the
--- Blender add-on's Build & Run writes it to start the level just saved.
+-- short settling time. levels.autostart_from_settings reads a one-shot request from the mod's
+-- settings: the editor's Build & Run writes it to start the level just saved.
 
 local levels = {}
 
@@ -20,24 +20,21 @@ local countdown = nil    -- frames left once the front end is up
 local watching = false
 
 local function start_now(name)
-    local console = game.read("ptr", "g_console")
-    if console == 0 then
+    local console = require("boz.console")
+    if not console.ready() then
         log("boz.levels: the console is not ready; start " .. name .. " from the menu")
         return false
     end
-    if pending_vars then
-        local ok, boz_console = pcall(require, "boz.console")
-        for entry in string.gmatch(pending_vars, "[^;]+") do
-            local var, value = string.match(entry, "^%s*([%w_]+)%s*=%s*(.-)%s*$")
-            if var and ok then
-                local kept, err = boz_console.register(var, value)
-                log("boz.levels: " .. var .. " = " .. tostring(kept or err))
-            end
+    for entry in string.gmatch(pending_vars or "", "[^;]+") do
+        local var, value = string.match(entry, "^%s*([%w_]+)%s*=%s*(.-)%s*$")
+        if var then
+            local kept, err = console.register(var, value)
+            log("boz.levels: " .. var .. " = " .. tostring(kept or err))
         end
-        pending_vars = nil
     end
+    pending_vars = nil
     log("boz.levels: starting " .. name)
-    game.call("Console_Execute", console, "StartLevel " .. name)
+    console.exec("StartLevel " .. name)
     return true
 end
 
@@ -61,7 +58,7 @@ local function watch()
         return
     end
     watching = true
-    hook.add("CFlashMenuState::CallActionScript", {after = function()
+    hook.add(require("boz.core").sym("CFlashMenuState::CallActionScript"), {after = function()
         if pending and not countdown then
             countdown = SETTLE_FRAMES
             events.on("frame", tick)
@@ -83,7 +80,7 @@ end
 --- setting (the SDK's Build & Run writes it), and its "autostart_vars" ("Name=value;..."), console
 --- variables set just before the level starts (e.g. UnlimitedHealth=true). Returns the level name
 --- or nil.
-function levels.autostart()
+function levels.autostart_from_settings()
     local name = settings.get(AUTOSTART_KEY)
     if type(name) ~= "string" or name == "" then
         return nil

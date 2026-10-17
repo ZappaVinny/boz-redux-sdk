@@ -20,62 +20,23 @@
 
 local entities = {}
 
+local core = require("boz.core")
 local hash = require("boz.hash")
 local components = require("boz.components")
 
-local FALLBACK = {
-    ["CIsEntityDB::FindEntity"] = 0x0bd514 + 1,
-    ["Spawn_ByHash"] = 0x1fa9c6 + 1,
-    ["Spawn_FindSpec"] = 0x1fa95c + 1,
-    ["EntityDB_Destroy"] = 0x0bb2d8 + 1,
-    ["Entity_GetNameHash"] = 0x104218 + 1,
-    ["CIsEntityDB::GetEntity"] = 0x0bd4c8 + 1,
-    ["CIsBroadcaster::FromEntity"] = 0x0b88bc + 1,
-    ["CIsBroadcaster::Send"] = 0x0b88da + 1,
-    ["CIsTransform::FromEntity"] = 0x0c23e4 + 1,
-    ["CIsTransform::UpdateWorld"] = 0x0c2488 + 1,
-    ["Transform_SetDirty"] = 0x0c2430 + 1,
-    ["CSpawnManager::s_instance"] = 0x460830,
-    ["CIsEntityDB::s_instance"] = 0x457920,
-}
 local ENTITY_ID, COMPONENT_ENTITY = 4, 0xc
 local LOCAL_POSITION, LOCAL_ROTATION, WORLD_POSITION = 0xa8, 0x98, 0x5c
 
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
-local function call(...)
-    return (game.call(...) or 0) & 0xffffffff
-end
-
-local scratch = nil
-local function buffer()
-    scratch = scratch or game.alloc(64)
-    return scratch
-end
-
-local function name_hash(name)
-    if type(name) == "number" then
-        return name
-    end
-    if name:lower():find("^0x") then
-        return tonumber(name:sub(3), 16)
-    end
-    return hash.name(name)
-end
-
 local function db()
-    return game.read("u32", sym("CIsEntityDB::s_instance"))
+    return core.singleton("CIsEntityDB")
 end
 
 --- The entity called `name` (or with that name hash) in the running level, or nil.
 function entities.find(name)
-    local database = db()
-    if database == 0 then
+    if not db() then
         return nil
     end
-    local entity = call(sym("CIsEntityDB::FindEntity"), name_hash(name))
+    local entity = core.call("CIsEntityDB::FindEntity", hash.of(name))
     return entity ~= 0 and entity or nil
 end
 
@@ -87,14 +48,25 @@ end
 --- The entity's record in the entity database (what Entity_GetNameHash and the managers use),
 --- or nil once the entity is gone.
 function entities.record(entity)
-    local record = call(sym("CIsEntityDB::GetEntity"), entity)
+    local record = core.call("CIsEntityDB::GetEntity", entity)
     return record ~= 0 and record or nil
+end
+
+--- True while the entity with this id is in the world (CIsEntityDB::GetEntity only reads the id
+--- at +4, so a removed entity's memory is never touched).
+function entities.alive(id)
+    if not id or id == 0 then
+        return false
+    end
+    local probe = core.scratch("entities.alive", 8)
+    game.write("u32", probe + ENTITY_ID, id)
+    return core.call("CIsEntityDB::GetEntity", probe) ~= 0
 end
 
 --- The hash of an entity's name (the key the score manager and navmesh tags use).
 function entities.name_hash(entity)
     local record = entities.record(entity)
-    return record and call(sym("Entity_GetNameHash"), record) or nil
+    return record and core.call("Entity_GetNameHash", record) or nil
 end
 
 --- The entity a component belongs to.
@@ -105,27 +77,23 @@ end
 --- True when an entity spec (name or hash) is in a loaded group, so it can spawn
 --- (Spawn_FindSpec).
 function entities.spec_loaded(spec)
-    return call(sym("Spawn_FindSpec"), name_hash(spec), 2) ~= 0
+    return core.call("Spawn_FindSpec", hash.of(spec), 2) ~= 0
 end
 
 --- Spawns an entity spec (its name, "0x..." hash or hash) at a position {x, y, z} with a
 --- rotation {x, y, z, w} (default none). Returns the entity, or nil and why (the spec must be
 --- in a loaded group: a map project's build brings every spec its scripts name).
 function entities.spawn(spec, position, rotation)
-    local manager = game.read("u32", sym("CSpawnManager::s_instance"))
-    if manager == 0 then
+    local manager = core.singleton("CSpawnManager")
+    if not manager then
         return nil, "not in a match"
     end
-    local at = buffer()
-    rotation = rotation or {0, 0, 0, 1}
-    local values = {position.x or position[1] or 0, position.y or position[2] or 0,
-                    position.z or position[3] or 0, 0,
-                    rotation.w or rotation[4] or 1, rotation.x or rotation[1] or 0,
-                    rotation.y or rotation[2] or 0, rotation.z or rotation[3] or 0}
-    for i, value in ipairs(values) do
-        game.write("f32", at + 4 * (i - 1), value)
-    end
-    local entity = call(sym("Spawn_ByHash"), manager, name_hash(spec), at, at + 16, 0, 0)
+    local at = core.scratch("entities.spawn", 32)
+    core.write_vec3(at, position)
+    core.write_quat(at + 16, rotation)
+    -- Spawn_ByHash(manager, hash, position, rotation, name, parent): name 0 makes up a unique
+    -- one, parent 0 puts it in the world on its own.
+    local entity = core.call("Spawn_ByHash", manager, hash.of(spec), at, at + 16, 0, 0)
     if entity == 0 then
         return nil, "no loaded entity spec " .. tostring(spec)
     end
@@ -135,13 +103,13 @@ end
 --- Removes an entity (and its children) at the end of the frame.
 function entities.remove(entity)
     local database = db()
-    if database ~= 0 and entity and entity ~= 0 then
-        call(sym("EntityDB_Destroy"), database, entity, 0)
+    if database and entity and entity ~= 0 then
+        core.call("EntityDB_Destroy", database, entity, 0)
     end
 end
 
 local function transform(entity)
-    local t = call(sym("CIsTransform::FromEntity"), entity)
+    local t = core.call("CIsTransform::FromEntity", entity)
     return t ~= 0 and t or nil
 end
 
@@ -151,9 +119,8 @@ function entities.position(entity)
     if not t then
         return nil
     end
-    call(sym("CIsTransform::UpdateWorld"), t)
-    return {x = game.read("f32", t + WORLD_POSITION), y = game.read("f32", t + WORLD_POSITION + 4),
-            z = game.read("f32", t + WORLD_POSITION + 8)}
+    core.call("CIsTransform::UpdateWorld", t)
+    return core.read_vec3(t + WORLD_POSITION)
 end
 
 --- Moves the entity (its local position: the world position for an entity without a parent).
@@ -162,10 +129,8 @@ function entities.set_position(entity, position)
     if not t then
         return false
     end
-    game.write("f32", t + LOCAL_POSITION, position.x or position[1])
-    game.write("f32", t + LOCAL_POSITION + 4, position.y or position[2])
-    game.write("f32", t + LOCAL_POSITION + 8, position.z or position[3])
-    call(sym("Transform_SetDirty"), t)
+    core.write_vec3(t + LOCAL_POSITION, position)
+    core.call("Transform_SetDirty", t)
     return true
 end
 
@@ -175,9 +140,7 @@ function entities.rotation(entity)
     if not t then
         return nil
     end
-    -- CIwFQuat keeps the scalar first: s, x, y, z.
-    return {w = game.read("f32", t + LOCAL_ROTATION), x = game.read("f32", t + LOCAL_ROTATION + 4),
-            y = game.read("f32", t + LOCAL_ROTATION + 8), z = game.read("f32", t + LOCAL_ROTATION + 12)}
+    return core.read_quat(t + LOCAL_ROTATION)
 end
 
 --- Turns the entity: a quaternion {x, y, z, w}, or a number (degrees about the vertical axis).
@@ -190,13 +153,19 @@ function entities.set_rotation(entity, rotation)
         local half = math.rad(rotation) / 2
         rotation = {0, math.sin(half), 0, math.cos(half)}
     end
-    -- {x, y, z, w} (or a list in that order) stored scalar first.
-    local values = {rotation.w or rotation[4] or 1, rotation.x or rotation[1] or 0,
-                    rotation.y or rotation[2] or 0, rotation.z or rotation[3] or 0}
-    for i, value in ipairs(values) do
-        game.write("f32", t + LOCAL_ROTATION + 4 * (i - 1), value)
+    core.write_quat(t + LOCAL_ROTATION, rotation)
+    core.call("Transform_SetDirty", t)
+    return true
+end
+
+--- Shows or hides the entity's own model (CIsRenderableModel::SetVisible: its collision and
+--- behaviour stay). Returns false when it has no model.
+function entities.set_visible(entity, visible)
+    local model = entities.component(entity, "CIsRenderableModel")
+    if not model then
+        return false
     end
-    call(sym("Transform_SetDirty"), t)
+    core.call("CIsRenderableModel::SetVisible", model, visible and 1 or 0)
     return true
 end
 
@@ -207,10 +176,9 @@ end
 
 --- The classes of the components an entity has (that the library knows a table for).
 function entities.components(entity)
-    local ok, data = pcall(require, "boz.symbol_data")
     local out = {}
     local id = entities.id(entity)
-    for class_name in pairs(ok and data.tables or {}) do
+    for class_name in pairs(require("boz.symbol_data").tables) do
         if components.find(class_name, id) then
             table.insert(out, class_name)
         end
@@ -235,12 +203,12 @@ end
 --- hits and uses reach it (CIsBroadcaster::Send on its broadcaster). Returns false when the entity
 --- has no broadcaster.
 function entities.send(entity, event, a, b)
-    local broadcaster = call(sym("CIsBroadcaster::FromEntity"), entity)
+    local broadcaster = core.call("CIsBroadcaster::FromEntity", entity)
     if broadcaster == 0 then
         return false
     end
     local id = require("boz.game_events").id(event)
-    call(sym("CIsBroadcaster::Send"), broadcaster, id, a or 0, b or 0, 0, 0)
+    core.call("CIsBroadcaster::Send", broadcaster, id, a or 0, b or 0, 0, 0)
     return true
 end
 

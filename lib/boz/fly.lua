@@ -12,6 +12,8 @@ local components = require("boz.components")
 
 local fly = {}
 
+local core = require("boz.core")
+
 local SUBJECT_PLAYER_FREE_MODE = 0xe8d65346   -- ids from gamedef/events
 local SUBJECT_PLAYER_ASCEND = 0x77f7c70e
 local FLYING, SPEED_VAR = 0x30, 0x34
@@ -21,9 +23,9 @@ local function component()
 end
 
 local function input_event(event)
-    local input = game.read("ptr", "CInputManager::s_instance")
-    if input ~= 0 then
-        game.call("CIsSubject::NotifyVirtual", input + 0x20, event, 0, 0, 0)
+    local input = core.singleton("CInputManager")
+    if input then
+        core.call("CIsSubject::NotifyVirtual", input + 0x20, event, 0, 0, 0)
     end
 end
 

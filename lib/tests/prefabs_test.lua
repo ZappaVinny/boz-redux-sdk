@@ -1,64 +1,9 @@
 -- boz.prefabs against a fake game: lua5.4 lib/tests/prefabs_test.lua (from the SDK root).
-package.path = "lib/?.lua;" .. package.path
-
-local memory, symbols, functions, hooks, calls, frames = {}, {}, {}, {}, {}, {}
-local next_symbol = 0x1000
-
-local function address(name)
-    if not symbols[name] then
-        next_symbol = next_symbol + 0x10
-        symbols[name] = next_symbol
-    end
-    return symbols[name]
-end
-
-local next_alloc = 0x700000
-game = {
-    base = function() return 0x4a000000 end,
-    symbol = function(name) return address(name) end,
-    read = function(_, at)
-        if type(at) == "string" then
-            at = address(at)
-        end
-        return memory[at] or 0
-    end,
-    write = function(_, at, value) memory[at] = value end,
-    alloc = function(size) next_alloc = next_alloc + size + 16; return next_alloc end,
-    call = function(target, ...)
-        if type(target) == "string" then
-            target = address(target)
-        end
-        for name, at in pairs(symbols) do
-            if at == target and functions[name] then
-                table.insert(calls, {name, ...})
-                return functions[name](...)
-            end
-        end
-        error("unexpected call " .. tostring(target))
-    end,
-}
-hook = {add = function(target, handlers)
-    hooks[target] = hooks[target] or {}
-    table.insert(hooks[target], handlers)
-end}
-events = {on = function(name, fn) if name == "frame" then table.insert(frames, fn) end end}
-function log(message) print("log: " .. message) end
-
-local function run_hook(name, args, when)
-    local skipped = false
-    for _, handlers in ipairs(hooks[address(name)] or {}) do
-        local fn = handlers[when or "before"]
-        if fn then
-            fn({arg = function(_, i) return args[i] or 0 end,
-                arg_signed = function(_, i) return args[i] or 0 end,
-                skip = function() skipped = true end})
-        end
-    end
-    return skipped
-end
-local function frame()
-    for _, fn in ipairs(frames) do fn(0.016) end
-end
+package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+local fake = require("fake_game").install({strict = true})
+local memory, symbols, functions, hooks, calls, frames = fake.memory, fake.symbols, fake.functions, fake.hooks,
+    fake.calls, fake.frames
+local address, run_hook, frame, check, called = fake.address, fake.run_hook, fake.frame, fake.check, fake.called
 
 local hash = require("boz.hash")
 local LEVEL, PLAYER, SCORE = 0x8000, 0x8100, 0x9100
@@ -94,6 +39,7 @@ end
 functions["Poi_FindPromptElement"] = function() return 0x5555 end
 functions["CScoreManager::GetLocalScore"] = function() return score end
 functions["CScoreManager::AddScore"] = function(_, id, delta)
+    if delta >= 0x80000000 then delta = delta - 0x100000000 end   -- an int32 in the game
     if id == 77 then score = score + delta end
 end
 -- The entity database's record of an entity (what Entity_GetNameHash must be asked).
@@ -155,18 +101,6 @@ function open() return self.name .. " opened" end
 write("Broken", "this is not lua")
 
 local prefabs = require("boz.prefabs")
-local function check(condition, message)
-    if not condition then
-        error("FAILED: " .. message, 2)
-    end
-end
-local function called(name)
-    local found = {}
-    for _, c in ipairs(calls) do
-        if c[1] == name then table.insert(found, c) end
-    end
-    return found
-end
 
 local bus = {}
 prefabs.on("Vault_1.Skull.hit", function(data, name) table.insert(bus, name) end)
@@ -286,7 +220,7 @@ memory[DOOR_C + 0x9c] = 0
 local components = require("boz.components")
 local real_each = components.each
 components.each = function(tbl)
-    if tbl == address("CDoor::s_table") then
+    if tbl == "CDoor" or tbl == address("CDoor::s_table") then
         local done = false
         return function() if not done then done = true; return DOOR_C end end
     end
@@ -366,7 +300,7 @@ check(console_lines[1] == "50%% done\t2", "print goes to the game console (" .. 
 prefabs.start({}, {}, {{name = "idgun", script = "", display = "Apothicon Servant"}})
 local function localise(id)
     local answer
-    for _, handlers in ipairs(hooks["Localise_GetString"] or {}) do
+    for _, handlers in ipairs(hooks[address("Localise_GetString")] or {}) do
         handlers.before({arg = function(_, i) return i == 1 and id or 0 end,
                          skip = function(_, value) answer = value end})
     end

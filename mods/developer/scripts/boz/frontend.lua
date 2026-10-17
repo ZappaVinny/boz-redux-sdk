@@ -18,6 +18,8 @@ local flash = require("boz.flash")
 
 local frontend = {}
 
+local core = require("boz.core")
+
 frontend.MOVIE = "fe_v4_cs4_swf.bin"
 
 local screen_patches = {}
@@ -57,7 +59,7 @@ end
 --- Calls an ActionScript function on a Flash menu state (CFlashMenuState) with gameswf's
 --- format, e.g. frontend.call(state, "setMusicVol", "%d", 50).
 function frontend.call(state, fn, format, ...)
-    return game.call("CFlashMenuState::CallActionScript", state, fn, format, ...)
+    return core.call("CFlashMenuState::CallActionScript", state, fn, format, ...)
 end
 
 --- Shows ActionScript trace() output and gameswf warnings in the log (boz.flash.capture_log).

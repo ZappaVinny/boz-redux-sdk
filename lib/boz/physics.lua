@@ -17,54 +17,41 @@
 
 local physics = {}
 
-local FALLBACK = {["Physics_RayCastAll"] = 0x126a78 + 1, ["operator_new_cpp"] = 0x016772 + 1,
-                  ["operator_delete_cpp"] = 0x34a4c0}
+local core = require("boz.core")
+
 local NODE_SIZE = 0x30      -- next, previous and the hit (position, normal, entity, shape, distance, material)
 local DEFAULT_FILTER = 0xffffffef
 
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
 local buffer = nil
 
-local function write_vec(at, v)
-    game.write("f32", at, v.x or v[1] or 0)
-    game.write("f32", at + 4, v.y or v[2] or 0)
-    game.write("f32", at + 8, v.z or v[3] or 0)
-end
-
-local function read_vec(at)
-    return {x = game.read("f32", at), y = game.read("f32", at + 4), z = game.read("f32", at + 8)}
-end
 
 --- Every hit of a ray from `from` to `to`, nearest first: {{position, normal, entity}, ...}.
 function physics.raycast_all(from, to, filter)
     buffer = buffer or game.alloc(64)
-    write_vec(buffer, from)
-    write_vec(buffer + 12, to)
+    core.write_vec3(buffer, from)
+    core.write_vec3(buffer + 12, to)
     -- An STLport list: the list object (+24) points at a sentinel node from the game's own
     -- allocator (sorting swaps sentinels with temporary lists, which free theirs).
     local list = buffer + 24
-    local sentinel = (game.call(sym("operator_new_cpp"), NODE_SIZE) or 0) & 0xffffffff
+    local sentinel = core.call("operator_new_cpp", NODE_SIZE)
     if sentinel == 0 then
         return {}
     end
     game.write("u32", sentinel, sentinel)
     game.write("u32", sentinel + 4, sentinel)
     game.write("u32", list, sentinel)
-    game.call(sym("Physics_RayCastAll"), buffer, buffer + 12, list, filter or DEFAULT_FILTER, 0xffffffff)
+    core.call("Physics_RayCastAll", buffer, buffer + 12, list, filter or DEFAULT_FILTER, 0xffffffff)
     sentinel = game.read("ptr", list)
     local hits, node, guard = {}, game.read("ptr", sentinel), 0
     while node ~= sentinel and node ~= 0 and guard < 256 do
         local entity = game.read("ptr", node + 0x20)
-        table.insert(hits, {position = read_vec(node + 8), normal = read_vec(node + 0x14),
+        table.insert(hits, {position = core.read_vec3(node + 8), normal = core.read_vec3(node + 0x14),
                             entity = entity ~= 0 and entity or nil})
         local next_node = game.read("ptr", node)
-        game.call(sym("operator_delete_cpp"), node)
+        core.call("operator_delete_cpp", node)
         node, guard = next_node, guard + 1
     end
-    game.call(sym("operator_delete_cpp"), sentinel)
+    core.call("operator_delete_cpp", sentinel)
     return hits         -- the game sorts them nearest first
 end
 

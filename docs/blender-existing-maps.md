@@ -205,9 +205,9 @@ it changes only the group that places it.
 
 **Build & Run** saves to your mod and starts the game straight into the level. The sidebar's
 **Test with** mod (the Developer mod by default) does the starting: Build & Run stores the level
-in that mod's settings, and the mod's `boz.levels.autostart()` runs the front end's `StartLevel`
+in that mod's settings, and the mod's `boz.levels.autostart_from_settings()` runs the front end's `StartLevel`
 console command once the menu is up, then clears the request, so a normal launch still shows the
-menu. Any mod can be the test mod if it calls `levels.autostart()` (see the
+menu. Any mod can be the test mod if it calls `levels.autostart_from_settings()` (see the
 [standard library](standard-library.md)). The game's output goes to `boz-log.txt` in the client
 folder. Build & Run refuses to start while the game is already running, or when the test mod is
 missing or switched off. When two enabled mods replace the same file, the one loaded later wins;

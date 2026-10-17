@@ -59,14 +59,14 @@ Read [making mods](docs/making-mods.md) for the Lua side. A script can use the s
 
 ```lua
 local pause_settings = require("boz.pause_settings")
-local player = require("boz.player")
+local camera = require("boz.camera")
 
 pause_settings.add_slider{id = "fov", label = "Field of view", min = 50, max = 120, step = 1,
     get = function() return settings.get("fov", 50) end,
-    set = function(v) settings.set("fov", v); player.set_fov(v) end}
+    set = function(v) settings.set("fov", v); camera.set_fov(v) end}
 ```
 
-`mods/redux` and `mods/developer` are complete examples.
+`mods/developer` is a complete example.
 
 ## Quick start: change a weapon's data
 

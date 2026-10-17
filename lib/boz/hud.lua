@@ -15,6 +15,8 @@
 
 local hud = {}
 
+local core = require("boz.core")
+
 hud.ELEMENTS = {"Insta_Kill_Image", "Insta_Kill_Label", "Double_Points_Image", "Double_Points_Label",
                 "Fire_Sale_Image", "Fire_Sale_Label", "Death_Machine_Image", "Death_Machine_Label",
                 "Perk_Deadshot_Image", "Perk_Double_Tap_Image", "Perk_Juggernog_Image",
@@ -22,15 +24,9 @@ hud.ELEMENTS = {"Insta_Kill_Image", "Insta_Kill_Label", "Double_Points_Image", "
                 "Perk_StaminUp_Image", "Clip_Label", "Grenade_Label", "Low_Ammo_Label", "No_Ammo_Label",
                 "Headshot_Image", "Headshot_Label", "Being_Revived_Label"}
 
-local FALLBACK = {["HUD_SetElementVisible"] = 0x1cffe4 + 1}
-
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
 --- Shows or hides a HUD element by name (the game shows and hides its own as things happen).
 function hud.set_visible(name, visible)
-    game.call(sym("HUD_SetElementVisible"), name, visible and 1 or 0)
+    core.call("HUD_SetElementVisible", name, visible and 1 or 0)
     return true
 end
 

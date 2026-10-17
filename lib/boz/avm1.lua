@@ -24,6 +24,7 @@ local OPS = {
 local Builder = {}
 Builder.__index = Builder
 
+--- A new ActionScript (AVM1) bytecode builder.
 function avm1.builder()
     return setmetatable({parts = {}, size = 0, labels = {}, fixups = {}}, Builder)
 end
@@ -122,7 +123,6 @@ function Builder:bytes(inner)
     return inner and code or code .. "\0"
 end
 
--- Convenience for common patterns ------------------------------------------------------------
 
 --- Pushes the value of a dotted path, e.g. b:get("_root.Options.settings").
 function Builder:get(path)

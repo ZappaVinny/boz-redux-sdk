@@ -183,7 +183,7 @@ pause_settings.add_slider{{
     get = function() return settings.get("speed", 100) end,
     set = function(value)
         settings.set("speed", value)
-        require("boz.rounds").set_time_scale(value / 100)
+        require("boz.map").set_time_scale(value / 100)
     end,
 }}
 

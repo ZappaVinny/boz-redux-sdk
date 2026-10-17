@@ -48,12 +48,10 @@ hole:remove()               -- or close it early (with its own sound)
   without the device lying on the floor), `freeze` (stay where spawned instead of settling on the
   floor), `lift` (centimetres up, default 10, so it does not start in the floor; `raise` replaces
   it), `rotation`. It is the
-  player's, and so are its kills (zombies turning to a device ask for its owner, so it always has
-  one). The game sets a new projectile up a frame after it spawns; the trigger, lifetime and
+  player's (zombies turning to a device ask for its owner, so it always has one). The game sets a new projectile up a frame after it spawns; the trigger, lifetime and
   hiding are applied then (`:ready()` says when), so scripts need not wait.
 - `effects.aim()`: the point the player's crosshair is on (where a shot lands, up to 100 m) and
   whether it is a live zombie.
-- `effects.sound(name, position)`: plays a game sound there.
 - What they return: `:alive()`, `:ready()`, `:position()`, `:move(position)`,
   `:trigger(name)`, `:hide()`, `:show()`, `:freeze()`, `:lifetime(seconds)`, `:remove()`.
 
@@ -78,6 +76,11 @@ still die.
 A black hole normally opens once it has come to rest and lasts 8 seconds; `trigger = "open"`
 opens it at once and `lifetime` sets how long it stays open.
 
+The game kills the zombies a black hole takes without naming who killed them, so they do not
+count as the player's kills (stats, achievements). A script that wants them counted asks once:
+`require("boz.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")`. The Effects tab's **Copy
+script line** adds that line for a black hole.
+
 ## Example: the idgun opens a black hole where it fires
 
 In the Effects tab, name Ascension's `bh_bomb projectile` `gersch` and tick **Hide its model** and
@@ -88,6 +91,7 @@ a script (**Add script**):
 
 ```lua
 local effects = require("boz.effects")
+require("boz.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")   -- its kills are the player's
 
 -- Every shot: a black hole where the shot lands, for six seconds.
 function on_fire(data)
@@ -102,7 +106,7 @@ end
 
 From the game's code (Ghidra names in the game definition): `Spawn_ByHash(CSpawnManager, spec
 hash, position, rotation)` creates any entity spec a loaded group holds (`Entity_CreateFromSpec`,
-then the `CIsTransform`'s position +0xa8 and rotation +0x98, x y z w). A projectile is an entity
+then the `CIsTransform`'s position +0xa8 and rotation +0x98, stored scalar first: s x y z). A projectile is an entity
 with a `CProjectileEntity` whose `behaviourType` (1 thrown, 2 bolt, 4 lure, 6 Gersch device)
 decides what `Projectile_UpdateFlight`, `Projectile_UpdateGersch` and `Projectile_Impact` do; it
 keeps its lifetime (ms) at +0xc0, its open state at +0xc7 and its owner at +0x88, and takes events

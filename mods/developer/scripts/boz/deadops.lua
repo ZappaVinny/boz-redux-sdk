@@ -1,8 +1,8 @@
 -- boz.deadops: Dead Ops Arcade (the top-down mode).
 --
---   deadops.active()            deadops.set_round(12)        deadops.god(true)
---   deadops.score()             deadops.set_score(100000)    deadops.lives()
---   deadops.spawn_enemy()       deadops.spawning(false)      deadops.spawn_pickup()
+--   deadops.active()            deadops.set_round(12)        deadops.set_god(true)
+--   deadops.score()             deadops.set_score(100000)    deadops.health()
+--   deadops.spawn_enemy()       deadops.toggle_spawning()    deadops.spawn_pickup()
 --   deadops.horde()             every field of the horde manager (spawn timers, horde size, ...)
 --   deadops.storage()           the persistent storage: stats and power timers
 --
@@ -16,9 +16,12 @@
 
 local deadops = {}
 
-local console = require("boz.console")
 local reflect = require("boz.reflect")
 local components = require("boz.components")
+
+local function exec(line)
+    return require("boz.console").exec(line)
+end
 
 --- True in Dead Ops Arcade.
 function deadops.active()
@@ -27,38 +30,43 @@ end
 
 --- Jumps to a round (the SetRound command).
 function deadops.set_round(number)
-    return console.exec("SetRound " .. tostring(math.floor(number)))
+    return exec("SetRound " .. tostring(math.floor(number)))
 end
 
---- God mode on or off (the GodMode command toggles it; this asks for a state).
 local god = false
-function deadops.god(on)
+
+--- God mode on or off (the GodMode command toggles it; this asks for a state). Returns the state.
+function deadops.set_god(on)
     if on == nil or (on and not god) or (not on and god) then
         god = not god
-        console.exec("GodMode")
+        exec("GodMode")
     end
     return god
 end
 
 --- Many lives (the ManyLives command).
 function deadops.many_lives()
-    return console.exec("ManyLives")
+    return exec("ManyLives")
 end
 
 --- Unlimited bombs and speed boosts (InfiniteBombBoost).
 function deadops.infinite_bombs()
-    return console.exec("InfiniteBombBoost")
+    return exec("InfiniteBombBoost")
 end
 
---- Spawns an enemy; switches enemy spawning on or off; spawns a pickup; spawns death gems; auto aim.
-function deadops.spawn_enemy() return console.exec("spawnEnemy") end
-function deadops.spawning() return console.exec("toggleEnemySpawn") end
-function deadops.spawn_pickup() return console.exec("spawnPickup") end
-function deadops.spawn_gems() return console.exec("SpawnDeathGems") end
-function deadops.auto_aim() return console.exec("AutoAim") end
+--- Spawns an enemy (spawnEnemy).
+function deadops.spawn_enemy() return exec("spawnEnemy") end
+--- Switches enemy spawning on or off (toggleEnemySpawn).
+function deadops.toggle_spawning() return exec("toggleEnemySpawn") end
+--- Spawns a pickup (spawnPickup).
+function deadops.spawn_pickup() return exec("spawnPickup") end
+--- Spawns death gems (SpawnDeathGems).
+function deadops.spawn_gems() return exec("SpawnDeathGems") end
+--- Switches auto aim (AutoAim).
+function deadops.auto_aim() return exec("AutoAim") end
 
 local function player_component(class_name)
-    local _, id = components.local_player()
+    local _, id = require("boz.map").player()
     return id and components.find(class_name, id) or nil
 end
 

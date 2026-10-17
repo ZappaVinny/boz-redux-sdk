@@ -1,52 +1,9 @@
 -- boz.effects against a fake game: lua5.4 lib/tests/effects_test.lua (from the SDK root).
-package.path = "lib/?.lua;" .. package.path
-
-local memory, symbols, functions, calls, frames = {}, {}, {}, {}, {}
-local next_symbol = 0x1000
-
-local function address(name)
-    if not symbols[name] then
-        next_symbol = next_symbol + 0x10
-        symbols[name] = next_symbol
-    end
-    return symbols[name]
-end
-
-game = {
-    base = function() return 0x4a000000 end,
-    symbol = function(name) return address(name) end,
-    read = function(_, at) return memory[at] or 0 end,
-    write = function(_, at, value) memory[at] = value end,
-    alloc = function() return 0x900000 end,
-    call = function(target, ...)
-        if type(target) == "string" then target = address(target) end
-        for name, at in pairs(symbols) do
-            if at == target and functions[name] then
-                table.insert(calls, {name, ...})
-                local result = functions[name](...)
-                if type(result) == "number" and result >= 0x80000000 then
-                    result = result - 0x100000000     -- the real game.call is signed too
-                end
-                return result
-            end
-        end
-        error("unexpected call " .. tostring(target))
-    end,
-}
-events = {on = function(name, fn) if name == "frame" then table.insert(frames, fn) end end}
-local hooks = {}
-hook = {add = function(target, handlers) hooks[target] = handlers return target end, remove = function() end}
-function log(message) print("log: " .. message) end
-
-local function check(condition, message)
-    if not condition then error("FAILED: " .. message, 2) end
-end
-local function frame(dt) for _, fn in ipairs(frames) do fn(dt) end end
-local function called(name)
-    local out = {}
-    for _, c in ipairs(calls) do if c[1] == name then table.insert(out, c) end end
-    return out
-end
+package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+local fake = require("fake_game").install({strict = true, signed = true})
+local memory, symbols, functions, hooks, calls, frames = fake.memory, fake.symbols, fake.functions, fake.hooks,
+    fake.calls, fake.frames
+local address, run_hook, frame, check, called = fake.address, fake.run_hook, fake.frame, fake.check, fake.called
 
 local hash = require("boz.hash")
 local MANAGER, PLAYER, GERSCH = 0xa000, 0x77, 0x8eae245e
@@ -176,30 +133,27 @@ check(not late:trigger("bogus") and late:trigger("explode"), "triggers it answer
 check(effects.projectile("impactRayGun", {0, 0, 0}) == nil, "an effect is not a projectile")
 check(not early, "nothing ever touched a projectile before it was set up")
 
--- Where the crosshair is, and sounds.
+-- Where the crosshair is.
 memory[MANAGER + 0xcc], memory[MANAGER + 0xd0], memory[MANAGER + 0xd4] = 100.0, 5.0, -40.0
 memory[MANAGER + 0xf0] = 1
 local aim, zombie = effects.aim()
 check(aim.x == 100.0 and aim.z == -40.0 and zombie, "the crosshair point")
-check(effects.sound("gersch_opens", aim) and called("CIwSoundManager::Play")[1][3] == hash.name("gersch_opens"),
-      "a sound plays by name")
--- Black hole kills are the player's: a zombie's gersch death damage gets the player as attacker.
+-- zombies.credit_kills: damage a zombie deals itself handling the event is the player's.
 do
     local h = require("boz.hash")
-    local on_event, damage = hooks[address("CAIControllerZombie::OnEvent")], hooks[address("CHealth::Damage")]
-    assert(on_event and damage, "FAILED: the kill credit hooks")
-    local set = {}
-    local function call(args) return {arg = function(_, i) return args[i] or 0 end, set_arg = function(_, i, v) set[i] = v end} end
-    memory[address("CLevelManager::s_instance")] = 0x6100
-    memory[0x6100 + 0x1a0] = 0x6200
-    functions["CIsEntityDB::GetEntity"] = function(e) return e == 0x6200 and 0x6300 or 0 end
+    require("boz.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")
+    memory[0x7100 + 0xd4] = 0x7000          -- the zombie controller's CHealth
+    functions["CIsEntityDB::GetEntity"] = function(e) return e == PLAYER and 0x6300 or 0 end
     functions["Entity_GetNameHash"] = function(r) return r == 0x6300 and 0xabc or 0 end
-    damage.before(call({0x7000, 0x7ffffffe, 0}))
-    assert(set[3] == nil, "FAILED: other damage keeps its attacker")
-    local ev = call({0x7100, 0, h.name("SUBJECT_ZOMBIE_GERSCH_DEATH")})
-    on_event.before(ev)
-    damage.before(call({0x7000, 0x7ffffffe, 0}))
-    on_event.after(ev)
-    assert(set[3] == 0xabc, "FAILED: a black hole kill is the player's")
+    local args = {0x7000, 0x7ffffffe, 0}
+    run_hook("CHealth::Damage", args)
+    check(args[3] == 0, "other damage keeps its attacker")
+    run_hook("CAIControllerZombie::OnEvent", {0x7100, 0, h.name("SUBJECT_ZOMBIE_GERSCH_DEATH")})
+    args = {0x7000, 0x7ffffffe, 0}
+    run_hook("CHealth::Damage", args)
+    check(args[3] == 0xabc, "a black hole kill is the player's")
+    args = {0x7000, 0x7ffffffe, 0}
+    run_hook("CHealth::Damage", args)
+    check(args[3] == 0, "only the damage of that event")
 end
 print("effects_test: OK")

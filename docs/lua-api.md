@@ -201,7 +201,7 @@ mods carry, like the standard lib, uses it to coordinate; mods can use it to tal
 ## Standard library
 
 Most mods should use the standard lib (`boz.*`) rather than the functions on this page: it turns
-the game's internals into plain functions (`player.set_fov(90)`,
+the game's internals into plain functions (`camera.set_fov(90)`,
 `pause_settings.add_slider{...}`). See [standard-library.md](standard-library.md).
 
 ## Example

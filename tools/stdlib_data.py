@@ -4,7 +4,7 @@ the gamedef's TOML from Lua):
 
     lib/boz/event_names.lua       every SUBJECT_* event name (boz.events: ids by IwHashString)
     lib/boz/reflection_data.lua   every reflected class: bases and fields (boz.reflect)
-    lib/boz/symbol_data.lua       singletons and component tables (boz.reflect, older clients)
+    lib/boz/symbol_data.lua       function and global offsets (boz.core, for older clients)
     lib/boz/cvar_data.lua         every console variable (type, default, note) and command (boz.cvars)
 
 Run after the game definition changes: python3 tools/stdlib_data.py
@@ -55,11 +55,17 @@ def reflection() -> str:
 
 def symbols() -> str:
     data = tomllib.loads((GAMEDEF / 'symbols' / 'boz-1.0.11.toml').read_text(encoding='utf-8'))
-    lines = [HEADER.format('gamedef/symbols'),
-             '-- Image offsets of the singletons (T::s_instance) and component tables (T::s_table),',
-             '-- for clients whose own game definition predates them (add game.base()).',
-             'return {', '    singletons = {']
     globals_ = sorted(data.get('global', []), key=lambda g: g['name'])
+    lines = [HEADER.format('gamedef/symbols'),
+             '-- Image offsets (add game.base()) for clients whose own game definition predates a name.',
+             '-- Functions carry the Thumb bit.',
+             'return {', '    functions = {']
+    for f in sorted(data['function'], key=lambda f: f['name']):
+        lines.append(f'        [{lua_string(f["name"])}] = 0x{f["offset"] | (1 if f.get("thumb") else 0):x},')
+    lines += ['    },', '    globals = {']
+    for g in globals_:
+        lines.append(f'        [{lua_string(g["name"])}] = 0x{g["offset"]:x},')
+    lines += ['    },', '    singletons = {']
     for g in globals_:
         if g['name'].endswith('::s_instance'):
             lines.append(f'        {g["name"][:-len("::s_instance")]} = 0x{g["offset"]:x},')

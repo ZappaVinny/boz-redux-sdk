@@ -12,16 +12,12 @@
 
 local network = {}
 
-local FALLBACK = {["CGameNetwork::s_instance"] = 0x460844, ["CGameNetwork::IsWifiMode"] = 0x18e5a4 + 1}
+local core = require("boz.core")
+
 local HOST = 0x54
 
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
 local function instance()
-    local value = game.read("ptr", sym("CGameNetwork::s_instance"))
-    return value ~= 0 and value or nil
+    return core.singleton("CGameNetwork")
 end
 
 --- True when this game runs the match.
@@ -33,7 +29,7 @@ end
 --- True for local Wi-Fi co-op.
 function network.wifi()
     local n = instance()
-    return n ~= nil and ((game.call(sym("CGameNetwork::IsWifiMode"), n) or 0) & 0xff) ~= 0
+    return n ~= nil and ((core.call("CGameNetwork::IsWifiMode", n) or 0) & 0xff) ~= 0
 end
 
 --- The other players: a list of their entities.

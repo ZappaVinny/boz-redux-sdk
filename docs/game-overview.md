@@ -106,8 +106,8 @@ readable and editable with bozkit. `WeaponsUnlimitedAmmo` stops ammo use.
   Flopper, Quick Revive, Speed Cola, kept as bits with a HUD icon each.
   `boz.player.give_perk` / `give_all_perks` grant them, `take_perk` / `take_all_perks` take them.
 - **Using something** only works when the player's points cover it as of the last frame (the
-  score updates a frame later); `piece:use_free()` credits the cost, uses it a frame later and
-  takes back a credit nothing charged.
+  score updates a frame later); `piece:use_free()` credits the cost, uses it a frame later with
+  purchases free (the `UnlimitedScore` cvar, `boz.score.free_purchases`) and takes the credit back.
 - **Power-ups** drop from zombies based on points earned since the last drop; the last dog or
   monkey of a round drops Max Ammo.
 - **The box** rolls a weapon and hands it over through `CWeaponManager::GiveWeapon`.
@@ -116,7 +116,7 @@ readable and editable with bozkit. `WeaponsUnlimitedAmmo` stops ammo use.
 
 The local player's controller is `CPlayerController`; its weapon manager (`CWeaponManager`)
 also owns the view's field of view: it eases between the map's default and the weapon's
-aim-down-sights zoom each frame. `boz.player.set_fov` changes it properly. `boz.fly` turns on
+aim-down-sights zoom each frame. `boz.camera.set_fov` changes it properly. `boz.fly` turns on
 the game's developer fly mode (noclip). Camera shakes are data (`CCameraShakeConfig`: duration,
 how far, how often it changes); one plays at a time (`boz.camera.shake`).
 

@@ -277,7 +277,7 @@ can't be built, but script-only projects still work.
 - **Library:** every Zombies asset in the game with previews (see *Asset library* below).
   Search by name, description or `0x` hash, filter by kind and map, and copy an asset's name or
   hash for scripts.
-- **Learn:** the guides and references, and the Developer and Redux mods as examples.
+- **Learn:** the guides and references, and the Developer mod as an example.
 - **Settings:** client folder, where new projects go, default author, the editor's Blender
   (automatic: the SDK's own, else `blender` on PATH), and **Rebuild library**.
 

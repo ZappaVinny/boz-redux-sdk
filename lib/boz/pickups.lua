@@ -19,6 +19,8 @@
 
 local pickups = {}
 
+local core = require("boz.core")
+
 pickups.TYPES = {"double_points", "insta_kill", "max_ammo", "nuke", "carpenter", "firesale",
                  "deathmachine", "perkbottle", "lightningbolt"}
 local INDEX = {}
@@ -26,17 +28,9 @@ for i, name in ipairs(pickups.TYPES) do INDEX[name] = i - 1 end
 local TIMERS = {insta_kill = 0xb8, double_points = 0xbc, firesale = 0xc0, deathmachine = 0xc4,
                 carpenter = 0xc8}
 
-local FALLBACK = {["CPickupManager::s_instance"] = 0x46083c, ["CPickupManager::SpawnPickupAt"] = 0x1d0dac + 1,
-                  ["CPickupManager::ApplyPickup"] = 0x1d2c98 + 1}
-
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
 --- The pickup manager (CPickupManager), or nil outside a match.
 function pickups.manager()
-    local manager = game.read("ptr", sym("CPickupManager::s_instance"))
-    return manager ~= 0 and manager or nil
+    return core.singleton("CPickupManager")
 end
 
 local function index_of(name)
@@ -61,25 +55,23 @@ function pickups.spawn(name, position)
     scratch = scratch or game.alloc(0xd0)
     -- A stand-in transform: position +0xa8, rotation +0x98 (none); then a zero offset at +0xc0.
     for i, value in ipairs({0, 0, 0, 1}) do game.write("f32", scratch + 0x98 + 4 * (i - 1), value) end
-    game.write("f32", scratch + 0xa8, position.x or position[1] or 0)
-    game.write("f32", scratch + 0xac, position.y or position[2] or 0)
-    game.write("f32", scratch + 0xb0, position.z or position[3] or 0)
+    core.write_vec3(scratch + 0xa8, position)
     for i = 0, 2 do game.write("f32", scratch + 0xc0 + 4 * i, 0) end
-    game.call(sym("CPickupManager::SpawnPickupAt"), manager, index, scratch, scratch + 0xc0)
+    core.call("CPickupManager::SpawnPickupAt", manager, index, scratch, scratch + 0xc0)
     return true
 end
 
 --- Applies a power-up as if the local player collected it. Returns true, or false and why.
 function pickups.give(name)
     local manager, index = pickups.manager(), index_of(name)
-    local player = require("boz.components").local_player()
+    local player = require("boz.map").player()
     if not manager or not player then
         return false, "not in a match"
     end
     if not index then
         return false, "no power-up " .. tostring(name)
     end
-    game.call(sym("CPickupManager::ApplyPickup"), manager, player, index, 0)
+    core.call("CPickupManager::ApplyPickup", manager, player, index, 0)
     return true
 end
 

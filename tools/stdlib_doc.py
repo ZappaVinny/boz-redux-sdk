@@ -16,16 +16,24 @@ SDK = Path(__file__).resolve().parents[1]
 
 # Reference order and grouping. Modules not listed go to "Other".
 GROUPS = [
-    ("Gameplay", ["player", "fly", "rounds"]),
+    ("Gameplay", ["player", "camera", "rounds", "zombies", "weapons", "effects", "score", "pickups",
+                  "pieces", "map", "fly", "deadops"]),
+    ("Map scripting", ["world", "prefabs", "objects", "match_events", "timers", "saved", "hooks",
+                       "game", "levels"]),
+    ("Engine access", ["entities", "components", "reflect", "resources", "physics", "game_events",
+                       "spawns", "audio", "screen", "hud", "stats", "saves", "network"]),
     ("Controls", ["input"]),
-    ("Console", ["console"]),
+    ("Console", ["console", "cvars"]),
     ("Menus and text", ["pause_settings", "text"]),
-    ("Game UI building blocks", ["iwui", "frontend", "flash"]),
-    ("Low-level helpers", ["components", "hash", "swf", "avm1"]),
+    ("Game UI building blocks", ["iwui", "frontend", "flash", "swf", "avm1"]),
+    ("Low-level helpers", ["hash", "enums"]),
 ]
+# Internals and generated data: not part of the reference.
+HIDDEN = {"core", "symbol_data", "reflection_data", "event_names", "cvar_data", "world_data"}
 
 FUNCTION = re.compile(r"^function ([\w\.]+[\.:]\w+)\((.*)\)")
-CONSTANT = re.compile(r"^(\w+\.[A-Z][A-Z0-9_]*)\s*=")
+CONSTANT = re.compile(r"^(\w+\.\w+)\s*=")
+ONE_LINER = re.compile(r"^function .*\bend$")
 
 
 def parse(path):
@@ -42,15 +50,20 @@ def parse(path):
         summary = first.split(":", 1)[1].strip() if ":" in first else first
         description = header[1:]
     entries = []
+    shared = None   # a run of one-line functions under one comment shares it
     for i, line in enumerate(lines):
         match = FUNCTION.match(line) or CONSTANT.match(line)
         if not match:
+            shared = None
             continue
         doc = []
         j = i - 1
         while j >= 0 and lines[j].startswith("---"):
             doc.insert(0, lines[j][3:].strip())
             j -= 1
+        if not doc and shared and ONE_LINER.match(line) and ONE_LINER.match(lines[i - 1]):
+            doc = shared
+        shared = doc if ONE_LINER.match(line) else None
         if not doc:
             continue  # internal helpers are left out
         if FUNCTION.match(line):
@@ -95,7 +108,7 @@ def paragraphs(lines):
 
 
 def render(lib):
-    modules = {p.stem: parse(p) for p in sorted(lib.glob("*.lua"))}
+    modules = {p.stem: parse(p) for p in sorted(lib.glob("*.lua")) if p.stem not in HIDDEN}
     out = [
         "# Standard library",
         "",
@@ -107,9 +120,9 @@ def render(lib):
         "This page is generated from the comments in `lib/boz/*.lua` (`tools/stdlib_doc.py`); see",
         "[making-mods.md](making-mods.md) for how to use it in a mod.",
         "",
-        "Using it in a mod: copy `lib/boz` into the mod as `scripts/boz` (or link it while developing),",
-        "then `local player = require(\"boz.player\")`. Each mod carries its own copy; copies in",
-        "different mods work together. The SDK will add it to mods automatically once it builds them.",
+        "Using it in a mod: an SDK project's build adds it to the mod as `scripts/boz`; then",
+        "`local player = require(\"boz.player\")`. Each mod carries its own copy; copies in different",
+        "mods work together.",
         "",
         "Functions that need a Zombies match return `nil` (or `false`) outside one instead of failing.",
         "",
@@ -154,7 +167,7 @@ def main(argv):
     lib = Path(argv[1]) if len(argv) > 1 else SDK / "lib" / "boz"
     target = Path(argv[2]) if len(argv) > 2 else SDK / "docs" / "standard-library.md"
     target.write_text(render(lib))
-    print("%s: %d modules" % (target, len(list(lib.glob("*.lua")))))
+    print("%s: %d modules" % (target, len([p for p in lib.glob("*.lua") if p.stem not in HIDDEN])))
     return 0
 
 

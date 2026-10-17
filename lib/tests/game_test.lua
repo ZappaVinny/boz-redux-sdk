@@ -7,9 +7,10 @@ local LEVEL = 0x5300
 
 game = {
     base = function() return 0x4a000000 end,
-    symbol = function(name) return ({["Level_Load"] = 0x100, ["CWaveRepeatable::GetZombieHealth"] = 0x200, ["String_Equals"] = 0x300})[name] end,
+    symbol = function(name) return ({["Level_Load"] = 0x100, ["CWaveRepeatable::GetZombieHealth"] = 0x200,
+                                     ["String_Equals"] = 0x300, ["CLevelManager::s_instance"] = 0x400})[name] end,
     read = function(kind, at, size)
-        if at == "CLevelManager::s_instance" then return LEVEL end
+        if at == 0x400 then return LEVEL end
         if kind == "string" then return at == 0x9000 and "callofthedead" or at == 0x9100 and "kino" or level_name end
         return memory[at] or 0
     end,
@@ -22,8 +23,6 @@ package.loaded["boz.console"] = {
     register = function(name, value) cvars[name] = value end,
     exec = function(line) table.insert(executed, line) return "" end,
 }
-local level_entity = 0
-package.loaded["boz.objects"] = {level = function() return level_entity end}
 local listeners = {}
 package.loaded["boz.prefabs"] = {on = function(name, fn) listeners[name] = fn end}
 
@@ -67,7 +66,7 @@ hooks_added[0x300].after(eq(0x1234, 0x9000))
 check(eq_result == nil, "and other strings are left alone")
 
 -- Power on once per level start.
-level_entity = 0xabc
+memory[LEVEL + 0x1a0], memory[0xabc + 4] = 0xabc, 1
 for _, fn in ipairs(frames) do fn(0.016) end
 for _, fn in ipairs(frames) do fn(0.016) end
 check(#executed == 1 and executed[1] == "SwitchPowerOn", "power on once when the level starts")

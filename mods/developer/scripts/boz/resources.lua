@@ -18,22 +18,12 @@
 
 local resources = {}
 
+local core = require("boz.core")
 local hash = require("boz.hash")
-
-local FALLBACK = {["g_iwResManager"] = 0x492b10, ["CIwResManager_GetResNamed"] = 0x2352f8 + 1,
-                  ["CIwResManager_GetResHashed"] = 0x235220 + 1, ["CIwResManager_GetGroupNamed"] = 0x2351c0 + 1}
-
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
-
-local function call(...)
-    return (game.call(...) or 0) & 0xffffffff
-end
 
 --- The resource manager, or nil before the game set it up.
 function resources.manager()
-    local manager = game.read("ptr", sym("g_iwResManager"))
+    local manager = game.read("ptr", core.sym("g_iwResManager"))
     return manager ~= 0 and manager or nil
 end
 
@@ -45,10 +35,9 @@ function resources.find(name, type_name)
     end
     local found
     if type(name) == "number" or name:lower():find("^0x") then
-        local value = type(name) == "number" and name or tonumber(name:sub(3), 16)
-        found = call(sym("CIwResManager_GetResHashed"), manager, value, type_name, 0)
+        found = core.call("CIwResManager_GetResHashed", manager, hash.of(name), type_name, 0)
     else
-        found = call(sym("CIwResManager_GetResNamed"), manager, name, type_name, 0)
+        found = core.call("CIwResManager_GetResNamed", manager, name, type_name, 0)
     end
     return found ~= 0 and found or nil
 end
@@ -64,7 +53,7 @@ function resources.group(name)
     if not manager then
         return nil
     end
-    local found = call(sym("CIwResManager_GetGroupNamed"), manager, name)
+    local found = core.call("CIwResManager_GetGroupNamed", manager, name)
     return found ~= 0 and found or nil
 end
 

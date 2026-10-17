@@ -56,13 +56,29 @@ from another (New weapon) plays its base's sounds, so replacing one changes both
 ## A weapon's own sounds
 
 The Weapons tab's **Sounds** panel gives the selected weapon sounds of its own: for Fire, Last
-round, Empty click, Reload, Reload (rounds left), Bought and Bought (player), **Use one sound**
-picks one of your saved sounds. The build gives that weapon its own sequence playing just that
-recording (with the volume and pitch of the sound it replaces), so:
+round, Empty click, Reload, Reload (rounds left), Equip / pickup and Bought (player), **Use one
+sound** picks one of your saved sounds. The build gives sequence fields a new sequence and
+direct-play fields a new sound spec (with the volume and pitch of the sound it replaces), so:
 
 - one recording can replace a reload the game plays in four parts, with nothing left over;
 - the weapon it is made from keeps its own sounds (the idgun's reload leaves the Thundergun's
   alone).
+
+**Equip / pickup** plays when the weapon is equipped, including after a wall buy, but also on
+ordinary weapon switches. **Bought (player)** is the buyer's sound on a wall purchase. The
+shared wall-buy click plays separately and is not replaced by either field. These native fields
+do not cover every way a weapon can be acquired. For a grant-only sound, assign a saved sound to
+**Bought (player)**, then call its generated spec from the weapon script's `on_given()` callback:
+
+```lua
+function on_given()
+    require("boz.audio").play(self.name .. "_playerBuySound")
+end
+```
+
+That callback runs for `CWeaponManager::GiveWeapon` (wall buy, mystery box, and
+`boz.weapons.give`). A wall purchase may also play the native **Bought (player)** field, so
+this example can play the sound twice on that path; use it only when that trade-off is acceptable.
 
 Your recording carries its own timing: line it up with the weapon's reload animation (the wave
 view shows its length). **Use the game's** (✕) goes back. Below, the panel lists the game sounds

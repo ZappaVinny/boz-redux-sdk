@@ -5,7 +5,7 @@
 --   local gun = weapons.current()               -- nil outside a match
 --   if gun then gun:set_ammo(gun:clip_size(), 999) end
 --   weapons.give("thundergun")    weapons.upgrade("mp40")    weapons.take("mp40")
---   weapons.listen(function(event, name) print(event .. " " .. name) end)
+--   weapons.on_event(function(event, name) print(event .. " " .. name) end)
 --
 -- Weapons are named as in the editor's Weapons tab ("mp40", or "0x..." for an unnamed one).
 -- Changes made here last for the match; the Weapons tab changes the weapons for good.
@@ -14,26 +14,17 @@
 -- of the player entity (+0x48 = the player); its weapons are CPlayerWeapon components found by
 -- name hash (WeaponManager_FindWeapon, map at +0x1d4), the one in hand at +0x1e0.
 -- CWeaponManager::GiveWeapon(manager, hash, slot, refill) equips one; EquipWeapon sends
--- SUBJECT_WEAPON_EQUIPPED; CPlayerController::FireWeapon fires; CWeaponManager::SetReloading
+-- SUBJECT_WEAPON_EQUIPPED; the fire button fires through CPlayerController::FireWeapon (hip),
+-- FireWeaponAimed (aiming down sights) or FireWeaponAlternate; CWeaponManager::SetReloading
 -- starts a reload. A CPlayerWeapon keeps its rounds at +0x2c (clip) and +0x30 (reserve), its
 -- clip size at +0x80, reserve size at +0x84, fire rate at +0x200 (rounds per minute) and
 -- CWeaponDamage at +0x20c (head +4, torso +8, limbs +0xc).
 
+local core = require("boz.core")
 local hash = require("boz.hash")
 local components = require("boz.components")
 
 local weapons = {}
-
-local FALLBACK = {
-    ["CWeaponManager::s_table"] = 0x4704d0,
-    ["WeaponManager_FindWeapon"] = 0x21de72 + 1,
-    ["CWeaponManager::GiveWeapon"] = 0x2205dc + 1,
-    ["CWeaponManager::EquipWeapon"] = 0x2202fc + 1,
-    ["CWeaponManager::SetReloading"] = 0x21e078 + 1,
-    ["CPlayerController::FireWeapon"] = 0x1d4ecc + 1,
-    ["WeaponManager_RefillAll"] = 0x21f018 + 1,
-    ["WeaponManager_RefillWeapon"] = 0x21f068 + 1,
-}
 -- The slots: primary (in hand) +0x1e0, secondary +0x1e4, melee +0x1e8, grenade +0x1ec, tactical
 -- (monkey bomb, Gersch, ...) +0x1f0; grenades left +0x1cc, tactical left +0x1d0.
 weapons.SLOTS = {primary = 0x1e0, secondary = 0x1e4, melee = 0x1e8, grenade = 0x1ec, tactical = 0x1f0}
@@ -46,10 +37,6 @@ local CLIP, RESERVE = 0x2c, 0x30
 local CLIP_SIZE, RESERVE_SIZE = 0x80, 0x84
 local FIRE_RATE = 0x200
 local DAMAGE = 0x20c
-
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
 
 local names = {}        -- hash -> name, for the weapons the map knows
 
@@ -69,24 +56,15 @@ function weapons.name(name_hash)
     return name_of(name_hash)
 end
 
-local function hash_of(name)
-    if type(name) == "number" then
-        return name
-    end
-    if string.sub(name, 1, 2) == "0x" then
-        return tonumber(string.sub(name, 3), 16)
-    end
-    return hash.name(name)
-end
-
 --- The local player's weapon manager, or nil outside a match.
 function weapons.manager()
-    local player = components.local_player()
+    local player = require("boz.map").player()
     if not player then
         return nil
     end
+    -- On a child of the player entity: +0x48 points back at the player.
     local only, count = nil, 0
-    for manager in components.each(sym("CWeaponManager::s_table")) do
+    for manager in components.each("CWeaponManager") do
         if game.read("ptr", manager + MANAGER_PLAYER) == player then
             return manager
         end
@@ -94,8 +72,6 @@ function weapons.manager()
     end
     return count == 1 and only or nil
 end
-
--- A weapon handle: a CPlayerWeapon of the player.
 
 local Weapon = {}
 Weapon.__index = Weapon
@@ -114,13 +90,10 @@ function Weapon:upgrade_name()
     return up ~= 0 and name_of(up) or nil
 end
 
---- Rounds in the clip.
+--- Rounds in the clip and spare rounds; the most each can hold.
 function Weapon:clip() return game.read("u32", self.pointer + CLIP) end
---- Spare rounds.
 function Weapon:reserve() return game.read("u32", self.pointer + RESERVE) end
---- Clip size.
 function Weapon:clip_size() return game.read("u32", self.pointer + CLIP_SIZE) end
---- Reserve size.
 function Weapon:reserve_size() return game.read("u32", self.pointer + RESERVE_SIZE) end
 
 --- Sets the rounds in the clip and in reserve (nil keeps one). Returns the weapon.
@@ -171,7 +144,26 @@ function weapons.get(name)
     if not manager then
         return nil
     end
-    return handle(game.call(sym("WeaponManager_FindWeapon"), manager, hash_of(name)))
+    return handle(core.call("WeaponManager_FindWeapon", manager, hash.of(name)))
+end
+
+local guarded = false
+
+--- Makes equipping a weapon whose animations are not loaded (another map's: the AllWeapons
+--- command, weapons.give) safe: the game looks its animation ids up in a missing state machine
+--- (Anim_FindId through a null pointer); this answers "not found" (0xffff) instead.
+--- weapons.give calls it.
+function weapons.guard_missing_animations()
+    if guarded then
+        return
+    end
+    guarded = true
+    hook.add(core.sym("Anim_FindId"), {before = function(call)
+        if call:arg(3) == 0 then
+            game.write("u16", call:arg(1), 0xffff)
+            call:skip()
+        end
+    end})
 end
 
 --- Gives the player *name* and puts it in hand, with full ammo. Returns false outside a match
@@ -181,7 +173,8 @@ function weapons.give(name)
     if not manager or not weapons.get(name) then
         return false
     end
-    game.call(sym("CWeaponManager::GiveWeapon"), manager, hash_of(name), 0, 1)
+    weapons.guard_missing_animations()
+    core.call("CWeaponManager::GiveWeapon", manager, hash.of(name), 0, 1)
     return true
 end
 
@@ -191,7 +184,7 @@ function weapons.slot_of(name)
     if not manager then
         return nil
     end
-    local wanted = hash_of(name)
+    local wanted = hash.of(name)
     for slot, offset in pairs(weapons.SLOTS) do
         local pointer = game.read("ptr", manager + offset)
         if pointer ~= 0 and game.read("u32", pointer + WEAPON_NAME) == wanted then
@@ -211,7 +204,7 @@ function weapons.take(name)
     if not manager or not slot or slot == "melee" then
         return false
     end
-    local equip = sym("CWeaponManager::EquipWeapon")
+    local equip = core.sym("CWeaponManager::EquipWeapon")
     if slot == "primary" then
         local other = game.read("ptr", manager + weapons.SLOTS.secondary)
         if other == 0 then
@@ -232,10 +225,10 @@ function weapons.upgrade(name)
     if not manager or up == 0 or (slot ~= "primary" and slot ~= "secondary") then
         return false
     end
-    game.call(sym("CWeaponManager::GiveWeapon"), manager, up, SLOT_INDEX[slot], 1)
+    core.call("CWeaponManager::GiveWeapon", manager, up, SLOT_INDEX[slot], 1)
     -- Into the hand, the replaced gun drops to an empty secondary slot: the upgrade replaces it.
     if slot == "primary" and game.read("ptr", manager + weapons.SLOTS.secondary) == gun.pointer then
-        game.call(sym("CWeaponManager::EquipWeapon"), manager, 0, 1, 0)
+        core.call("CWeaponManager::EquipWeapon", manager, 0, 1, 0)
     end
     return true
 end
@@ -285,9 +278,9 @@ function weapons.refill(name)
         return false
     end
     if name then
-        game.call(sym("WeaponManager_RefillWeapon"), manager, hash_of(name))
+        core.call("WeaponManager_RefillWeapon", manager, hash.of(name))
     else
-        game.call(sym("WeaponManager_RefillAll"), manager)
+        core.call("WeaponManager_RefillAll", manager)
     end
     return true
 end
@@ -307,17 +300,12 @@ function Weapon:fields()
     return require("boz.reflect").dump(self.pointer, "CPlayerWeapon")
 end
 
--- Events: fn(event, weapon name, data) for "equipped", "given", "fired", "reloaded".
-
 local listeners = {}
 local hooked = false
 
 local function emit(event, name, data)
-    for _, fn in ipairs(listeners) do
-        local ok, err = pcall(fn, event, name, data or {})
-        if not ok then
-            log("boz.weapons: " .. event .. " listener: " .. tostring(err))
-        end
+    for fn in pairs(listeners) do
+        core.safely("boz.weapons: " .. event .. " listener", fn, event, name, data or {})
     end
 end
 
@@ -325,53 +313,32 @@ local function is_players(manager)
     return manager ~= 0 and manager == weapons.manager()
 end
 
+local function fired()
+    local gun = weapons.current()
+    if gun then
+        emit("fired", gun.name, {clip = gun:clip()})
+    end
+end
+
 local function install()
     hooked = true
-    hook.add(sym("CWeaponManager::GiveWeapon"), {before = function(call)
+    hook.add(core.sym("CWeaponManager::GiveWeapon"), {before = function(call)
         if is_players(call:arg(1)) then
             emit("given", name_of(call:arg(2)))
         end
     end})
-    hook.add(sym("CWeaponManager::EquipWeapon"), {before = function(call)
+    hook.add(core.sym("CWeaponManager::EquipWeapon"), {before = function(call)
         local manager, weapon, slot = call:arg(1), call:arg(2), call:arg(3)
         if slot == 0 and weapon ~= 0 and is_players(manager)
                 and game.read("ptr", manager + MANAGER_IN_HAND) ~= weapon then
             emit("equipped", name_of(game.read("u32", weapon + WEAPON_NAME)))
         end
     end})
-    -- Hip fire goes through CPlayerController::FireWeapon; a shot while aiming does not (the aim
-    -- state fires through the arms' state machine), so a clip that went down counts as a shot too,
-    -- less the shots the hook already told about (waiting up to a second for their round to go).
-    local watch = {gun = 0, clip = 0, owed = 0, owed_age = 0}
-    hook.add(sym("CPlayerController::FireWeapon"), {before = function()
-        local gun = weapons.current()
-        if gun then
-            watch.owed, watch.owed_age = watch.owed + 1, 0
-            emit("fired", gun.name, {clip = gun:clip()})
-        end
-    end})
-    events.on("frame", function(dt)
-        local gun = weapons.current()
-        if not gun then
-            watch.gun = 0
-            return
-        end
-        local clip = gun:clip()
-        if gun.pointer == watch.gun and clip < watch.clip and watch.clip - clip <= 8 then
-            local shots = watch.clip - clip
-            local told = math.min(shots, watch.owed)
-            watch.owed = watch.owed - told
-            for i = 1, shots - told do
-                emit("fired", gun.name, {clip = watch.clip - (i - 1) - told})
-            end
-        end
-        watch.owed_age = watch.owed_age + (dt or 0)
-        if watch.owed_age > 1 then
-            watch.owed = 0
-        end
-        watch.gun, watch.clip = gun.pointer, clip
-    end)
-    hook.add(sym("CWeaponManager::SetReloading"), {before = function(call)
+    for _, fire in ipairs({"CPlayerController::FireWeapon", "CPlayerController::FireWeaponAimed",
+                           "CPlayerController::FireWeaponAlternate"}) do
+        hook.add(core.sym(fire), {before = fired})
+    end
+    hook.add(core.sym("CWeaponManager::SetReloading"), {before = function(call)
         if call:arg(2) ~= 0 and is_players(call:arg(1)) then
             local gun = weapons.current()
             if gun then
@@ -381,14 +348,19 @@ local function install()
     end})
 end
 
---- Calls fn(event, weapon name, data) on "equipped", "given", "fired" and "reloaded" of the
---- local player's weapons. Returns fn.
-function weapons.listen(fn)
+--- Calls fn(event, weapon name, data) on "equipped", "given", "fired" (data.clip: rounds left
+--- before the shot) and "reloaded" of the local player's weapons. Returns a handle for off().
+function weapons.on_event(fn)
     if not hooked then
         install()
     end
-    table.insert(listeners, fn)
+    listeners[fn] = true
     return fn
+end
+
+--- Stops a handler on_event() returned.
+function weapons.off(handle)
+    listeners[handle] = nil
 end
 
 return weapons

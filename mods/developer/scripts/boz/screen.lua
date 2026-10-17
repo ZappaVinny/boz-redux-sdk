@@ -16,28 +16,23 @@
 
 local screen = {}
 
+local core = require("boz.core")
 local hash = require("boz.hash")
 
-local FALLBACK = {["CFullscreenFXManager::s_instance"] = 0x461084, ["CFullscreenFXManager::OnEvent"] = 0x18bdec + 1}
-local PLAY_EVENT = 0x4672f0
-
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
 
 --- Plays a full-screen effect by name (or hash) for `ms` milliseconds (default: its own time).
 --- Returns false when the effect is not loaded.
 function screen.effect(name, ms)
-    local manager = game.read("ptr", sym("CFullscreenFXManager::s_instance"))
-    if manager == 0 then
+    local manager = core.singleton("CFullscreenFXManager")
+    if not manager then
         return false
     end
-    local id = type(name) == "number" and name or hash.name(name)
+    local id = hash.of(name)
     if not require("boz.resources").find(id, "CFullscreenFXConfig") then
         return false
     end
-    local event = game.read("u32", game.base() + PLAY_EVENT)
-    game.call(sym("CFullscreenFXManager::OnEvent"), manager, 0, event, id, ms or 0)
+    local event = game.read("u32", core.sym("g_fullscreenFxPlayEvent"))
+    core.call("CFullscreenFXManager::OnEvent", manager, 0, event, id, ms or 0)
     return true
 end
 

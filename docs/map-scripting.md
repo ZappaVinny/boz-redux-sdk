@@ -159,21 +159,29 @@ are not.
 
 The build lists every scripted object and every volume in `scripts/boz/world_data.lua`, with
 property values and parts. `boz.world` starts `boz.prefabs` when each level starts. Objects are
-found by their `CIsNamed` name, and the events are hooks on the game's own functions:
+found by their `CIsNamed` name. Volume events are `boz.objects` hooks on the game's own functions:
 
 - collision enter and exit for Trigger volumes;
 - the easter egg skull's weapon hit for Hit volumes;
-- `Poi_SendUse` for Use volumes;
+- `Poi_SendUse` for Use volumes.
+
+The game events come from `boz.match_events` (any mod can use it directly):
+
 - `CWaveManager::StartWave` for `round_started`;
-- the power switch's flag for `power_on`;
-- `CPerkManager::GainPerk` for `perk_bought`, `CDoor::OnEvent` for `door_opened`, the zombie's
-  dead state for `zombie_killed`, the player's stance for `player_downed` / `player_revived`;
+- the wave manager's power flag for `power_on`;
+- `CPerkManager::GainPerk` for `perk_bought`, a door's state turning open for `door_opened`, the
+  zombie's dead state for `zombie_killed`, the player's stance for `player_downed` /
+  `player_revived`;
 - `CScoreManager::AddScore` for `points_earned`, `CPickupManager::ApplyPickup` for
   `powerup_grabbed`, and the game's own events for the rest (`SUBJECT_WAVE_ENDED`,
   `SUBJECT_CHARGE_POINTS`, `SUBJECT_ENEMY_ATTACK_DAMAGE`, `SUBJECT_MB_CHOOSE_WEAPON`,
   `SUBJECT_PACKAPUNCH_START`, `SUBJECT_NUKE_NOW`, `SUBJECT_CARPENTER_ACTIVATED`,
   `SUBJECT_ON_TRAP_ACTIVATED`, `SUBJECT_ON_TELEPORTER_ACTIVATED`), once each (they reach several
-  subjects);
+  subjects).
+
+Timers are `boz.timers` (game time: frames in which `CPlayerController::FixedStep` ran). Saved
+globals use `boz.saved`:
+
 - `CSaveManager::SaveGame` and `CSaveManager::NotifyLoad` for saved globals, kept in the map
   mod's settings (`saves/mods/<map>.cfg`), next to the game's own save, which is never changed.
 

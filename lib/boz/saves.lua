@@ -13,18 +13,14 @@
 
 local saves = {}
 
-local FALLBACK = {["CSaveManager::AutoSave"] = 0x1f50c8 + 1, ["CSaveManager::s_instance"] = 0x460848}
-
-local function sym(name)
-    return game.symbol(name) or (FALLBACK[name] and game.base() + FALLBACK[name])
-end
+local core = require("boz.core")
 
 --- Saves the match now (single player). Returns false outside a match.
 function saves.save()
-    if game.read("ptr", sym("CSaveManager::s_instance")) == 0 or not require("boz.map").playing() then
+    if not core.singleton("CSaveManager") or not require("boz.map").playing() then
         return false
     end
-    game.call(sym("CSaveManager::AutoSave"))
+    core.call("CSaveManager::AutoSave")
     return true
 end
 

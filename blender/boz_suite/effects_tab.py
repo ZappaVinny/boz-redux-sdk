@@ -65,6 +65,14 @@ def _where(level: str) -> str:
     return "every map" if not level else level
 
 
+def setup(item) -> str:
+    """Lua a script needs once before spawning *item*: a black hole's kills count as the player's
+    only when the script asks (boz.zombies.credit_kills)."""
+    if item.kind == "projectile" and item.behaviour == 6:
+        return 'require("boz.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")\n'
+    return ""
+
+
 def snippet(item) -> str:
     """A line of Lua that spawns the map's effect *item*."""
     if item.kind == "projectile":
@@ -284,7 +292,7 @@ class BOZ_OT_effect_copy(Operator):
         item = selected(scene.boz_effects_used, scene.boz_effect_used_index)
         if item is None:
             return {"CANCELLED"}
-        context.window_manager.clipboard = 'local effects = require("boz.effects")\n' + snippet(item)
+        context.window_manager.clipboard = 'local effects = require("boz.effects")\n' + setup(item) + snippet(item)
         self.report({"INFO"}, "Copied")
         return {"FINISHED"}
 

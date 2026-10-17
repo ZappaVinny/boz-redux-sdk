@@ -959,8 +959,7 @@ def _build_window():
             examples = QGridLayout()
             mods = sdkhome.sdk_root() / 'mods'
             for row, (label, text, folder) in enumerate([
-                    ('Developer', 'The console overlay, cheats and noclip', mods / 'developer'),
-                    ('Redux', 'Settings in the game\'s pause menu', mods / 'redux')]):
+                    ('Developer', 'The console overlay, cheats and noclip', mods / 'developer')]):
                 examples.addWidget(QLabel(f'<b>{label}</b> — {text}'), row, 0)
                 examples.addWidget(button('Open', lambda _=False, f=folder: self.open_example(f),
                                           enabled=folder.is_dir()), row, 1)

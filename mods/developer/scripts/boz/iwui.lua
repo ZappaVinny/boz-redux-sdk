@@ -18,6 +18,8 @@ local hash = require("boz.hash")
 
 local iwui = {}
 
+local core = require("boz.core")
+
 local function ptr(address)
     return game.read("ptr", address)
 end
@@ -28,7 +30,7 @@ function iwui.find(name)
     if manager == 0 then
         return nil
     end
-    local element = game.call("CUIPageManager::FindElement", manager, name, 0)
+    local element = core.call("CUIPageManager::FindElement", manager, name, 0)
     return element ~= 0 and element or nil
 end
 
@@ -88,13 +90,13 @@ end
 
 --- A deep copy of an element (not yet on any page; add it with add_child).
 function iwui.clone(element)
-    local copy = game.call("CIwUIElement::Clone", element)
+    local copy = core.call("CIwUIElement::Clone", element)
     return copy ~= 0 and copy or nil
 end
 
 --- Adds an element to a parent (and to the parent's layout, if it has one).
 function iwui.add_child(parent, child)
-    game.call("CIwUIElement::AddChild", parent, child)
+    core.call("CIwUIElement::AddChild", parent, child)
 end
 
 --- Renames an element (CIwManaged::SetName, vtable slot 9) so FindElement finds it.
@@ -104,13 +106,13 @@ end
 
 --- Shows or hides an element.
 function iwui.set_visible(element, visible)
-    game.call("CIwUIElement::SetVisible", element, visible and 1 or 0)
+    core.call("CIwUIElement::SetVisible", element, visible and 1 or 0)
 end
 
 --- Sets a label's text. SetCaption only stores the "caption" property and skips the redraw in
 --- some states, so the label is also told the property changed (vtable +0xb8).
 function iwui.set_caption(label, text)
-    game.call("CIwUILabel::SetCaption", label, text)
+    core.call("CIwUILabel::SetCaption", label, text)
     game.call(ptr(ptr(label) + 0xb8), label, hash.name("caption"))
 end
 
@@ -118,7 +120,7 @@ end
 --- game's labels show their localiseCaption string id rather than their caption. Changes only
 --- the label's own property (not one shared through its style). Returns false if it has none.
 function iwui.set_text_id(label, id)
-    local property = game.call("IwPropertySet_Find", label + 0xa0, hash.name("localiseCaption"), 0)
+    local property = core.call("IwPropertySet_Find", label + 0xa0, hash.name("localiseCaption"), 0)
     if property == 0 then
         return false
     end
@@ -129,7 +131,7 @@ end
 
 --- Sets a slider's value (0..4096 on the game's sliders); calls its OnSliderChanged slot.
 function iwui.set_value(slider, value)
-    game.call("CIwUISlider::SetValue", slider, value)
+    core.call("CIwUISlider::SetValue", slider, value)
 end
 
 --- The first descendant (depth first) for which test(element) is true.

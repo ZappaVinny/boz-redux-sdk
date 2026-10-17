@@ -14,12 +14,14 @@
 
 local console = {}
 
+local core = require("boz.core")
+
 local listeners = {}
 local capture = nil
 local value_buffer = game.alloc(2048)
 local VAR_TO_STRING = 0x10   -- CIwConsoleVar vtable: ToString(var, buffer, size)
 
-hook.add("Console_Print", {before = function(call)
+hook.add(core.sym("Console_Print"), {before = function(call)
     -- The text is a printf format; "%%" (an escaped "%", as print from map scripts sends) is "%".
     local text = game.read("string", call:arg(2), 2048):gsub("%%%%", "%%")
     if capture then
@@ -34,12 +36,23 @@ hook.add("Console_Print", {before = function(call)
 end})
 
 local function object()
-    return game.read("ptr", "g_console")
+    return game.read("ptr", core.sym("g_console"))
 end
 
 --- True once the game created its console (from the first frame on, in practice).
 function console.ready()
     return object() ~= 0
+end
+
+--- Prints a line on the game's console (the Developer console shows it).
+function console.print(text)
+    local con = object()
+    if con == 0 then
+        return false
+    end
+    -- Console_Print takes a printf format: "%" is written "%%".
+    core.call("Console_Print", con, (tostring(text):gsub("%%", "%%%%")))
+    return true
 end
 
 --- Calls fn(text) for every line the console prints.
@@ -55,7 +68,7 @@ function console.exec(line)
     end
     local outer = capture
     capture = {}
-    game.call("Console_Execute", con, line)
+    core.call("Console_Execute", con, line)
     local output = table.concat(capture, "\n")
     capture = outer
     return output
@@ -67,7 +80,7 @@ function console.get(name)
     if con == 0 then
         return nil
     end
-    local var = game.call("Console_FindVar", con, name)
+    local var = core.call("Console_FindVar", con, name)
     if var == 0 then
         return nil
     end
@@ -103,7 +116,7 @@ function console.register(name, value, kind)
         return nil, "kind must be bool, int, float or string"
     end
     if console.get(name) == nil then
-        game.call(REGISTER[kind], name, value, 0, 0)
+        core.call(REGISTER[kind], name, value, 0, 0)
     end
     return console.set(name, value), kind
 end

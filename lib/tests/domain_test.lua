@@ -1,45 +1,15 @@
 -- The domain modules (rounds, score, pickups, zombies, pieces, audio, stats, hud, map, cvars,
 -- resources, deadops, player additions) against a fake game: lua5.4 lib/tests/domain_test.lua.
-package.path = "lib/?.lua;" .. package.path
-
-local memory, strings, calls, symbols, functions = {}, {}, {}, {}, {}
-local next_symbol = 0x100
-local function address(name)
-    if not symbols[name] then next_symbol = next_symbol + 0x10 symbols[name] = next_symbol end
-    return symbols[name]
-end
+package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+local fake = require("fake_game").install()
+local memory, strings, calls, functions = fake.memory, fake.strings, fake.calls, fake.functions
+local address, check, last = fake.address, fake.check, fake.last
 local cvar_values, executed = {}, {}
-game = {
-    base = function() return 0x4a000000 end,
-    symbol = function(name) return address(name) end,
-    read = function(kind, at, size)
-        if type(at) == "string" then at = address(at) end
-        if kind == "string" then return strings[at] or "" end
-        return memory[at] or 0
-    end,
-    write = function(kind, at, value) memory[at] = value end,
-    alloc = function() return 0x900000 end,
-    call = function(target, ...)
-        if type(target) == "string" then target = address(target) end
-        table.insert(calls, {target, ...})
-        local fn = functions[target]
-        return fn and fn(...) or 0
-    end,
-}
-local hooks = {}
-hook = {add = function(t, h) table.insert(hooks, {t = t, h = h}) return #hooks end, remove = function() end,
-        float_bits = function(x) return string.unpack("<I4", string.pack("<f", x)) end}
-events = {on = function() end}
-function log(m) print("log: " .. m) end
 package.loaded["boz.console"] = {
     get = function(n) return cvar_values[n] end,
     register = function(n, v) cvar_values[n] = v return v end,
     exec = function(line) table.insert(executed, line) return "" end,
 }
-local function check(c, m) if not c then error("FAILED: " .. m, 2) end end
-local function last(name)
-    for i = #calls, 1, -1 do if calls[i][1] == address(name) then return calls[i] end end
-end
 
 -- The world: the level manager, a player (entity 0x5000, id 7) with health and a controller.
 local LEVEL, PLAYER = 0x6000, 0x5000
@@ -113,7 +83,7 @@ local pickups = require("boz.pickups")
 memory[address("CPickupManager::s_instance")] = 0x8500
 memory[0x8500 + 0xb8], memory[0x8500 + 0xbc] = 1000, 0
 check(pickups.spawn("max_ammo", {x = 1, y = 2, z = 3}) and last("CPickupManager::SpawnPickupAt")[3] == 2, "spawn by name")
-check(memory[0x900000 + 0xac] == 2, "at the position")
+check(memory[last("CPickupManager::SpawnPickupAt")[4] + 0xac] == 2, "at the position")
 check(pickups.give("insta_kill") and last("CPickupManager::ApplyPickup")[3] == PLAYER and last("CPickupManager::ApplyPickup")[4] == 1, "give")
 local active = pickups.active()
 check(active.insta_kill == 1000 and active.double_points == nil, "active timers")
@@ -166,7 +136,7 @@ local map = require("boz.map")
 strings[LEVEL + 0x55] = "Kino"
 memory[LEVEL + 0x20c] = 2
 check(map.name() == "kino" and map.difficulty() == "hard" and not map.dead_ops(), "level info")
-map.teleport("lobby")
+map.kino.teleport("lobby")
 check(executed[#executed] == "StartTeleportLobby", "Kino teleport")
 
 -- boz.audio
@@ -174,7 +144,7 @@ local audio = require("boz.audio")
 memory[address("CMusicManager::s_instance")] = 0x8600
 memory[address("CIwSoundManager::s_instance")] = 0x8700
 check(audio.music("115.mp3", {loop = true}) and last("Music_Play")[3] == "blackops-music/115.mp3" and last("Music_Play")[4] == 1, "music by file")
-check(audio.play("begin_wave", {x = 1.5, y = 2, z = 3}) and memory[0x900000] == 1, "a positioned sound (whole centimetres)")
+check(audio.play("begin_wave", {x = 1.5, y = 2, z = 3}) and memory[last("CIwSoundManager::Play")[4]] == 1, "a positioned sound (whole centimetres)")
 
 -- boz.stats and boz.resources
 local stats = require("boz.stats")

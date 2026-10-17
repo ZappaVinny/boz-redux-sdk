@@ -225,24 +225,13 @@ end
 
 --- A manager by class name ("CWaveManager", "CPickupManager", ...): its singleton, or nil.
 function reflect.singleton(class_name)
-    local address = game.symbol(class_name .. "::s_instance")
-    if not address then
-        local ok, data = pcall(require, "boz.symbol_data")
-        local offset = ok and data.singletons[class_name]
-        address = offset and game.base() + offset
-    end
-    if not address then
-        return nil
-    end
-    local instance = game.read("ptr", address)
-    return instance ~= 0 and instance or nil
+    return require("boz.core").singleton(class_name)
 end
 
 --- Every singleton class name the library knows, sorted.
 function reflect.singletons()
-    local ok, data = pcall(require, "boz.symbol_data")
     local out = {}
-    for name in pairs(ok and data.singletons or {}) do
+    for name in pairs(require("boz.symbol_data").singletons) do
         table.insert(out, name)
     end
     table.sort(out)

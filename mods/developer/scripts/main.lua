@@ -4,11 +4,12 @@
 -- every way to see it. This mod gives it a window: a command line with history, a browser for all
 -- console variables, cheats and the developer commands. Press ` or F1.
 --
--- Game access goes through the standard library in scripts/boz: console, player, fly, rounds,
--- zombies, weapons, score, pickups, pieces, effects, map, deadops (the Game tab).
+-- Game access goes through the standard library in scripts/boz: console, player, camera, fly,
+-- levels, rounds, zombies, weapons, score, pickups, pieces, effects, map, spawns, deadops.
 
 local console = require("boz.console")
 local player = require("boz.player")
+local camera = require("boz.camera")
 local fly = require("boz.fly")
 local rounds = require("boz.rounds")
 local levels = require("boz.levels")
@@ -22,9 +23,9 @@ local map = require("boz.map")
 local deadops = require("boz.deadops")
 local spawns = require("boz.spawns")
 
--- The Developer mod is the default test runner: the Blender add-on's Build & Run asks it to start
--- the level just saved, once.
-levels.autostart()
+-- The Developer mod is the default test runner: the editor's Build & Run asks it to start the
+-- level just saved, once.
+levels.autostart_from_settings()
 
 local MAX_LINES = 2000
 local MAX_ROWS = 300          -- variable rows shown at once; type in the filter to narrow
@@ -100,7 +101,6 @@ console.on_output(function(text)
     add_line(text)
 end)
 
--- Commands --------------------------------------------------------------------------------------
 -- The mod answers these itself; everything else goes to the game's console. The game's own
 -- `cvar`, `bind` and `help` are registered but have no handler in the release build.
 
@@ -229,13 +229,8 @@ function commands_here.noclip()
     end
 end
 
--- For quick tests only: the saved field of view is a Redux setting (Options > Settings).
-local function apply_fov(degrees)
-    player.set_fov(degrees)
-end
-
 function commands_here.fov(rest)
-    local current, default = player.fov()
+    local current, default = camera.fov()
     if rest == "" then
         if current then
             info(string.format("fov = %.0f (map default %.0f)", current, default))
@@ -245,7 +240,7 @@ function commands_here.fov(rest)
         return
     end
     if rest == "default" then
-        apply_fov(nil)
+        camera.set_fov(nil)
         info("Field of view back to the map default")
         return
     end
@@ -254,7 +249,7 @@ function commands_here.fov(rest)
         fail("usage: fov <20-140> | fov default")
         return
     end
-    apply_fov(value)
+    camera.set_fov(value)
     info(string.format("Field of view set to %.0f%s", value, current and "" or " (applies in a match)"))
 end
 
@@ -283,7 +278,6 @@ local function run(line)
     execute(line)
 end
 
--- Restore saved settings.
 local saved_binds = settings.get("binds")
 for entry in ((type(saved_binds) == "string" and saved_binds or "") .. "\n"):gmatch("(.-)\n") do
     local key, line = entry:match("^([^\t]+)\t(.+)$")
@@ -292,7 +286,6 @@ for entry in ((type(saved_binds) == "string" and saved_binds or "") .. "\n"):gma
     end
 end
 
--- Keys ------------------------------------------------------------------------------------------
 
 input.bind("`", toggle)
 input.bind("F1", toggle)
@@ -315,17 +308,9 @@ events.on("frame", function(dt)
     end
 end)
 
--- AllWeapons gives weapons from other maps whose animations are not loaded; equipping one makes
--- the game look up animation ids in a missing state machine. Answer "not found" (0xffff) instead
--- of letting the lookup read through a null pointer.
-hook.add("Anim_FindId", {before = function(call)
-    if call:arg(3) == 0 then
-        game.write("u16", call:arg(1), 0xffff)
-        call:skip()
-    end
-end})
+-- AllWeapons gives weapons from other maps whose animations are not loaded.
+weapons.guard_missing_animations()
 
--- Tabs ------------------------------------------------------------------------------------------
 
 local function value_of(name)
     return state.values[name]
@@ -410,7 +395,7 @@ local function cheats_tab(dt)
     end
 
     ui.separator("Field of view (Zombies match)")
-    local current, default = player.fov()
+    local current, default = camera.fov()
     if current then
         local submitted, text = ui.input("Degrees##fov", state.fov_text or string.format("%.0f", current),
             {submit = true, width = 80})
@@ -459,11 +444,12 @@ end
 
 -- The Game tab: the match through the standard library. Every action reports in the Console tab.
 
-local function report(ok, done, why)
+-- report(done, otherwise, ok, why): the stdlib's own reason wins over `otherwise`.
+local function report(done, otherwise, ok, why)
     if ok then
         info(done)
     else
-        fail(why or "not possible here (start a Zombies match)")
+        fail(why or otherwise or "not possible here (start a Zombies match)")
     end
 end
 
@@ -474,7 +460,7 @@ local function spawn_spot()
     return point and point:position() or here
 end
 
-local function each_zombie(fn)
+local function each_living_zombie(fn)
     local n = 0
     for z in zombies.each("all") do
         if z:alive() and not z:dying() then
@@ -500,7 +486,7 @@ local function round_section()
     if ui.button("Set round") or submitted then
         local number = tonumber(text)
         if number and number >= 1 then
-            report(rounds.set(number), "Round " .. math.floor(number) .. " started")
+            report("Round " .. math.floor(number) .. " started", nil, rounds.set(number))
         else
             fail("Type a round number (1 or more)")
         end
@@ -508,63 +494,62 @@ local function round_section()
     end
     ui.tooltip("Starts that round now, with its own zombie count and health; zombies left over go.")
     if ui.button("Spawn a zombie") then
-        report(zombies.spawn_at_point(nil, false), "Spawned a zombie")
+        report("Spawned a zombie", nil, zombies.spawn_at_point(nil, false))
     end
     ui.same_line()
     if ui.button("Kill all zombies") then
-        info("Killed " .. each_zombie(function(z) z:kill() end))
+        info("Killed " .. zombies.kill_all())
     end
     ui.same_line()
-    local spawning = console.get("DisableZombieSpawning") ~= "true"
-    local changed, on = ui.checkbox("Zombies spawn", spawning)
+    local changed, on = ui.checkbox("Zombies spawn", rounds.spawning())
     if changed then
         rounds.set_spawning(on)
         info(on and "Zombies spawn again" or "No more zombies spawn")
     end
     ui.same_line()
     if ui.button("Pause / resume time") then
-        rounds.toggle_pause()
+        map.toggle_pause()
     end
 end
 
 local function zombies_section()
     if ui.button("Freeze all") then
-        info("Froze " .. each_zombie(function(z) z:freeze() end))
+        info("Froze " .. each_living_zombie(function(z) z:freeze() end))
     end
     ui.same_line()
     if ui.button("Burn all") then
-        info("Set " .. each_zombie(function(z) z:burn() end) .. " on fire")
+        info("Set " .. each_living_zombie(function(z) z:burn() end) .. " on fire")
     end
     ui.same_line()
     if ui.button("Explode all") then
-        info("Exploded " .. each_zombie(function(z) z:explode() end))
+        info("Exploded " .. each_living_zombie(function(z) z:explode() end))
     end
     ui.same_line()
     if ui.button("All sprint") then
-        info(each_zombie(function(z) z:set_speed("sprint") end) .. " sprinting")
+        info(each_living_zombie(function(z) z:set_speed("sprint") end) .. " sprinting")
     end
     if ui.button("Spawn a hellhound") then
         local at = spawn_spot()
         local dog, why = at and zombies.spawn("zombie_dog", at)
-        report(dog, "Spawned a hellhound", why or "no spot to spawn at")
+        report("Spawned a hellhound", why or "no spot to spawn at", dog)
     end
     ui.same_line()
     if ui.button("Spawn a monkey") then
         local at = spawn_spot()
         local monkey, why = at and zombies.spawn("zombie_monkey", at)
-        report(monkey, "Spawned a monkey", why)
+        report("Spawned a monkey", why, monkey)
     end
     ui.same_line()
     if ui.button("Spawn George") then
         local at = spawn_spot()
         local george, why = at and zombies.spawn_george(at)
-        report(george, "George is here", why)
+        report("George is here", why, george)
     end
     ui.same_line()
     if ui.button("Bring the nearest here") then
         local here = player.position()
         local z = here and zombies.nearest(here)
-        report(z and z:teleport(spawn_spot()), "Brought a zombie to the nearest spawn point", "no zombie")
+        report("Brought a zombie to the nearest spawn point", "no zombie", z and z:teleport(spawn_spot()))
     end
     ui.text_disabled("Hellhounds, monkeys and George spawn where their map (or a build that uses them) loaded them.")
 end
@@ -600,11 +585,11 @@ local function player_section()
     state.perk = perk
     ui.same_line()
     if ui.button("Give perk") then
-        report(player.give_perk(player.PERKS[perk]), "Gave " .. player.PERKS[perk])
+        report("Gave " .. player.PERKS[perk], nil, player.give_perk(player.PERKS[perk]))
     end
     ui.same_line()
     if ui.button("Take perk") then
-        report(player.take_perk(player.PERKS[perk]), "Took " .. player.PERKS[perk], "the player does not have it")
+        report("Took " .. player.PERKS[perk], "the player does not have it", player.take_perk(player.PERKS[perk]))
     end
     ui.same_line()
     if ui.button("All perks") then
@@ -612,7 +597,7 @@ local function player_section()
     end
     ui.same_line()
     if ui.button("No perks") then
-        report(player.take_all_perks(), "Took every perk")
+        report("Took every perk", nil, player.take_all_perks())
     end
 end
 
@@ -622,16 +607,15 @@ local function weapons_section()
         ui.text_disabled("Start a Zombies match.")
         return
     end
-    local owned = {}
+    local owned, held = weapons.owned(), {}
     for _, slot in ipairs({"primary", "secondary", "grenade", "tactical"}) do
-        local w = weapons.slot(slot)
-        if w then
-            owned[#owned + 1] = slot .. ": " .. w.name
+        if owned[slot] then
+            held[#held + 1] = slot .. ": " .. owned[slot].name
         end
     end
-    ui.text(table.concat(owned, "   "))
+    ui.text(table.concat(held, "   "))
     if ui.button("Pack-a-Punch it") then
-        report(weapons.upgrade(gun.name), "Upgraded " .. gun.name, gun.name .. " has no upgrade")
+        report("Upgraded " .. gun.name, gun.name .. " has no upgrade", weapons.upgrade(gun.name))
     end
     ui.same_line()
     if ui.button("Max ammo") then
@@ -640,7 +624,7 @@ local function weapons_section()
     end
     ui.same_line()
     if ui.button("Drop it") then
-        report(weapons.take(gun.name), "Took " .. gun.name, "it is the only gun")
+        report("Took " .. gun.name, "it is the only gun", weapons.take(gun.name))
     end
     ui.same_line()
     local submitted, text = ui.input("##giveweapon", state.weapon_text, {submit = true, width = 160,
@@ -649,7 +633,7 @@ local function weapons_section()
     ui.same_line()
     if ui.button("Give") or submitted then
         local name = text:match("^%s*(.-)%s*$")
-        report(name ~= "" and weapons.give(name), "Gave " .. name, "no weapon " .. name .. " on this map")
+        report("Gave " .. name, "no weapon " .. name .. " on this map", name ~= "" and weapons.give(name))
         state.weapon_text = ""
     end
 end
@@ -660,12 +644,12 @@ local function powerups_section()
     local name = pickups.TYPES[index]
     ui.same_line()
     if ui.button("Use it now") then
-        report(pickups.give(name), "Power-up: " .. name)
+        report("Power-up: " .. name, nil, pickups.give(name))
     end
     ui.same_line()
     if ui.button("Drop it here") then
         local here = player.position()
-        report(here and pickups.spawn(name, here), "Dropped " .. name)
+        report("Dropped " .. name, nil, here and pickups.spawn(name, here))
     end
 end
 
@@ -675,25 +659,12 @@ local function map_section()
     end
     ui.same_line()
     if ui.button("Open every door") then
-        local n = 0
-        for _, door in ipairs(pieces.doors()) do
-            if door:get("m_DoorState") ~= 2 then
-                door:use_free()
-                n = n + 1
-            end
-        end
-        info("Opening " .. n .. " doors")
+        info("Opening " .. pieces.open_all_doors() .. " doors")
     end
     ui.same_line()
     if ui.button("Move the box") then
-        local boxes, current = pieces.boxes(), pieces.active_box()
-        local others = {}
-        for _, box in ipairs(boxes) do
-            if not current or box.entity ~= current.entity then
-                others[#others + 1] = box
-            end
-        end
-        report(#others > 0 and pieces.move_box(others[math.random(#others)]), "The box moves", "only one box spot here")
+        local moved, why = pieces.move_box()
+        report("The box moves", why, moved)
     end
     ui.same_line()
     if ui.button("Fix barricades") then
@@ -701,7 +672,7 @@ local function map_section()
     end
     if ui.button("Explosion at the crosshair") then
         local at = effects.aim()
-        report(at and effects.explode(at), "Boom")
+        report("Boom", nil, at and effects.explode(at))
     end
     ui.same_line()
     if ui.button("Wireframe") then
@@ -719,7 +690,7 @@ local function deadops_section()
         deadops.set_round(state.round)
     end
     if ui.button("Zombie spawning on / off##do") then
-        deadops.spawning()
+        deadops.toggle_spawning()
     end
     ui.same_line()
     if ui.button("Spawn an enemy") then
