@@ -679,17 +679,27 @@ def first_spec(shared, sequence_hash: int) -> bytes | None:
 
 def add_weapon_sound(parsed, shared, weapon: str, field_key: str, original: int,
                      data_body: bytes) -> int:
-    """Give a weapon a sound of its own for one field: the sound's data, a spec copied from the
-    one its original sequence plays first (else any of the shared group's), and a sequence that
-    plays it, all in *parsed* (the map's weapons group). Returns the sequence's hash for the
-    field."""
-    template = first_spec(shared, original) or next(iter(_resources(shared, SPEC).values()), None)
+    """Add weapon audio and return the hash expected by its native field.
+
+    Fire/reload fields are sequences; buy and empty-click fields are direct sound specs.
+    Preserve the original spec's volume, pitch and sound group when available.
+    """
+    direct = field_key in {'fireEmptySound', 'buySound', 'playerBuySound'}
+    local_specs = _resources(parsed, SPEC)
+    shared_specs = _resources(shared, SPEC)
+    if direct:
+        template = local_specs.get(original) or shared_specs.get(original)
+    else:
+        template = first_spec(parsed, original) or first_spec(shared, original)
+    template = template or next(iter(shared_specs.values()), None)
     if template is None or len(template) < 48:
         raise SoundError('the game has no sound spec to copy')
     base = f'{weapon}_{field_key}'
     sound_hash, sequence_hash = iw_hash(base), iw_hash(f'{base}_seq')
     add_resource(parsed, DATA, sound_hash, data_body, DATA_ADPCM)
     add_resource(parsed, SPEC, sound_hash, template[:44] + struct.pack('<I', sound_hash), SPEC_SOUND)
+    if direct:
+        return sound_hash
     add_resource(parsed, SEQUENCE, sequence_hash, sequence_body(sound_hash))
     return sequence_hash
 

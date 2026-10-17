@@ -180,6 +180,20 @@ class Slots(unittest.TestCase):
 
 
 class WeaponSounds(unittest.TestCase):
+    def test_direct_weapon_fields_use_specs_not_sequences(self):
+        data = sound.encode_data(sound.encode_adpcm(tone(0.1), 22050))
+        original = spec_body(0xa, group_hash=0x777)
+        shared = make_group([rtype(sound.SPEC, [(0x1a, original)])])
+        weapons_group = make_group([])
+        for key in ('buySound', 'playerBuySound', 'fireEmptySound'):
+            value = sound.add_weapon_sound(weapons_group, shared, 'idgun', key, 0x1a, data)
+            self.assertEqual(value, iw_hash(f'idgun_{key}'))
+            self.assertNotIn(value, sound._resources(weapons_group, sound.SEQUENCE))
+            new_spec = sound._resources(weapons_group, sound.SPEC)[value]
+            self.assertEqual(new_spec[:44], original[:44])
+            self.assertEqual(sound.decode_spec(new_spec).data, value)
+        self.assertEqual(sound._resources(weapons_group, sound.SEQUENCE), {})
+
     def test_a_weapon_gets_its_own_sequence(self):
         data = sound.encode_data(sound.encode_adpcm(tone(0.1), 22050))
         shared = make_group([

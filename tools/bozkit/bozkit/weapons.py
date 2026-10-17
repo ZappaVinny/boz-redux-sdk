@@ -166,7 +166,8 @@ FIELDS = (
     Field('reloadSoundSequence', 'Reload', 'Sounds', 'sound', '', 'A full reload.', 0),
     Field('reloadPartialSequence', 'Reload (rounds left)', 'Sounds', 'sound', '',
           'A reload with rounds still in the clip.', 0),
-    Field('buySound', 'Bought', 'Sounds', 'sound', '', 'Played when it is bought.', 0),
+    Field('buySound', 'Equip / pickup', 'Sounds', 'sound', '',
+          'Played on equip, including after a wall purchase; also plays on weapon switches.', 0),
     Field('playerBuySound', 'Bought (player)', 'Sounds', 'sound', '',
           'The buyer\'s own purchase sound.', 0),
     Field('muzzleFlash', 'Muzzle flash', 'Firing', 'effect', '', 'The muzzle flash effect.', 0),
@@ -617,7 +618,7 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=Non
         if resource is None:
             raise WeaponError(f'weapon {weapon.name} is not in the level')
         apply_model(groups, weapon, resource)
-    # 5. Sounds of their own: each in its own sequence (the base weapon keeps its sounds).
+    # 5. Sounds of their own: direct-spec and sequence fields have different native consumers.
     shared = None
     for weapon in defs:
         if not weapon.sound_data:
@@ -631,9 +632,9 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=Non
         spec = resources.decode_entity_spec(resource.body)
         blob = weapon_blob(spec)
         for key, body in sorted(weapon.sound_data.items()):
-            sequence = sound.add_weapon_sound(groups['weapons'], shared, weapon.name, key,
-                                              int(value_or_default(blob, key) or 0), body)
-            set_value(blob, key, sequence)
+            sound_hash = sound.add_weapon_sound(groups['weapons'], shared, weapon.name, key,
+                                                int(value_or_default(blob, key) or 0), body)
+            set_value(blob, key, sound_hash)
         resource.body = resources.encode_entity_spec(spec)
     # Weapons with a model of their own show it on wall buys (not their base's).
     own_models = {hash_of(w.name) for w in defs if w.model and w.model.get('asset')}

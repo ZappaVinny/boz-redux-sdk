@@ -259,7 +259,7 @@ so those two come with the animation tools, not this form.
 | Empty click | `fireEmptySound` |  | 0 | Firing with no ammo. |
 | Reload | `reloadSoundSequence` |  | 0 | A full reload. |
 | Reload (rounds left) | `reloadPartialSequence` |  | 0 | A reload with rounds still in the clip. |
-| Bought | `buySound` |  | 0 | Played when it is bought. |
+| Equip / pickup | `buySound` |  | 0 | Played on equip, including after a wall purchase; also plays on weapon switches. |
 | Bought (player) | `playerBuySound` |  | 0 | The buyer's own purchase sound. |
 
 <!-- fields:end -->

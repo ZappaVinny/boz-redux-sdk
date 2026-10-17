@@ -740,7 +740,7 @@ def _weapon_fields():
 class BOZ_OT_weapon_sound_set(Operator):
     bl_idname = "boz.weapon_sound_set"
     bl_label = "Use one sound"
-    bl_description = ("Give this weapon one sound of its own here (its own sequence: the weapon "
+    bl_description = ("Give this weapon one sound of its own here (the weapon "
                       "it is made from keeps its sounds)")
     bl_property = "sound"
 
