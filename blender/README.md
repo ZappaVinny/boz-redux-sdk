@@ -1,14 +1,12 @@
-# Blender: the BOZ Redux editor and the map tools
+# Blender: the BOZ Redux editor
 
-Two parts live here:
-
-- `boz_suite/`: the **BOZ Redux editor**, a Blender application template. The SDK launcher
-  opens map projects in it (**Open in Editor**). `tools/build_suite.py` assembles it with the
-  add-on and the bozkit modules into `build/suite/` (a Blender user scripts folder) and
-  generates its `startup.blend` from `boz_suite/tabs.py`; the launcher rebuilds it in a checkout
-  when the sources change. Test: `python3 blender/tests/run_suite_test.py`.
-- `boz_redux/`: the add-on with the existing-map tools (below). In the editor they sit in the
-  World tab's sidebar; on their own they install into any Blender 5.2.
+`boz_suite/` is the **BOZ Redux editor**, a Blender application template. The SDK launcher opens
+map projects in it (**Open in Editor**). `tools/build_suite.py` assembles it with the bozkit
+modules into `build/suite/` (a Blender user scripts folder) and generates its `startup.blend`
+from `boz_suite/tabs.py`; the launcher rebuilds it in a checkout when the sources change.
+Tests: `python3 blender/tests/run_suite_test.py` (the editor) and
+`blender -b --factory-startup --python blender/tests/headless_roundtrip.py` (the shipped-file
+tools).
 
 ## The editor
 
@@ -111,18 +109,13 @@ Two parts live here:
 What Python cannot change in Blender (the case for a fork) is tracked in
 `docs/internal/blender-walls.md`.
 
-## Existing-map tools (add-on)
+## Shipped-file tools
 
-The add-on targets Blender 5.2 LTS and delegates all native parsing and writing to the bundled
-`bozkit` modules. Build the installable ZIP from the repository root:
-
-```bash
-python3 tools/build_blender_addon.py
-```
-
-In Blender, open **Edit > Preferences > Add-ons**, install
-`build/blender/boz-redux-blender.zip`, and enable **BOZ Redux Map Tools**. The **BOZ Redux** tab in
-the 3D View sidebar provides import, validation, and export.
+`boz_suite/shipped_maps.py` edits the game's own group files without a project: the editor's
+**Shipped files** sidebar tab imports a group or a level folder, validates, and exports to files
+or into a mod. The mesh and material builders they share with the rest of the editor are in
+`boz_suite/meshes.py`; the overlays (markers, links, the Selected panel) in
+`boz_suite/scene_view.py`.
 
 Import currently creates separate collections for:
 

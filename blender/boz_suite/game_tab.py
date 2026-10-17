@@ -26,14 +26,10 @@ from bpy.types import Operator, Panel, PropertyGroup, UIList
 
 from . import link
 
-try:
-    from bozkit import game, group, weapons as wp, world as bworld
-    from bozkit import project as sdk_project
-    from bozkit.hashing import iw_hash
-except ModuleNotFoundError:
-    from ._vendor.bozkit import game, group, weapons as wp, world as bworld
-    from ._vendor.bozkit import project as sdk_project
-    from ._vendor.bozkit.hashing import iw_hash
+from ._bozkit import game, group, weapons as wp, world as bworld
+from ._bozkit import project as sdk_project
+from ._bozkit import hashing
+iw_hash = hashing.iw_hash
 
 WORKSPACE = "Game"
 GRAPH_IMAGE = "BOZ Rounds"

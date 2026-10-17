@@ -16,7 +16,7 @@ cd /home/zappa/Work/boz/boz-redux-sdk
 git submodule update --init tools/recast
 cmake -S tools/navmesh -B tools/navmesh/build -DCMAKE_BUILD_TYPE=Release
 cmake --build tools/navmesh/build -j
-python3 tools/build_blender_addon.py   # bundles the helper into the add-on
+python3 tools/build_suite.py          # bundles the helper into the editor
 ```
 
 Without the helper, saving still works and reports that the navmesh was not rebuilt.

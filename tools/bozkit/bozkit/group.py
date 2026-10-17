@@ -131,6 +131,13 @@ def parse(data: bytes) -> Group:
     return Group(bytes(data[:6]), sections, bytes(data[p:]))
 
 
+def read_parsed(read, path: str) -> Group:
+    """The group at *path* of a pack's read(), parsed (a read that already returns parsed groups,
+    as in-memory packs do, is passed through)."""
+    raw = read(path)
+    return parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+
+
 def encode(group: Group) -> bytes:
     out = bytearray(group.header)
     for s in group.sections:

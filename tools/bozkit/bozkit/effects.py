@@ -1,10 +1,10 @@
-"""Effects and projectiles: what the game can spawn, carrying the ones a map uses into it, and the
-names scripts use for them (boz.effects).
+"""Effects and projectiles: what the game can spawn, bringing the ones a map uses into it
+(bozkit.bundle), and the names scripts use for them (boz.effects).
 
 How the game spawns them (Ghidra): CSpawnManager spawns any entity spec by hash at a position
 and rotation (Entity_CreateFromSpec, then the CIsTransform's position +0xa8 and rotation +0x98,
-x y z w); CIwResManager finds the spec in any loaded group, so a map can carry the ones it uses
-in its own groups. Effects are entity specs that draw particles (CIsRenderableGFXEmitter); the
+stored scalar first); CIwResManager finds the spec in any loaded group, so a map can hold the
+ones it uses in its own groups. Effects are entity specs that draw particles (CIsRenderableGFXEmitter); the
 game's shared ones are in ingame/effects/visualeffects and ingame/ingame (the Gersch device's
 gersch_Effect among them), every map loads both. Projectiles are entity specs with a
 CProjectileEntity, in each map's weapon_projectiles group; their behaviourType decides what they
@@ -18,9 +18,6 @@ do:
      zombies within 5000 units walk into it and die within m_proximityRadius x 100; a player
      inside is sent to a Gersch teleport point (none: nothing happens); it ends with
      gersch_shuts
-
-Some of what a projectile uses is played by name, not referenced by its data (the Gersch
-sounds): RUNTIME_SOUNDS lists those per behaviour, carried with it.
 
 Project file: source/effects.json {"effects": [{"name", "kind", "level", "hash"}]}: each effect
 the map uses under the project's own name (what scripts call it).
@@ -46,11 +43,8 @@ SHARED_EFFECT_GROUPS = ('ingame/effects/visualeffects.group.bin', 'ingame/ingame
 BEHAVIOURS = {0: 'Plain', 1: 'Thrown (lifetime)', 2: 'Bolt (explodes on impact)',
               3: 'Projectile', 4: 'Lure (zombies drawn to it)', 5: 'Projectile',
               6: 'Black hole (Gersch device)'}
-RUNTIME_SOUNDS = {6: ('gersch_opens', 'gersch_loop', 'gersch_shuts', 'gersch_teleport')}
 TRIGGERS = {6: ('open',), 1: ('explode',), 2: ('explode',)}
 NAME_RE = re.compile(r'[a-z][a-z0-9_]{0,31}')
-TEXTURE_CLASSES = {iw_hash('CIwTexture')}
-SOUND_DATA, SOUND_SPEC = iw_hash('CIwSoundData'), iw_hash('CIwSoundSpec')
 
 
 class EffectError(ValueError):
@@ -102,8 +96,7 @@ def behaviour_of(spec) -> int:
 
 def _parsed(read, path):
     from . import group as group_module
-    raw = read(path)
-    return group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+    return group_module.read_parsed(read, path)
 
 
 def catalog(read, names, known: dict | None = None) -> list[Entry]:
@@ -254,63 +247,6 @@ def _add_like(target, source_type, resource) -> None:
     raise EffectError('the target group has no resource section')
 
 
-def _references(body: bytes, wanted: set) -> set:
-    found = set()
-    for shift in range(4):
-        count = (len(body) - shift) // 4
-        if count > 0:
-            found |= wanted.intersection(struct.unpack_from(f'<{count}I', body, shift))
-    return found
-
-
-def carry(read, used: Used, target, groups: dict) -> int:
-    """Copy an effect or projectile of another map, with everything it refers to by hash (and the
-    sounds its behaviour plays by name), into *target* (the map's projectiles group). Resources
-    any of the map's *groups* or the shared groups already hold are not copied. Returns how many
-    resources were copied."""
-    gear = used.level
-    paths = []
-    if used.kind == 'projectile':
-        paths.append(f'ingame/weapons/weapon_projectiles_{gear}.group.bin')
-    paths += [f'levels/{gear}/effects.group.bin', f'levels/{gear}/effects_shared.group.bin',
-              f'levels/{gear}/{gear}_statics.group.bin']
-    index = {}
-    for p in paths:
-        try:
-            parsed = _parsed(read, p)
-        except (KeyError, OSError, ValueError):
-            continue
-        for t in parsed.types():
-            for r in t.resources:
-                index.setdefault(r.in_group_hash, []).append((t, r))
-    if used.hash not in index:
-        raise EffectError(f'{used.name}: {gear} has no effect 0x{used.hash:08x}')
-    present = set()
-    for parsed in list(groups.values()) + [_parsed(read, p) for p in SHARED_EFFECT_GROUPS]:
-        present |= {(t.class_hash, r.in_group_hash) for t in parsed.types() for r in t.resources}
-    seeds = {used.hash} | {iw_hash(n) for n in RUNTIME_SOUNDS.get(used.behaviour, ())}
-    wanted = set(index)
-    todo, done = [h for h in seeds if h in index], set()
-    while todo:
-        current = todo.pop()
-        if current in done:
-            continue
-        done.add(current)
-        for t, r in index[current]:
-            if (t.class_hash, current) in present or t.class_hash in TEXTURE_CLASSES:
-                continue
-            todo.extend(_references(r.body, wanted) - done)
-    copied = 0
-    for current in done:
-        for t, r in index[current]:
-            if (t.class_hash, current) in present:
-                continue
-            _add_like(target, t, r)
-            present.add((t.class_hash, current))
-            copied += 1
-    return copied
-
-
 MODEL_COMPONENTS = {iw_hash('CIsRenderableModel')}
 PHYSICS_COMPONENTS = {iw_hash(n) for n in ('CIsRigidBody', 'CIsCollisionSphere')}
 
@@ -333,7 +269,7 @@ def changed_spec(body: bytes, used: Used) -> bytes:
 
 
 def _find_spec(read, used: Used, groups: dict) -> tuple | None:
-    """(resource type, resource) of an effect's spec: in the map's groups (carried in or the base
+    """(resource type, resource) of an effect's spec: in the map's groups (bundled in or the base
     map's), else in the shared groups or its own map's."""
     paths = list(SHARED_EFFECT_GROUPS)
     if used.level:
@@ -364,55 +300,41 @@ def _source_group(used: Used) -> str | None:
     return f'levels/{used.level}/effects.group.bin'
 
 
-def apply(read, source: Path, groups: dict, map_name: str, base: str, pack=None,
-          scripts: Path | None = None) -> list[dict]:
+def apply(read, source: Path, groups: dict, map_name: str, pack, scripts: Path | None = None) -> list[dict]:
     """Put the project's effects in the map and return the runtime list for boz.effects.
 
-    With the game *pack*, everything goes through bozkit.bundle: each effect (from any map) and
-    every effect or projectile the project's *scripts* name ("0x..." or its game name) comes
-    with everything it uses, so scripts can spawn anything; changed ones (hidden, anchored) get
-    the map's own copy. Without it, effects of other maps than *base* are carried (carry)."""
+    Everything goes through bozkit.bundle: each effect (from any map) and every effect or
+    projectile the project's *scripts* name ("0x..." or its game name) comes with everything it
+    uses, so scripts can spawn anything; changed ones (hidden, anchored) get the map's own copy."""
+    from . import bundle as bundle_module, resources, weapons
     used = load(source)
-    from . import levels
     target = groups.get(f'weapon_projectiles_{map_name}.group.bin')
+    registry = bundle_module.Registry.of(pack)
+    bundle = bundle_module.Bundle(registry, groups, map_name)
+    for item in used:
+        bundle.add([item.hash], prefer=_source_group(item))
+        spawned = next((v for (_path, h), v in bundle.renamed.items() if h == item.hash), None)
+        if spawned and not item.changed:
+            item.hash = spawned            # the map holds it under a name of its own
+    known = {u.hash for u in used}
+    names = weapons._names()
     extra: list[dict] = []
-    if pack is not None:
-        from . import bundle as bundle_module, weapons
-        registry = bundle_module.Registry.of(pack)
-        bundle = bundle_module.Bundle(registry, groups, map_name)
-        for item in used:
-            bundle.add([item.hash], prefer=_source_group(item))
-            spawned = next((v for (_path, h), v in bundle.renamed.items() if h == item.hash), None)
-            if spawned and not item.changed:
-                item.hash = spawned            # the map holds it under a name of its own
-        known = {u.hash for u in used}
-        names = weapons._names()
-        for value in bundle_module.script_names(scripts, registry) if scripts else []:
-            if value in known:
-                continue
-            bundle.add([value])
-            entry = next((e for e in registry.entries(value) if e.cls == ENTITY_SPEC), None)
-            if entry is None:
-                continue          # a sound, sequence, screen effect or fog: bundled, not an effect
-            behaviour, kind = 0, 'effect'
-            if entry is not None:
-                from . import resources
-                try:
-                    spec = resources.decode_entity_spec(entry.resource.body)
-                    if PROJECTILE in _types_of(spec):
-                        kind, behaviour = 'projectile', behaviour_of(spec)
-                except (ValueError, struct.error):
-                    pass
-            extra.append({'name': names.get(value, f'0x{value:08x}'), 'hash': value, 'kind': kind,
-                          'behaviour': behaviour, 'triggers': list(TRIGGERS.get(behaviour, ()))})
-    else:
-        gear = levels.GEAR.get(base, base) if hasattr(levels, 'GEAR') else base
-        for item in used:
-            if not item.level or item.level in (base, gear):
-                continue
-            if target is None:
-                raise EffectError(f'{item.name}: the map has no projectiles group to carry it into')
-            carry(read, item, target, groups)
+    for value in bundle_module.script_names(scripts, registry) if scripts else []:
+        if value in known:
+            continue
+        bundle.add([value])
+        entry = next((e for e in registry.entries(value) if e.cls == ENTITY_SPEC), None)
+        if entry is None:
+            continue          # a sound, sequence, screen effect or fog: bundled, not an effect
+        behaviour, kind = 0, 'effect'
+        try:
+            spec = resources.decode_entity_spec(entry.resource.body)
+            if PROJECTILE in _types_of(spec):
+                kind, behaviour = 'projectile', behaviour_of(spec)
+        except (ValueError, struct.error):
+            pass
+        extra.append({'name': names.get(value, f'0x{value:08x}'), 'hash': value, 'kind': kind,
+                      'behaviour': behaviour, 'triggers': list(TRIGGERS.get(behaviour, ()))})
     for item in used:            # changed ones: the map's own copy of the spec, under its name
         if not item.changed:
             continue

@@ -20,12 +20,9 @@ from bpy.types import Operator, Panel, PropertyGroup, UIList
 
 from . import link
 
-try:
-    from bozkit import sound
-    from bozkit.hashing import iw_hash
-except ModuleNotFoundError:
-    from ._vendor.bozkit import sound
-    from ._vendor.bozkit.hashing import iw_hash
+from ._bozkit import sound
+from ._bozkit import hashing
+iw_hash = hashing.iw_hash
 
 WORKSPACE = "Audio"
 AUDIO_TYPES = (".wav", ".mp3", ".ogg", ".flac", ".aif", ".aiff", ".m4a", ".opus")
@@ -756,10 +753,7 @@ class BOZ_PT_sound_processor(_SoundsPanel, Panel):
 
 
 def _weapon_fields():
-    try:
-        from bozkit import weapons as wp
-    except ModuleNotFoundError:
-        from ._vendor.bozkit import weapons as wp
+    from ._bozkit import weapons as wp
     return [(f.key, f.label) for f in wp.FIELDS if f.kind == "sound" and f.key != "muzzleFlash"]
 
 

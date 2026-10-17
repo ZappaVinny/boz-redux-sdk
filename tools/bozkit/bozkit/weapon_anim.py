@@ -83,8 +83,7 @@ def load_clips(source: Path, weapon: str) -> dict:
         except (OSError, ValueError) as exc:
             raise WeaponAnimError(f'{path}: {exc}') from None
         entry = {'state': str(data.get('state', '')), 'edits': dict(data.get('edits', {})),
-                 'length': int(data.get('length', 0)),
-                 'legacy': 'edits' not in data}       # made by an older editor: its clips are the edit
+                 'length': int(data.get('length', 0))}
         for part in ('arms', 'gun'):
             if part in data:
                 entry[part] = _clip_from(data[part])
@@ -92,34 +91,6 @@ def load_clips(source: Path, weapon: str) -> dict:
                 entry[f'{part}_layer'] = data[f'{part}_layer']   # the editor's keys on the stock motion
         out[state] = entry
     return out
-
-
-def save_clip(source: Path, weapon: str, state: int, label: str, part: str, clip: Clip | None,
-              layer: dict | None = None) -> None:
-    """Store (or with None, remove) one part's clip of one state. *layer*: the editor's keys made on
-    top of the stock motion (kept to edit them again; the build uses the clip)."""
-    folder = clips_dir(source, weapon)
-    path = folder / f'{state:08x}.json'
-    try:
-        data = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
-    except (OSError, ValueError):
-        data = {}
-    data['state'] = label
-    if clip is None:
-        data.pop(part, None)
-        data.pop(f'{part}_layer', None)
-    else:
-        data[part] = _clip_json(clip)
-        if layer is not None:
-            data[f'{part}_layer'] = layer
-        else:
-            data.pop(f'{part}_layer', None)
-    if 'arms' not in data and 'gun' not in data:
-        if path.is_file():
-            path.unlink()
-        return
-    folder.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, separators=(',', ':')) + '\n', encoding='utf-8')
 
 
 def save_state(source: Path, weapon: str, state: int, label: str, clips: dict, edits: dict,
@@ -146,7 +117,6 @@ def save_state(source: Path, weapon: str, state: int, label: str, clips: dict, e
 #   {"frame": f, "pose": {bone: [px, py, pz, qw, qx, qy, qz]}}   your pose, held from f on
 #   {"frame": f, "original": s}                                   the original again from f, playing
 #                                                                 its frame s at f (s = f: as it was)
-#   {"frame": 0, "legacy": true}                                  a clip made by an older editor
 # Before a part's first change it plays the original; a change lasts until the next one, and never
 # touches the frames before it.
 
@@ -162,15 +132,12 @@ def change_at(changes: list, frame: int):
 
 
 def source_of(changes: list, frame: int):
-    """What a part plays at *frame*: ("original", frame of the original), ("pose", bones) or
-    ("legacy", frame)."""
+    """What a part plays at *frame*: ("original", frame of the original) or ("pose", bones)."""
     change = change_at(changes, frame)
     if change is None:
         return 'original', frame
     if 'pose' in change:
         return 'pose', change['pose']
-    if change.get('legacy'):
-        return 'legacy', frame
     return 'original', int(change['original']) + frame - change['frame']
 
 

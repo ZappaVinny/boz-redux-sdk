@@ -1,19 +1,16 @@
 # Editing existing maps in Blender
 
-The BOZ Redux add-on targets Blender 5.2 LTS and uses the same `bozkit` codecs as the command-line
-and desktop tools. It never overwrites the groups it imports. Format details are in
-[asset formats](asset-formats.md).
+The BOZ Redux editor (Blender 5.2 LTS with the SDK's app template) edits the game's own group
+files directly with its **Shipped files** tools, using the same `bozkit` codecs as the
+command-line and desktop tools. It never overwrites the groups it imports. Format details are in
+[asset formats](asset-formats.md). A map project that inherits a shipped map
+([SDK projects](sdk-projects.md)) is the usual way to change an existing map; these tools are for
+working on the files themselves.
 
-## Build and install
+## Open the tools
 
-```bash
-cd /home/zappa/Work/boz/boz-redux-sdk
-python3 tools/build_blender_addon.py
-```
-
-Install `build/blender/boz-redux-blender.zip` from **Edit > Preferences > Add-ons > Install from
-Disk**, enable **BOZ Redux Map Tools**, and restart Blender. The tools are in the **BOZ Redux** tab
-of the 3D View sidebar. The ZIP bundles the map-format part of `bozkit`; Blender needs nothing else.
+Open any map project in the editor (**Open in Editor** in the SDK launcher). The tools are in the
+**Shipped files** tab of the 3D View sidebar; set the client folder there.
 
 ## Extract the game data
 
@@ -30,7 +27,7 @@ A map is spread over many groups. Kino der Toten's `levels/kino` folder has 25: 
 places objects whose models live in `kino_dynamics` and in the shared `ingame` group, and every
 room (`theatre_shared`, `lobby_shared`, ...) has its own geometry, portals and lightmaps.
 
-1. Start from a fresh scene and choose **BOZ Redux > Import level folder**.
+1. Start from a fresh scene and choose **Shipped files > Import level folder**.
 2. Select `/tmp/boz-etc/levels/kino`. With **Shared in-game group** enabled, the add-on also reads
    `/tmp/boz-etc/ingame/ingame.group.bin` and the level's weapon groups
    (`ingame/weapons/*_kino.group.bin`, for the wall-buy displays) to resolve placements, but

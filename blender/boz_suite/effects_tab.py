@@ -16,11 +16,7 @@ from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntPropert
 from bpy.types import Operator, Panel, PropertyGroup, UIList
 
 from . import link
-
-try:
-    from bozkit import effects
-except ModuleNotFoundError:
-    from ._vendor.bozkit import effects
+from ._bozkit import effects
 
 WORKSPACE = "Effects"
 _state: dict = {"catalog": None, "refreshing": False}

@@ -21,18 +21,14 @@ One Blender unit is one game centimetre; Blender's Z is the game's Y.
 from __future__ import annotations
 
 import json
-import math
 from collections import defaultdict
 from pathlib import Path
 
 import bpy
 
-try:
-    from bozkit import blender_scene, toolkit, world
-except ModuleNotFoundError:
-    from ._vendor.bozkit import blender_scene, toolkit, world
+from ._bozkit import blender_scene, toolkit, world
 
-from . import game
+from . import game, meshes
 
 _SAFE = str.maketrans({c: "_" for c in " .-/\\()[]{}:;,'\"!?"})
 
@@ -377,12 +373,11 @@ def entity_category(base: str, source_hash: int, group_path: str = "") -> str:
 def colour_marker(obj, category: str) -> None:
     """Make *obj* a marker cube coloured by what the entity is (the shipped-map add-on's
     colours: perks violet, doors orange, wall buys green, triggers teal, ...)."""
-    tools = game._tools()
-    colour = tools.MARKER_COLOURS.get(category, tools.MARKER_COLOURS["entity"])
+    colour = meshes.MARKER_COLOURS.get(category, meshes.MARKER_COLOURS["entity"])
     if obj.data is not marker_mesh():
         obj.data = marker_mesh()
     obj.material_slots[0].link = "OBJECT"
-    obj.material_slots[0].material = tools._colour_material(f"BOZ Marker: {category}", colour, 1.0)
+    obj.material_slots[0].material = meshes.colour_material(f"BOZ Marker: {category}", colour, 1.0)
     obj.color = (*colour, 1.0)
     obj.hide_render = True
     obj["boz_marker"] = category
@@ -510,7 +505,7 @@ def volume_box(kind: str):
     colour = VOLUME_COLOURS.get(kind, VOLUME_COLOURS["trigger"])
     box = bpy.data.objects.new(name, volume_mesh())
     box.material_slots[0].link = "OBJECT"
-    box.material_slots[0].material = game._tools()._colour_material(name, colour, 0.25)
+    box.material_slots[0].material = meshes.colour_material(name, colour, 0.25)
     box.color = (*colour, 0.25)
     box.show_wire = True
     box.show_transparent = True
@@ -528,33 +523,6 @@ def colour_volume(obj) -> None:
     obj.empty_display_type = "CUBE"
     obj.empty_display_size = world.TRIGGER_SIZE / 2
     obj.hide_render = True
-
-
-def migrate_volumes(scene) -> int:
-    """Volumes saved as meshes become Empties showing their box (the outliner's volume icon)."""
-    changed = 0
-    for obj in list(scene.objects):
-        if obj.boz.role != "volume" or obj.type == "EMPTY":
-            continue
-        replacement = bpy.data.objects.new(obj.name, None)
-        for prop in obj.boz.bl_rna.properties:
-            key = prop.identifier
-            if key not in ("rna_type", "part_name") and not prop.is_readonly:
-                setattr(replacement.boz, key, getattr(obj.boz, key))
-        for key, value in obj.items():
-            replacement[key] = value
-        for collection in obj.users_collection:
-            collection.objects.link(replacement)
-        replacement.parent = obj.parent
-        replacement.matrix_parent_inverse = obj.matrix_parent_inverse.copy()
-        replacement.matrix_basis = obj.matrix_basis.copy()
-        part_name, name = obj.boz.part_name, obj.name
-        bpy.data.objects.remove(obj)
-        replacement.name = name
-        replacement.boz.part_name = part_name
-        colour_volume(replacement)
-        changed += 1
-    return changed
 
 
 def volume_object(volume: "world.Volume", scene, parent=None):
@@ -644,21 +612,15 @@ class _Reports:
 def show_base_level(scene, base: str) -> int:
     """Show the base level an inherited map starts from, read only (its rooms, models and
     entities, through the shipped-map tools). Returns the number of objects shown."""
-    import importlib
-
-    try:
-        from bozkit import library
-    except ModuleNotFoundError:
-        from ._vendor.bozkit import library
-    tools = importlib.import_module("boz_redux.operators")
+    from ._bozkit import library
     folder = library.library_dir() / "groups" / "levels" / base
-    editable, references = tools.blender_scene.level_groups(str(folder), None)
-    result = tools.blender_scene.import_groups(editable, references, include_models=False,
+    editable, references = blender_scene.level_groups(str(folder), None)
+    result = blender_scene.import_groups(editable, references, include_models=False,
                                                include_collision=False, include_portals=False,
                                                include_navigation=False)
     before = set(bpy.data.objects)
     scene.boz_show_markers = True   # markers of triggers, effects, spawns, ...
-    tools._import_result(_Reports(), bpy.context, result)
+    meshes.import_result(_Reports(), bpy.context, result)
     shown = [obj for obj in bpy.data.objects if obj not in before]
     collection = bpy.data.collections.get(BASE_COLLECTION) or bpy.data.collections.new(BASE_COLLECTION)
     if collection.name not in scene.collection.children:
@@ -687,10 +649,7 @@ def _entity_hash(obj) -> str:
 
 def _base_specs(base: str) -> dict:
     """The base level's own entities (its statics group): "0x<hash>" -> EntitySpec."""
-    try:
-        from bozkit import group, levels, library, resources
-    except ModuleNotFoundError:
-        from ._vendor.bozkit import group, levels, library, resources
+    from ._bozkit import group, levels, library, resources
     path = library.library_dir() / "groups" / "levels" / base / f"{base}_statics.group.bin"
     try:
         parsed = group.parse(path.read_bytes())
@@ -894,26 +853,6 @@ def show_game_models(scene) -> int:
             collection.objects.link(replacement)
         bpy.data.objects.remove(obj)
         replacement.name = replacement.name.split(".")[0]
-        changed += 1
-    return changed
-
-
-LEGACY_ROLES = {"mesh": "model", "prop": "model", "entity": "prefab", "base": "prefab"}
-
-
-def migrate_roles(scene) -> int:
-    """Scenes made before models, volumes and prefabs: level meshes and props become models of
-    your own, entities become game prefabs, base entities original game prefabs."""
-    changed = 0
-    for obj in scene.objects:
-        old = obj.boz.role
-        if old not in LEGACY_ROLES:
-            continue
-        if old in ("mesh", "prop"):
-            obj.boz.source = ""
-        if old == "base":
-            obj.boz.original = True
-        obj.boz.role = LEGACY_ROLES[old]
         changed += 1
     return changed
 

@@ -14,12 +14,9 @@ import bpy
 from bpy.types import Operator, Panel
 from bpy.props import EnumProperty
 
-try:
-    from bozkit import blender_scene, collision, group, levels, library, world
-except ModuleNotFoundError:
-    from ._vendor.bozkit import blender_scene, collision, group, levels, library, world
+from ._bozkit import blender_scene, collision, group, levels, library, world
 
-from . import convert, game
+from . import convert, meshes, scene_view
 from . import link
 
 COLLECTIONS = {"navmesh": "Preview: walkable area", "collision": "Preview: collision"}
@@ -74,20 +71,14 @@ def build(context) -> str:
     if project is None or project.kind != "map":
         raise ValueError("open this map from the SDK launcher to preview it")
     import os
-    try:
-        from bozkit import sdkhome
-    except ModuleNotFoundError:
-        from ._vendor.bozkit import sdkhome
+    from ._bozkit import sdkhome
     client = os.environ.get("BOZ_CLIENT") or sdkhome.Settings.load().client
     pack = library.open_game(client or None)
     if pack is None:
         raise ValueError("the preview needs the game data: build the asset library in the launcher")
     problems = []
     source = convert.scene_to_world(link.map_scene(), problems)
-    try:
-        from bozkit import assets, weapons
-    except ModuleNotFoundError:
-        from ._vendor.bozkit import assets, weapons
+    from ._bozkit import assets, weapons
     try:
         # The project's own weapons too, as Build & Run compiles it (wall buys may sell them).
         defs = weapons.load_defs(project.root / "source")
@@ -98,18 +89,17 @@ def build(context) -> str:
         raise ValueError(str(exc)) from None
     statics = files.groups[f"{project.map_name}_statics.group.bin"]
     items = _scene_meshes(statics, project.map_name)
-    tools = game._tools()
     shown = {}
     for kind, name in COLLECTIONS.items():
         clear(kind)
         collection = bpy.data.collections.get(name) or bpy.data.collections.new(name)
         if collection.name not in link.map_scene().collection.children:
             link.map_scene().collection.children.link(collection)
-        meshes, objects = {}, {}
+        made_meshes, made_objects = {}, {}
         for item in items:
             if item.kind not in KINDS[kind]:
                 continue
-            obj = tools._mesh_object(context, item, meshes, objects)
+            obj = meshes.mesh_object(context, item, made_meshes, made_objects)
             for users in list(obj.users_collection):
                 users.objects.unlink(obj)
             collection.objects.link(obj)
@@ -120,7 +110,7 @@ def build(context) -> str:
         found = bpy.data.collections[name]
         if found.name.startswith(project.map_name) and not found.objects and not found.children:
             bpy.data.collections.remove(found)
-    tools.view.apply_visibility(context)
+    scene_view.apply_visibility(context)
     return (f"walkable area {shown.get('navmesh', 0)} polygons, collision "
             f"{shown.get('collision', 0)} triangles")
 
@@ -193,7 +183,7 @@ def draw_switches(layout, context, compact=False) -> None:
     if scene.boz_show_links:
         row.prop(scene, "boz_links_selected_only", text="" if compact else "Selected",
                  icon="RESTRICT_SELECT_OFF", toggle=True)
-        error = game._tools().view.draw_error
+        error = scene_view.draw_error
         if error and not compact:
             layout.label(text=f"Links could not be drawn: {error}", icon="ERROR")
     row = layout.row(align=True)

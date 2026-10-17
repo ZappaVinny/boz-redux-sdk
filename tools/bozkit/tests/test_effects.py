@@ -1,4 +1,4 @@
-"""Effects and projectiles (synthetic): the catalog, the project's effects, carrying into a map."""
+"""Effects and projectiles (synthetic): the catalog, the project's effects, bundling into a map."""
 import struct
 import sys
 import tempfile
@@ -43,8 +43,24 @@ def rtype(class_name, items, names_omitted=1, subclass=None):
                               [group.Resource(subclass, h, body) for h, body in items])
 
 
+GERSCH_SOUNDS = ('gersch_opens', 'gersch_loop', 'gersch_shuts', 'gersch_teleport')
+
+
+class Pack:
+    """A game pack over in-memory groups."""
+
+    def __init__(self, groups):
+        self.groups = groups
+
+    def names(self):
+        return list(self.groups)
+
+    def read(self, path):
+        return self.groups[path]
+
+
 def game():
-    sounds = [(iw_hash(n), b'pcm ' + n.encode()) for n in effects.RUNTIME_SOUNDS[6]]
+    sounds = [(iw_hash(n), b'pcm ' + n.encode()) for n in GERSCH_SOUNDS]
     groups = {
         'ingame/weapons/weapon_projectiles_ascension.group.bin': make_group([
             rtype('CIsEntitySpec', [(GERSCH, projectile_spec(6))]),
@@ -82,22 +98,21 @@ class Project(unittest.TestCase):
             self.assertEqual(effects.load(source), [])
 
 
-class Carry(unittest.TestCase):
-    def test_a_projectile_brings_what_it_uses(self):
+class Apply(unittest.TestCase):
+    def test_a_projectile_of_another_map_comes_with_what_it_uses(self):
         groups, read = game()
-        target = make_group([rtype('CIsEntitySpec', [(iw_hash('mine'), b'x')])])
-        used = effects.Used('gersch', 'projectile', 'ascension', GERSCH, 6)
-        copied = effects.carry(read, used, target, {'weapon_projectiles_mymap.group.bin': target})
-        self.assertEqual(copied, 2 + len(effects.RUNTIME_SOUNDS[6]))      # spec, model, its sounds
-        held = {(t.class_hash, r.in_group_hash) for t in target.types() for r in t.resources}
-        self.assertIn((iw_hash('CIsEntitySpec'), GERSCH), held)
-        self.assertIn((iw_hash('CIwModel'), MODEL), held)
-        self.assertNotIn((iw_hash('CIwModel'), iw_hash('unused_model')), held)
-        sound_type = next(t for t in target.types() if t.class_hash == iw_hash('CIwSoundData'))
-        self.assertEqual((sound_type.names_omitted, sound_type.resources[0].name_hash),
-                         (0, iw_hash('CIwSoundDataADPCM')))           # as the game stores sounds
-        self.assertEqual(effects.carry(read, used, target, {'p': target}), 0)   # already there
-        group.parse(group.encode(target))
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)
+            effects.save(source, [effects.Used('gersch', 'projectile', 'ascension', GERSCH, 6),
+                                  effects.Used('spark', 'effect', '', SPARK)])
+            target = make_group([])
+            level = {'weapon_projectiles_mymap.group.bin': target}
+            listed = effects.apply(read, source, level, 'mymap', Pack(groups))
+            self.assertEqual([e['name'] for e in listed], ['gersch', 'spark'])
+            held = {(t.class_hash, r.in_group_hash) for g in level.values() for t in g.types() for r in t.resources}
+            self.assertIn((iw_hash('CIsEntitySpec'), GERSCH), held)
+            self.assertIn((iw_hash('CIwModel'), MODEL), held)
+            self.assertNotIn((iw_hash('CIwModel'), iw_hash('unused_model')), held)
 
     def test_a_changed_copy_without_model_and_physics(self):
         groups, read = game()
@@ -111,28 +126,14 @@ class Carry(unittest.TestCase):
             effects.save(source, [used])
             self.assertEqual(effects.load(source), [used])
             target = make_group([])
-            listed = effects.apply(read, source, {'weapon_projectiles_mymap.group.bin': target}, 'mymap', 'kino')
+            listed = effects.apply(read, source, {'weapon_projectiles_mymap.group.bin': target}, 'mymap',
+                                   Pack(groups))
             own = iw_hash('boz_effect_gersch')
             self.assertEqual(listed[0]['hash'], own)                   # scripts spawn the copy
             body = next(r.body for t in target.types() for r in t.resources if r.in_group_hash == own)
             kept = [c.type_hash for c in resources.decode_entity_spec(body).components]
             self.assertEqual(kept, [iw_hash('CProjectileEntity'), iw_hash('CIsTransform')])
-            self.assertTrue(any(r.in_group_hash == GERSCH for t in target.types() for r in t.resources))
-
-    def test_apply_carries_other_maps_only(self):
-        groups, read = game()
-        with tempfile.TemporaryDirectory() as temp:
-            source = Path(temp)
-            effects.save(source, [effects.Used('gersch', 'projectile', 'ascension', GERSCH, 6),
-                                  effects.Used('spark', 'effect', '', SPARK)])
-            target = make_group([])
-            level = {'weapon_projectiles_mymap.group.bin': target}
-            listed = effects.apply(read, source, level, 'mymap', 'kino')
-            self.assertEqual([e['name'] for e in listed], ['gersch', 'spark'])
-            self.assertTrue(any(r.in_group_hash == GERSCH for t in target.types() for r in t.resources))
-            on_ascension = make_group([])
-            effects.apply(read, source, {'weapon_projectiles_mymap.group.bin': on_ascension}, 'mymap', 'ascension')
-            self.assertEqual(on_ascension.types(), [])               # the base map has it
+            group.parse(group.encode(target))
 
 
 if __name__ == '__main__':

@@ -245,8 +245,8 @@ class BOZ_PT_selected(Panel):
     bl_idname = "BOZ_PT_selected"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "BOZ Redux"
-    bl_parent_id = "BOZ_PT_map_tools"
+    bl_category = "Shipped files"
+    bl_parent_id = "BOZ_PT_shipped_files"
 
     @classmethod
     def poll(cls, context):

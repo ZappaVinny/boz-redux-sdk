@@ -315,8 +315,7 @@ def read_level(game, level: str) -> list[GameWeapon]:
     from . import group as group_module
     from . import resources
 
-    raw = game.read(weapons_group_path(level))
-    parsed = group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+    parsed = group_module.read_parsed(game.read, weapons_group_path(level))
     return read_group(parsed, level)
 
 
@@ -539,73 +538,32 @@ def _hashes(parsed) -> set[int]:
     return {r.in_group_hash for t in parsed.types() for r in t.resources}
 
 
-def _references(body: bytes, wanted: set[int]) -> set[int]:
-    """Every u32 in *body* that is one of *wanted* (resources refer to each other by hash)."""
-    found = set()
-    for shift in range(4):
-        count = (len(body) - shift) // 4
-        if count > 0:
-            found |= wanted.intersection(struct.unpack_from(f'<{count}I', body, shift))
-    return found
-
-
-def import_weapon(game, level: str, name_hash: int, targets: dict) -> list[str]:
-    """Copy a weapon of another level, with everything it refers to by hash (state machines,
-    animations, models, skins, skeletons, materials, textures, its projectile, the arms' state
-    machine), into the map's groups (*targets*: 'weapons'/'projectiles'/'arms' -> parsed group).
-    Returns warnings."""
-    from . import group as group_module
+def _bring(bundle, weapon: 'WeaponDef', groups: dict) -> list[str]:
+    """Bring a weapon of another level into the map with everything it uses (bozkit.bundle): its
+    spec, and the state machines it names by text (m_weaponAsm into the weapons group, m_armsAsm
+    into the arms group, where the game's own are). Returns warnings."""
     from . import resources
-
-    gear = GEAR.get(level, level)
-    sources = {
-        'weapons': group_module.parse(game.read(f'ingame/weapons/weapons_{gear}.group.bin')),
-        'projectiles': group_module.parse(
-            game.read(f'ingame/weapons/weapon_projectiles_{gear}.group.bin')),
-        'arms': group_module.parse(game.read(f'ingame/characters/arms/arms_{gear}.group.bin')),
-    }
-    index: dict[int, list] = {}   # hash -> [(kind, class hash, resource)]: names repeat by class
-    for kind, parsed in sources.items():
-        for resource_type in parsed.types():
-            for resource in resource_type.resources:
-                index.setdefault(resource.in_group_hash, []).append(
-                    (kind, resource_type.class_hash, resource))
-    present = {(t.class_hash, r.in_group_hash) for g in targets.values()
-               for t in g.types() for r in t.resources}
-    weapon_resource = next((r for _k, c, r in index.get(name_hash, ()) if c == ENTITY_SPEC), None)
-    if weapon_resource is None:
-        raise WeaponError(f'{level} has no weapon 0x{name_hash:08x}')
-    seeds = {name_hash}
-    blob = _weapon_blob(resources.decode_entity_spec(weapon_resource.body))
-    for asm_field in ('m_weaponAsm', 'm_armsAsm'):
-        value = get_value(blob, asm_field)
+    gear = GEAR.get(weapon.level, weapon.level)
+    source = _hash_of(weapon.source)
+    weapons_file = next(f for f, g in bundle.groups.items() if g is groups['weapons'])
+    arms_file = next(f for f, g in bundle.groups.items() if g is groups['arms'])
+    bundle.add([source], prefer=weapons_group_path(weapon.level))
+    resource = next((r for r in _entity_specs(groups['weapons']).resources if r.in_group_hash == source), None)
+    if resource is None:
+        raise WeaponError(f'{weapon.level} has no weapon {weapon.source}')
+    blob = _weapon_blob(resources.decode_entity_spec(resource.body))
+    for field_name, target, prefer in (('m_weaponAsm', weapons_file, weapons_group_path(weapon.level)),
+                                       ('m_armsAsm', arms_file, f'ingame/characters/arms/arms_{gear}.group.bin')):
+        value = get_value(blob, field_name)
         if isinstance(value, str) and value:
-            seeds.add(iw_hash(value))
-    wanted = set(index)
-    todo, done = [h for h in seeds if h in index], set()
-    while todo:
-        current = todo.pop()
-        if current in done:
-            continue
-        done.add(current)
-        for _kind, class_hash, resource in index[current]:
-            if class_hash in TEXTURE_CLASSES:
-                continue
-            todo.extend(_references(resource.body, wanted) - done)
-    copied = 0
-    for current in done:
-        for kind, class_hash, resource in index[current]:
-            if (class_hash, current) in present:
-                continue
-            _add(targets[kind], class_hash, copy.copy(resource))
-            present.add((class_hash, current))
-            copied += 1
-    return [] if copied else [f'{level} weapon 0x{name_hash:08x} added nothing new']
+            bundle.add([iw_hash(value)], prefer=prefer, target=target)
+    return []
 
 
-def apply(game, groups: dict, base_level: str, defs: list[WeaponDef]) -> dict:
+def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=None) -> dict:
     """Apply a project's weapons to a map's groups. *groups*: 'weapons', 'projectiles', 'arms' ->
-    parsed groups (changed in place). Returns {"aliases": {new hash: base hash}, "warnings": [...]}.
+    parsed groups (changed in place); *bundle* (a bozkit.bundle.Bundle over the map's files)
+    brings weapons of other levels. Returns {"aliases": {new hash: base hash}, "warnings": [...]}.
     """
     from . import resources
 
@@ -613,12 +571,12 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef]) -> dict:
     aliases = {}
     weapons_group = groups['weapons']
     base_gear = GEAR.get(base_level, base_level)
-    # 1. Imports from other levels.
+    # 1. Weapons of other levels.
     for weapon in defs:
         if weapon.level and GEAR.get(weapon.level, weapon.level) != base_gear:
-            warnings += import_weapon(game, weapon.level, _hash_of(weapon.source), groups)
-            warnings.append(f'weapon {weapon.name}: sounds and effects of {weapon.level} may be '
-                            f'missing on this map')
+            if bundle is None:
+                raise WeaponError(f'weapon {weapon.name}: weapons of other maps need the game')
+            warnings += _bring(bundle, weapon, groups)
     specs = _entity_specs(weapons_group)
     by_hash = {r.in_group_hash: r for r in specs.resources}
     # 2. New weapons: copies of their base under a new name.
@@ -671,8 +629,7 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef]) -> dict:
             continue
         from . import group as group_module, sound
         if shared is None:
-            raw = game.read(sound.SHARED_GROUP)
-            shared = group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+            shared = group_module.read_parsed(game.read, sound.SHARED_GROUP)
         resource = by_hash.get(_hash_of(weapon.name))
         if resource is None:
             raise WeaponError(f'weapon {weapon.name} is not in the level')
@@ -760,7 +717,8 @@ def _templates(parsed, view_model: int):
               if t.class_hash == iw_hash('CIwModel') for r in t.resources}
     material = None
     body = models.get(view_model, b'')
-    for mh in _references(body, set(materials)):
+    from .blender_scene import _model_materials
+    for mh in _model_materials(body, set(materials)):
         decoded = native.decode_material(materials[mh])
         if material is None or decoded.same_as_default:
             material = decoded

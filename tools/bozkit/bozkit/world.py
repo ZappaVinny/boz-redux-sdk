@@ -12,9 +12,8 @@ read::
 
 ``world.json`` lists **models** (a mesh you see and bump into), **volumes** (invisible boxes that
 send script events) and **prefabs** (named groups of parts with a script, or the game's own
-entities); see the Format 3 section. Format 1 and 2 files still load (from_layout). Compiling
-lowers a world into a Layout (the format 2 shape: level meshes, props, instances, entities),
-which _compile_layout turns into the game's groups.
+entities); see the Format 3 section. Compiling lowers a world into a Layout (level meshes,
+props, instances, entities), which _compile_layout turns into the game's groups.
 """
 from __future__ import annotations
 
@@ -149,8 +148,8 @@ class Placement:
 
 @dataclass
 class Layout:
-    """The compiler's input: level meshes, props and their instances, and game entities (format
-    2's shape). Format 3 worlds lower into it (lower()); format 1 and 2 files load through it."""
+    """The compiler's input: level meshes, props and their instances, and game entities. Worlds
+    lower into it (lower()); the templates are built as one (from_layout)."""
     base: str = 'kino'
     meshes: list[Mesh] = field(default_factory=list)
     entities: list[Placement] = field(default_factory=list)
@@ -223,83 +222,11 @@ def _script_json(script: dict) -> dict:
             if key == 'name' or SCRIPT_DEFAULTS.get(key) != value}
 
 
-def _transform_json(item) -> dict:
-    out = {'position': [round(c, 3) for c in item.position]}
-    if item.rotation:
-        out['rotation'] = [round(c, 6) for c in item.rotation]
-    else:
-        out['yaw'] = item.yaw
-    if tuple(item.scale) != UNIT:
-        out['scale'] = [round(c, 5) for c in item.scale]
-    return out
-
-
-def _transform_args(item: dict) -> dict:
-    rotation = item.get('rotation')
-    return {'position': tuple(float(c) for c in item['position']),
-            'yaw': float(item.get('yaw', 0.0)),
-            'rotation': tuple(float(c) for c in rotation) if rotation else None,
-            'scale': tuple(float(c) for c in item.get('scale', UNIT))}
-
-
 def _lines(key: str, items: list[dict], last: bool = False) -> list[str]:
     lines = [f'  "{key}": [']
     lines += [f'    {json.dumps(item)}' + (',' if i < len(items) - 1 else '')
               for i, item in enumerate(items)]
     return lines + ['  ]' + ('' if last else ',')]
-
-
-def _save_layout(world: Layout, source: str | Path) -> None:
-    """Write a format 2 world (tests of the migration only: the editor writes format 3)."""
-    source = Path(source)
-    wanted = set()
-    for folder in ('meshes', 'props', 'textures'):
-        (source / folder).mkdir(parents=True, exist_ok=True)
-    meshes = [_write_mesh(source, 'meshes', mesh) for mesh in world.meshes]
-    props = [_write_mesh(source, 'props', prop) for prop in world.props]
-    for item in meshes + props:
-        wanted.add(item['file'])
-        wanted.update(item['textures'])
-    for folder in ('meshes', 'props', 'textures'):
-        for old in (source / folder).iterdir():
-            if old.suffix in ('.json', '.png') and f'{folder}/{old.name}' not in wanted:
-                old.unlink()
-    instances = []
-    for item in world.instances:
-        entry = {'prop': item.prop} if item.prop else {
-            'model': item.model, 'collision': item.collision, 'shape': item.shape}
-        entry.update(_transform_json(item))
-        if item.script:
-            entry['script'] = _script_json(item.script)
-        instances.append(entry)
-    entities = []
-    for entity in world.entities:
-        entry = {'source': entity.source}
-        if entity.group:
-            entry['group'] = entity.group
-        if entity.piece:
-            entry['piece'] = entity.piece
-        if entity.prop:
-            entry['prop'] = entity.prop
-        if entity.model:
-            entry['model'] = entity.model
-        if entity.settings:
-            entry['settings'] = entity.settings
-        if entity.fields:
-            entry['fields'] = entity.fields
-        if entity.script:
-            entry['script'] = _script_json(entity.script)
-        entry.update(_transform_json(entity))
-        entities.append(entry)
-    # One line per item, so the file stays readable and diffs stay small.
-    lines = ['{', '  "format": 2,', f'  "base": {json.dumps(world.base)},']
-    if world.inherit:
-        lines.append('  "inherit": true,')
-    if world.removed:
-        lines.append(f'  "removed": {json.dumps(sorted(world.removed))},')
-    lines += _lines('meshes', meshes) + _lines('props', props) + _lines('instances', instances)
-    lines += _lines('entities', entities, last=True) + ['}']
-    (source / 'world.json').write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
 def _inside(source: Path, relative: str) -> Path:
@@ -323,47 +250,6 @@ def _read_mesh(source: Path, item: dict, default_collision: str) -> Mesh:
                 str(item.get('collision', default_collision)), bool(item.get('double_sided', False)),
                 [int(i) for i in geometry.get('materials', [])], str(item.get('shape', 'mesh')),
                 dict(item.get('script', {})))
-
-
-def _load_layout(source: str | Path) -> Layout:
-    source = Path(source)
-    try:
-        data = json.loads((source / 'world.json').read_text(encoding='utf-8'))
-    except FileNotFoundError:
-        raise WorldError(f'{source / "world.json"} not found: this map has no world yet') from None
-    except (OSError, ValueError) as exc:
-        raise WorldError(f'cannot read world.json: {exc}') from exc
-    if data.get('format') not in (1, 2):
-        raise WorldError(f'world.json format {data.get("format")!r} is not supported')
-    world = Layout(str(data.get('base', 'kino')), inherit=bool(data.get('inherit', False)),
-                  removed=[str(item) for item in data.get('removed', [])])
-    world.meshes = [_read_mesh(source, item, 'floor') for item in data.get('meshes', [])]
-    world.props = [_read_mesh(source, item, 'solid') for item in data.get('props', [])]
-    try:
-        for item in data.get('instances', []):
-            world.instances.append(Instance(
-                prop=str(item.get('prop', '')), model=str(item.get('model', '')),
-                collision=str(item.get('collision', 'solid')), shape=str(item.get('shape', 'box')),
-                script=dict(item.get('script', {})), **_transform_args(item)))
-        for item in data.get('entities', []):
-            world.entities.append(Placement(str(item['source']), group=str(item.get('group', '')),
-                                            prop=str(item.get('prop', '')),
-                                            model=str(item.get('model', '')),
-                                            piece=str(item.get('piece', '')),
-                                            settings=dict(item.get('settings', {})),
-                                            fields=dict(item.get('fields', {})),
-                                            script=dict(item.get('script', {})),
-                                            **_transform_args(item)))
-    except (KeyError, TypeError, ValueError) as exc:
-        raise WorldError(f'world.json: {exc}') from exc
-    for entity in world.entities:
-        image = entity.settings.get(CHALK_FIELD, '')
-        if isinstance(image, str) and image not in ('', 'none'):
-            try:
-                entity.chalk_texture = read_texture(_inside(source, image))
-            except (OSError, ValueError) as exc:
-                raise WorldError(f'{entity.source}: chalk image {image}: {exc}') from exc
-    return world
 
 
 def _check_mesh(mesh: Mesh, label: str, problems: list[str]) -> None:
@@ -835,7 +721,7 @@ def save(world: World, source: str | Path) -> None:
 
 
 def load(source: str | Path) -> World:
-    """A project's world. Format 1 and 2 files load and convert (from_layout)."""
+    """A project's world (world.json, format 3)."""
     source = Path(source)
     try:
         data = json.loads((source / 'world.json').read_text(encoding='utf-8'))
@@ -843,8 +729,6 @@ def load(source: str | Path) -> World:
         raise WorldError(f'{source / "world.json"} not found: this map has no world yet') from None
     except (OSError, ValueError) as exc:
         raise WorldError(f'cannot read world.json: {exc}') from exc
-    if data.get('format') in (1, 2):
-        return from_layout(_load_layout(source))
     if data.get('format') != FORMAT:
         raise WorldError(f'world.json format {data.get("format")!r} is not supported')
     world = World(str(data.get('base', 'kino')), inherit=bool(data.get('inherit', False)),
@@ -1000,8 +884,8 @@ def _start_of(script: dict) -> dict:
 
 
 def from_layout(layout: Layout) -> World:
-    """A format 3 world from a format 1/2 one: level meshes and props become models (sharing
-    their mesh), placed game models become models, entities become game prefabs."""
+    """A world from a layout (how the templates are built): level meshes and props become models
+    (sharing their mesh), placed game models become models, entities become game prefabs."""
     world = World(layout.base, inherit=layout.inherit, removed=list(layout.removed))
     taken: set = set()
     for mesh in layout.meshes + layout.props:
@@ -1444,19 +1328,24 @@ class _Level:
 
     # Repacking: whatever a placed entity or model uses comes with it from its own map.
 
-    def repack(self, hashes, source: str) -> int:
-        """Copy the resources *hashes* name (and what they use, transitively) from the game's
-        groups into the map, unless it already has them (bozkit.bundle: any map's, weapon groups
-        too; clashing names get names of their own). Returns how many."""
+    def bundle(self):
+        """The bozkit.bundle.Bundle that brings resources of any map into this one."""
         from . import bundle
         if getattr(self, '_bundle', None) is None:
             groups = dict(getattr(self, 'groups', None) or {})
             groups[f'{self.name}_statics.group.bin'] = self.statics
             self._bundle = bundle.Bundle(bundle.Registry.of(self.pack), groups, self.name)
-        copied = self._bundle.add(hashes, prefer=source)
-        for cls, name, _path, target in self._bundle.copied[-copied:] if copied else []:
+        return self._bundle
+
+    def repack(self, hashes, source: str) -> int:
+        """Copy the resources *hashes* name (and what they use, transitively) from the game's
+        groups into the map, unless it already has them (bozkit.bundle: any map's, weapon groups
+        too; clashing names get names of their own). Returns how many."""
+        bundle = self.bundle()
+        copied = bundle.add(hashes, prefer=source)
+        for cls, name, _path, _target in bundle.copied[-copied:] if copied else []:
             if cls == levels.MODEL:
-                self.models[name] = self._bundle.present()[(cls, name)]
+                self.models[name] = bundle.present()[(cls, name)]
         self._loaded = None
         return copied
 
@@ -2315,7 +2204,7 @@ def _apply_weapons(pack, files, name: str, base: str, level, defs) -> None:
               'projectiles': files.groups[f'weapon_projectiles_{name}.group.bin'],
               'arms': files.groups[f'arms_{name}.group.bin']}
     try:
-        result = weapons_module.apply(pack, groups, base, list(defs))
+        result = weapons_module.apply(pack, groups, base, list(defs), bundle=level.bundle())
     except weapons_module.WeaponError as exc:
         raise WorldError(str(exc)) from None
     level.weapon_group = groups['weapons']

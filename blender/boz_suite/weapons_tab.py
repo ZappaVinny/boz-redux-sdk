@@ -12,7 +12,6 @@ writes the weapon's file.
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 
 import bpy
@@ -22,11 +21,7 @@ from bpy.types import Operator, Panel, PropertyGroup, UIList
 
 from . import link
 
-try:
-    from bozkit import assets, blender_scene, hud_icons, library, viewmodel, weapon_model, weapons as wp
-except ModuleNotFoundError:
-    from ._vendor.bozkit import (assets, blender_scene, hud_icons, library, viewmodel, weapon_model,
-                                 weapons as wp)
+from ._bozkit import hud_icons, library, weapons as wp
 
 WORKSPACE = "Weapons"
 SCRIPT_TEMPLATE = '''-- {name}: a weapon script. self is the weapon: self.name, and the live weapon's

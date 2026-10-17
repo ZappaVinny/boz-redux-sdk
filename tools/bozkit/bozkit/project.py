@@ -469,10 +469,9 @@ def compile_map(project: Project, game, fixed=None):
         if 'ingame.group.bin' in files.groups:
             # A shipped ingame group replaces the client's own fix-up (it hides the touch sticks).
             hud_icons.hide_sticks(files.groups['ingame.group.bin'])
-        # The Effects tab's effects (from other maps: carried in) under the names scripts use.
-        files.runtime['effects'] = effects.apply(game.read, source, files.groups,
-                                                 project.map_name, layout.base, pack=game,
-                                                 scripts=project.scripts)
+        # The Effects tab's effects (from any map) under the names scripts use.
+        files.runtime['effects'] = effects.apply(game.read, source, files.groups, project.map_name,
+                                                 game, scripts=project.scripts)
         # The Game tab: rounds, special rounds, zombie looks, economy, loading screen.
         files.runtime['game'] = game_rules.apply(game_rules.load(source), project.root,
                                                  files.groups, project.map_name, game.read, pack=game)

@@ -13,10 +13,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy.types import Menu, Operator
 
-try:
-    from bozkit import world
-except ModuleNotFoundError:
-    from ._vendor.bozkit import world
+from ._bozkit import world
 
 from . import convert
 from . import link

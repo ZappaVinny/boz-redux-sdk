@@ -108,8 +108,7 @@ class Registry:
     def group(self, path: str):
         if path not in self.groups:
             try:
-                raw = self.read(path)
-                self.groups[path] = group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+                self.groups[path] = group_module.read_parsed(self.read, path)
             except (KeyError, OSError, ValueError):
                 self.groups[path] = None
         return self.groups[path]

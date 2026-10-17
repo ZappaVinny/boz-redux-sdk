@@ -17,10 +17,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy.types import Operator, Panel
 
-try:
-    from bozkit import scripts, toolkit, world
-except ModuleNotFoundError:
-    from ._vendor.bozkit import scripts, toolkit, world
+from ._bozkit import scripts, toolkit, world
 
 from . import convert, link, tabs
 

@@ -540,8 +540,7 @@ def catalog(read, names, level: str, weapons=(), known_names: dict | None = None
                     if f.kind == 'sound' and f.key != 'muzzleFlash']
     slots = []
     for path, category in sound_groups(names, level):
-        raw = read(path)
-        parsed = group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+        parsed = group_module.read_parsed(read, path)
         data = _resources(parsed, DATA)
         if not data:
             continue
@@ -628,8 +627,7 @@ def original_samples(read, key: str) -> tuple[list[int], int]:
     """(samples, rate) of a slot's original sound."""
     from . import group as group_module
     path, data_hash = parse_key(key)
-    raw = read(path)
-    parsed = group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+    parsed = group_module.read_parsed(read, path)
     body = _resources(parsed, DATA).get(data_hash)
     if body is None:
         raise SoundError(f'{path} has no sound 0x{data_hash:08x}')
@@ -751,8 +749,7 @@ def apply(source: Path, read, groups: dict, level: str, map_name: str) -> list[s
                 target = candidate
                 break
         if target is None:
-            raw = read(path)
-            parsed = group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+            parsed = group_module.read_parsed(read, path)
             if data_hash not in _resources(parsed, DATA):
                 raise SoundError(f'sound slot {key}: the game has no such sound')
             groups[file_name] = parsed

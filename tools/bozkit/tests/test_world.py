@@ -124,7 +124,7 @@ class WorldTests(unittest.TestCase):
         with self.assertRaises(world.WorldError):
             world.load(self.source)
 
-    def test_format_2_migrates(self):
+    def test_from_layout_builds_a_world(self):
         layout = world._empty_layout()
         crate = crate_mesh()
         crate.collision, crate.shape = 'solid', 'box'
@@ -134,30 +134,27 @@ class WorldTests(unittest.TestCase):
                             world.Instance((0.0, 0.0, 0.0), model=GAME_MODEL)]
         layout.entities.append(world.Placement('Juggernog', (1.0, 2.0, 3.0), piece='juggernog',
                                                settings={'CPerk.powerSwitch': False}))
-        world._save_layout(layout, self.source)
-        self.assertEqual(json.loads((self.source / 'world.json').read_text())['format'], 2)
-        migrated = world.load(self.source)
-        self.assertEqual(world.validate(migrated), [])
-        names = {m.name: m for m in migrated.models}
+        built = world.from_layout(layout)
+        self.assertEqual(world.validate(built), [])
+        names = {m.name: m for m in built.models}
         self.assertEqual((names['Secret_Wall'].mesh, names['Secret_Wall'].shape,
                           names['Secret_Wall'].start), ('crate', 'box', {'visible': False}))
         self.assertEqual(names['model_1'].game, GAME_MODEL)
-        jug = next(p for p in migrated.prefabs if p.piece == 'juggernog')
+        jug = next(p for p in built.prefabs if p.piece == 'juggernog')
         self.assertEqual((jug.source, jug.settings), ('Juggernog', {'CPerk.powerSwitch': False}))
-        world.save(migrated, self.source)                 # and saves as format 3
+        world.save(built, self.source)
         saved = world.load(self.source)
         world.save(saved, self.source)
         self.assertEqual(world.load(self.source).models, saved.models)
-        self.assertEqual([m.name for m in saved.models], [m.name for m in migrated.models])
+        self.assertEqual([m.name for m in saved.models], [m.name for m in built.models])
 
-    def test_format_1_still_loads(self):
-        world._save_layout(world._empty_layout(), self.source)
+    def test_old_formats_are_refused(self):
+        world.save(world.empty_world(), self.source)
         data = json.loads((self.source / 'world.json').read_text())
-        data['format'] = 1
-        mesh = data['meshes'][0]
-        mesh['texture'] = mesh.pop('textures')[0]
+        data['format'] = 2
         (self.source / 'world.json').write_text(json.dumps(data))
-        self.assertEqual(len(world.load(self.source).meshes[0].textures), 1)
+        with self.assertRaises(world.WorldError):
+            world.load(self.source)
 
     def test_inherited_base_entities(self):
         migrated = world.from_layout(world.Layout('kino', inherit=True, entities=[

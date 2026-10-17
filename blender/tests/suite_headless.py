@@ -38,7 +38,7 @@ scene = bpy.context.scene
 # The shell
 check(set(tabs.TAB_NAMES) <= {w.name for w in bpy.data.workspaces}, "every tab exists")
 check("Shading" not in bpy.data.workspaces, "unused factory workspaces are gone")
-check("boz_redux" in bpy.context.preferences.addons, "the shipped-map add-on is enabled")
+check(hasattr(bpy.types, "BOZ_PT_shipped_files"), "the shipped-map tools are registered")
 registered = [name for name in dir(bpy.types) if name.startswith("BOZ_PT_placeholder")]
 check(len(registered) == len(placeholders.PLACEHOLDERS), "every placeholder has a panel")
 check(not bpy.types.OBJECT_PT_relations.poll(bpy.context), "stock object panels are hidden")
@@ -213,7 +213,7 @@ def own_model_checks(label, asset_name):
     weapon = {d.name: d for d in wt.wp.load_defs(project / "source")}["hq_wonder"]
     check(weapon.model.get("asset") == asset_name and weapon.model.get("fit", {}).get("scale"),
           f"{label}: the weapon uses your model, fitted ({weapon.model})")
-    model, _textures = wt.assets.load_game(project / "source", asset_name)
+    model, _textures = suite._bozkit.assets.load_game(project / "source", asset_name)
     rig_obj = bpy.data.objects[wv.RIG]
     check(all(f"gun {b.name}" in rig_obj.data.bones for b in model.bones),
           f"{label}: the rig has your model's bones under the gun position")
@@ -814,16 +814,6 @@ def prefab_checks(anchor):
     check(trigger.type == "EMPTY" and trigger.instance_type == "COLLECTION"
           and trigger.instance_collection.name == "BOZ Volume: hit",
           "a volume is an Empty showing its kind's box (its own outliner icon)")
-    old_style = bpy.data.objects.new("OldUse", convert.volume_mesh())
-    scene.collection.objects.link(old_style)
-    old_style.boz.role, old_style.boz.volume, old_style.boz.cost = "volume", "use", 250
-    old_style.scale = (2.0, 1.0, 1.0)
-    check(convert.migrate_volumes(scene) == 1, "a volume saved as a mesh migrates")
-    migrated = scene.objects["OldUse"]
-    check(migrated.type == "EMPTY" and migrated.boz.cost == 250 and migrated.scale[0] == 2.0
-          and migrated.instance_collection.name == "BOZ Volume: use",
-          "the migrated volume keeps its settings and size")
-    bpy.data.objects.remove(migrated)
     select_only(wall, trigger)
     bpy.ops.boz.make_prefab()
     prefab = bpy.context.view_layer.objects.active

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Assemble the BOZ Redux editor: a Blender user scripts folder holding the boz_suite app
-template, the boz_redux add-on and the bozkit modules both need, with a generated startup.blend.
+template and the bozkit modules it needs, with a generated startup.blend.
 
     build/suite/scripts/startup/bl_app_templates_user/boz_suite/   app template (+ _vendor/bozkit)
-    build/suite/scripts/addons/boz_redux/                          add-on (+ _vendor/bozkit)
 
 The launcher runs Blender with BLENDER_USER_SCRIPTS pointing here. In a checkout it rebuilds
 this folder when the sources are newer.
@@ -18,7 +17,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / 'blender' / 'boz_suite'
-ADDON = ROOT / 'blender' / 'boz_redux'
 BOZKIT = ROOT / 'tools' / 'bozkit' / 'bozkit'
 OUTPUT = ROOT / 'build' / 'suite'
 NOT_VENDORED = {'desktop.py', '__main__.py'}
@@ -36,9 +34,9 @@ bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1], compress=True)
 
 
 def sources() -> list[Path]:
-    files = [*TEMPLATE.glob('*.py'), *ADDON.glob('*.py'), *BOZKIT.glob('*.py'), Path(__file__),
+    files = [*TEMPLATE.glob('*.py'), *BOZKIT.glob('*.py'), Path(__file__),
              *(ROOT / 'gamedef' / 'runtime').glob('*.toml')]
-    return [path for path in files if path.name != '_build.py']
+    return files
 
 
 def stale(output: Path = OUTPUT) -> bool:
@@ -69,17 +67,10 @@ def build(blender: str | Path, output: Path = OUTPUT) -> Path:
     if output.exists():
         shutil.rmtree(output)
     template = scripts / 'startup' / 'bl_app_templates_user' / 'boz_suite'
-    addon = scripts / 'addons' / 'boz_redux'
     template.mkdir(parents=True)
-    addon.mkdir(parents=True)
     for path in sorted(TEMPLATE.glob('*.py')):
         shutil.copy2(path, template / path.name)
-    for path in sorted(ADDON.glob('*.py')):
-        if path.name != '_build.py':
-            shutil.copy2(path, addon / path.name)
-    (addon / '_build.py').write_text('BUILD = "suite"\n')
     _vendor(template)
-    _vendor(addon)
     script = output / 'generate.py'
     script.write_text(GENERATE)
     startup = template / 'startup.blend'

@@ -340,13 +340,6 @@ def _scale_by(spec, scale) -> None:
     _set_scale(spec, tuple(own[i] * float(scale[i]) for i in range(3)))
 
 
-def _yaw(degrees: float) -> tuple[float, float, float, float]:
-    """Quaternion (x, y, z, w) turning by *degrees* about Y."""
-    import math
-    half = math.radians(degrees) / 2
-    return (0.0, math.sin(half), 0.0, math.cos(half))
-
-
 def _raw_texture(body: bytes) -> bool:
     from . import native
 
@@ -354,34 +347,6 @@ def _raw_texture(body: bytes) -> bool:
         return native.texture_layout(body).pixel_format == 0x0E
     except ValueError:
         return False
-
-
-def arena_geometry(arena: Arena):
-    """Floor and inside walls as quads: (vertices, uvs, triangles) with every quad textured once.
-    Triangles are double-sided (both windings) so culling cannot hide them. UVs: floor uses the
-    top half of the texture, walls the bottom half."""
-    vertices, uvs, triangles = [], [], []
-    h, c, top = arena.half_size, arena.cell, arena.wall_height
-
-    def quad(a, b, cc, d, v0):
-        base = len(vertices)
-        vertices.extend([a, b, cc, d])
-        uvs.extend([(0.0, v0), (1.0, v0), (1.0, v0 + 0.5), (0.0, v0 + 0.5)])
-        triangles.extend([(base, base + 1, base + 2), (base, base + 2, base + 3),
-                          (base, base + 2, base + 1), (base, base + 3, base + 2)])
-
-    steps = range(-h, h, c)
-    for x in steps:
-        for z in steps:
-            quad((x, 0, z), (x + c, 0, z), (x + c, 0, z + c), (x, 0, z + c), 0.0)
-    for s in steps:
-        for y in range(0, top, c):
-            y2 = min(y + c, top)
-            quad((s, y, -h), (s + c, y, -h), (s + c, y2, -h), (s, y2, -h), 0.5)
-            quad((s, y, h), (s + c, y, h), (s + c, y2, h), (s, y2, h), 0.5)
-            quad((-h, y, s), (-h, y, s + c), (-h, y2, s + c), (-h, y2, s), 0.5)
-            quad((h, y, s), (h, y, s + c), (h, y2, s + c), (h, y2, s), 0.5)
-    return vertices, uvs, triangles
 
 
 def arena_texture(size: int = 128) -> bytes:
@@ -454,13 +419,3 @@ def box_triangles(base: int) -> list[tuple[int, int, int]]:
     from . import blender_scene as scene
 
     return [(base + a, base + c, base + b) for a, b, c in scene._BOX_FACES]
-
-
-def generate_arena(pack: derbh.Pack, name: str, arena: Arena | None = None,
-                   template: str = 'kino', fixed: group.Group | None = None) -> LevelFiles:
-    """The debug arena (a walled square with its own model, texture, collision and navmesh,
-    spawns, Juggernog and power from the template level), compiled like any map project's
-    world: see bozkit.world."""
-    from . import world
-
-    return world.compile_world(pack, name, world.arena_world(pack, arena, template), fixed)

@@ -16,10 +16,7 @@ from bpy.props import (BoolProperty, EnumProperty, FloatProperty, IntProperty, P
                        StringProperty)
 from bpy.types import Operator, Panel, PropertyGroup
 
-try:
-    from bozkit import blender_scene, project as sdk_project, sdkhome, toolkit, world
-except ModuleNotFoundError:
-    from ._vendor.bozkit import blender_scene, project as sdk_project, sdkhome, toolkit, world
+from ._bozkit import project as sdk_project, sdkhome, toolkit, world
 
 from . import convert, tabs
 
@@ -30,14 +27,9 @@ COLLISION_ITEMS = [
      "and nobody walks on it (it cuts a hole in the navmesh)"),
     ("none", "None", "Decoration: no collision, and the navmesh ignores it"),
 ]
-# Saved files store an item's number, so every item keeps its number for good. mesh, prop,
-# entity and base are older roles: convert.migrate_roles turns them into the three kinds.
-ROLE_ITEMS = [("mesh", "Level mesh (old)", "", 0),
-              ("prop", "Prop (old)", "", 1),
-              ("model", "Model", "A mesh you see and bump into: a game model or your own", 2),
-              ("entity", "Game entity (old)", "", 3),
+# Saved files store an item's number, so every item keeps its number for good.
+ROLE_ITEMS = [("model", "Model", "A mesh you see and bump into: a game model or your own", 2),
               ("reference", "Base level", "Part of the inherited base level, shown read only", 4),
-              ("base", "Base level entity (old)", "", 5),
               ("volume", "Volume", "An invisible box that sends script events", 6),
               ("prefab", "Prefab", "One object made of parts, or one of the game's own "
                "(perk machine, wall buy, door, spawn, ...)", 7)]
@@ -241,10 +233,6 @@ def on_load(_dummy):
         scene = map_scene()
         view = scene.view_settings
         view.view_transform, view.look = "Standard", "None"   # the game's colours
-        migrated = convert.migrate_roles(scene)
-        if migrated:
-            append_log(f"sdk   {migrated} objects now use models, volumes and prefabs")
-        convert.migrate_volumes(scene)
         convert.unwrap_single_prefabs(scene)
         convert.tidy_collections(scene)
         convert.show_game_models(scene)

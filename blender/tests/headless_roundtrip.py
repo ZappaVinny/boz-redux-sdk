@@ -11,8 +11,7 @@ sys.path.insert(0, str(ROOT / 'tools' / 'bozkit'))
 
 import bpy  # noqa: E402
 import bmesh  # noqa: E402
-import addon_utils  # noqa: E402
-import boz_redux  # noqa: E402
+from boz_suite import scene_view, shipped_maps  # noqa: E402
 from bozkit import (blender_scene, bullet, collision, group, map_resources, native,  # noqa: E402
                     navigation, reflect, resources)
 from bozkit.hashing import iw_hash  # noqa: E402
@@ -106,7 +105,8 @@ with tempfile.TemporaryDirectory() as directory:
     output = directory / 'synthetic-unchanged.group.bin'
     edited = directory / 'synthetic-edited'  # the operator appends the .group.bin suffix
     source.write_bytes(fixture())
-    addon_utils.enable('boz_redux', default_set=True)
+    shipped_maps.register()
+    scene_view.register()
     clear_scene()
 
     # Single-group workflow.
@@ -234,7 +234,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert effect.visible_get() and effect.type == 'MESH'
     scene.boz_marker_types = {'perk'}  # the type filter hides other markers
     assert not effect.visible_get()
-    scene.boz_marker_types = {item[0] for item in boz_redux.view.MARKER_TYPES}
+    scene.boz_marker_types = {item[0] for item in scene_view.MARKER_TYPES}
     assert effect.material_slots[0].material.name == 'BOZ Marker: effect'
     assert effect['boz_description'].startswith('Particle effect')
     shapes = {obj['boz_shape']: obj for obj in boz_objects() if obj['boz_kind'] == 'shape'}
@@ -271,12 +271,12 @@ with tempfile.TemporaryDirectory() as directory:
     assert bpy.ops.boz.import_group(filepath=str(linked)) == {'FINISHED'}
     door = next(obj for obj in boz_objects() if obj.get('boz_category') == 'door')
     power = next(obj for obj in boz_objects() if obj.get('boz_category') == 'power')
-    assert boz_redux.view.links_of(door)[0]['targets'] == [iw_hash('Power')]
+    assert scene_view.links_of(door)[0]['targets'] == [iw_hash('Power')]
     bpy.context.view_layer.objects.active = door
-    component_index = boz_redux.view.links_of(door)[0]['component']
+    component_index = scene_view.links_of(door)[0]['component']
     assert bpy.ops.boz.link_remove(component=component_index, field='powerSwitch',
                                    target=power['boz_link_id']) == {'FINISHED'}
-    assert boz_redux.view.links_of(door)[0]['targets'] == []
+    assert scene_view.links_of(door)[0]['targets'] == []
     unpowered = directory / 'linked-unpowered.group.bin'
     assert bpy.ops.boz.export_group(filepath=str(unpowered)) == {'FINISHED'}
     assert next(item for item in blender_scene.import_group(unpowered).meshes
@@ -284,7 +284,7 @@ with tempfile.TemporaryDirectory() as directory:
     power.select_set(True)
     door.select_set(True)
     assert bpy.ops.boz.link_add_selected(component=component_index, field='powerSwitch') == {'FINISHED'}
-    assert boz_redux.view.links_of(door)[0]['targets'] == [iw_hash('Power')]
+    assert scene_view.links_of(door)[0]['targets'] == [iw_hash('Power')]
     scene.boz_show_links = True  # drawing is skipped in background mode; the switch must exist
 
     # Level workflow: placements resolve their model from the shared ingame group.
@@ -311,8 +311,8 @@ with tempfile.TemporaryDirectory() as directory:
     # The UI loop the guide describes: save to a mod, start over, import the level with the mod.
     client = directory / 'client'
     client.mkdir()
-    preferences = bpy.context.preferences.addons['boz_redux'].preferences
-    preferences.client_root = str(client)
+    settings = bpy.context.window_manager.boz_shipped
+    settings.client_root = str(client)
     assert bpy.ops.boz.save_to_mod() == {'FINISHED'}
     assert (client / 'mods' / 'developer' / 'mod.toml').is_file()
     clear_scene()
@@ -364,24 +364,6 @@ with tempfile.TemporaryDirectory() as directory:
         'open=b:true\nautostart_level=s:test\n'
     assert 'Saved' in bpy.context.scene['boz_last_report']
 
-    # New level test: writes a renamed Kino copy, read straight from the game's pack, into the mod.
-    sys.path.insert(0, str(ROOT / 'tools' / 'bozkit' / 'tests'))
-    from test_levels import level_pack, make_dz
-    from bozkit import derbh
-    (client / 'assets').mkdir(exist_ok=True)
-    (client / 'assets' / 'blackops_etc.dz').write_bytes(make_dz(
-        {path: (data, derbh.STORED) for path, data in level_pack().files.items()}))
-    started.unlink()
-    assert bpy.ops.boz.run_new_level_test(kind='clone') == {'FINISHED'}
-    assets = client / 'mods' / 'developer' / 'assets'
-    assert (assets / 'redux_test_statics.group.bin').is_file(), sorted(assets.iterdir())
-    assert (assets / 'fixed.group.bin').is_file()
-    for _ in range(50):
-        if started.exists():
-            break
-        time.sleep(0.1)
-    assert started.exists()
-    assert 'autostart_level=s:redux_test' in \
-        (client / 'saves' / 'mods' / 'developer.cfg').read_text()
-    addon_utils.disable('boz_redux')
+    scene_view.unregister()
+    shipped_maps.unregister()
     print('BOZ_BLENDER_HEADLESS_OK')

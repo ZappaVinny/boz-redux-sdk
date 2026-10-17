@@ -1,5 +1,6 @@
 """New levels and the .dz reader on synthetic data (no game files)."""
 import lzma
+import math
 import struct
 import sys
 import tempfile
@@ -193,7 +194,7 @@ class GeneratedAssetTests(unittest.TestCase):
             return resources.Component(iw_hash('CIsComponentSpec'), 0, iw_hash(name),
                                        [reflect.Blob(iw_hash(name), props)])
 
-        quarter = levels._yaw(90)
+        quarter = (0.0, math.sin(math.radians(45)), 0.0, math.cos(math.radians(45)))
         spec = resources.EntitySpec([
             component('CIsTransform', [
                 typed('CIsTransform', 'CIwFVec3', 'm_localPosition', (1000.0, 0.0, 0.0)),
@@ -206,17 +207,7 @@ class GeneratedAssetTests(unittest.TestCase):
         self.assertEqual(spans, [(990, 1010), (0, 100), (-100, 100)])  # turned 90 degrees
         self.assertEqual(len(levels.box_triangles(0)), 12)
 
-    def test_arena_geometry_is_closed_and_double_sided(self):
-        arena = levels.Arena(half_size=400, wall_height=300, cell=200)
-        vertices, uvs, triangles = levels.arena_geometry(arena)
-        floor_quads, wall_quads = 16, 4 * 4 * 2
-        self.assertEqual(len(vertices), 4 * (floor_quads + wall_quads))
-        self.assertEqual(len(triangles), 4 * (floor_quads + wall_quads))
-        a, b, c = triangles[0]
-        self.assertEqual(triangles[2], (a, c, b))  # the same face, wound the other way
-        xs = [v[0] for v in vertices]
-        self.assertEqual((min(xs), max(xs)), (-400, 400))
-        self.assertEqual(max(v[1] for v in vertices), 300)
+    def test_arena_texture(self):
         self.assertEqual(len(levels.arena_texture(64)), 64 * 64 * 4)
 
 

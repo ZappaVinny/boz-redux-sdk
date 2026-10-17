@@ -76,17 +76,6 @@ class Formats(unittest.TestCase):
 
 
 class Clips(unittest.TestCase):
-    def test_files(self):
-        with tempfile.TemporaryDirectory() as temp:
-            source = Path(temp)
-            clip = wa.Clip([(0, {'3': ((1.0, 2.0, 3.0), (1.0, 0.0, 0.0, 0.0))})])
-            wa.save_clip(source, 'gun', 0x1234, 'reloading', 'arms', clip)
-            loaded = wa.load_clips(source, 'gun')
-            self.assertEqual(loaded[0x1234]['state'], 'reloading')
-            self.assertEqual(loaded[0x1234]['arms'].frames, clip.frames)
-            wa.save_clip(source, 'gun', 0x1234, 'reloading', 'arms', None)
-            self.assertEqual(wa.load_clips(source, 'gun'), {})
-
     def test_frames_and_times(self):
         self.assertEqual(wa.time_of(30), 4096)
         self.assertEqual(wa.frame_of(2731), 20)
@@ -123,9 +112,6 @@ class Timelines(unittest.TestCase):
             loaded = wa.load_clips(source, 'gun')[0xab]
             self.assertEqual((loaded['edits'], loaded['length'], loaded['state']), (edits, 40, 'reloading'))
             self.assertEqual(loaded['arms'].frames, clip.frames)
-            self.assertFalse(loaded['legacy'])           # a part without changes plays the original
-            wa.save_clip(source, 'old', 0xcd, 'idle', 'arms', clip)     # an older editor's file
-            self.assertTrue(wa.load_clips(source, 'old')[0xcd]['legacy'])
             wa.save_state(source, 'gun', 0xab, 'reloading', {}, {'arms': [], 'gun': []}, 40)
             self.assertEqual(wa.load_clips(source, 'gun'), {})
 

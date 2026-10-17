@@ -30,12 +30,9 @@ from bpy.types import Operator, Panel, PropertyGroup
 
 from . import link
 
-try:
-    from bozkit import anim, assets, viewmodel, weapon_anim, weapon_model
-    from bozkit.hashing import iw_hash
-except ModuleNotFoundError:
-    from ._vendor.bozkit import anim, assets, viewmodel, weapon_anim, weapon_model
-    from ._vendor.bozkit.hashing import iw_hash
+from ._bozkit import anim, assets, viewmodel, weapon_anim, weapon_model
+from ._bozkit import hashing
+iw_hash = hashing.iw_hash
 
 WORKSPACES = ("Weapons", "Animation")
 VIEW_CAMERA = "BOZ view camera"
@@ -234,17 +231,6 @@ def _original(part: str, state: int):
     return clip
 
 
-def _legacy(part: str, entry: dict):
-    """A clip made by an older editor, by the rig's arm or gun bone index."""
-    clip = entry.get(part)
-    if clip is None:
-        return None
-    if part == "gun" and _state["asset"] is not None:
-        return weapon_anim.gun_clip_to_game(clip, _state["asset"], _state["fit"])
-    return weapon_anim.Clip([(f, {int(k): v for k, v in keys.items() if str(k).isdigit()})
-                             for f, keys in clip.frames])
-
-
 def _gun_keys_to_game(values: dict) -> dict:
     """Stored gun pose values ({clip key: key}) as {gun bone index: key} in game space."""
     if _state["asset"] is not None:
@@ -286,8 +272,6 @@ def frame_locals(state: int, frame: int, entry: dict | None = None, edits: dict 
         arms_locals = dict(defaults_arms)
         arms_locals.update({int(k): v for k, v in values.items() if k.isdigit()})
         grips = {k[-1]: v for k, v in values.items() if k.startswith("hand ")}
-    elif arm_kind == "legacy":
-        arms_locals = weapon_anim.sample(_legacy("arms", entry), frame, defaults_arms)
     else:
         arms_locals = weapon_anim.sample(_original("arms", state), arm_value, defaults_arms)
     for i, value in arms_locals.items():
@@ -304,9 +288,6 @@ def frame_locals(state: int, frame: int, entry: dict | None = None, edits: dict 
         tag = values.get("TAG_WEAPON", arms_locals.get(bones.tag, bones.binds[bones.tag]))
         gun_locals = dict(defaults_gun)
         gun_locals.update(_gun_keys_to_game(values))
-    elif gun_kind == "legacy":
-        tag = arms_locals.get(bones.tag, bones.binds[bones.tag])
-        gun_locals = weapon_anim.sample(_legacy("gun", entry), frame, defaults_gun)
     else:
         original_arms = weapon_anim.sample(_original("arms", state), gun_value, defaults_arms)
         tag = original_arms.get(bones.tag, bones.binds[bones.tag])
@@ -623,9 +604,6 @@ def show_state(context, state: int) -> None:
     """Play *state*: read its changes (or none) and bake it onto the rig."""
     entry = _entry(state)
     edits = {part: list(entry.get("edits", {}).get(part, [])) for part in ("arms", "gun")}
-    for part in ("arms", "gun"):
-        if not edits[part] and part in entry and entry.get("legacy"):     # made by an older editor
-            edits[part] = [{"frame": 0, "legacy": True}]
     original = max((s[2] for s in states() if s[0] == state), default=0)
     _state.update(edits=edits, entry=entry, state=state, dirty=False,
                   length=int(entry.get("length") or original) or 1)
@@ -785,9 +763,7 @@ def capture(context=None, frame: int | None = None) -> bool:
 
 
 def _stored_edits() -> dict:
-    return {part: [c for c in changes if not c.get("legacy")] or
-            ([{"frame": 0, "legacy": True}] if any(c.get("legacy") for c in changes) else [])
-            for part, changes in _state["edits"].items()}
+    return {part: list(changes) for part, changes in _state["edits"].items()}
 
 
 def store_edits() -> None:
@@ -1119,8 +1095,6 @@ def timeline_text(part: str) -> str:
                                        "" if end is not None else "+")
         if "pose" in change:
             kind = "yours"
-        elif change.get("legacy"):
-            kind = "older edit"
         elif change["original"] == change["frame"]:
             kind = "original"
         else:

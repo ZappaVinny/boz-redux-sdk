@@ -162,9 +162,15 @@ class WeaponTests(unittest.TestCase):
             weapons.apply(FakeGame(), kino_groups(), 'kino', [weapons.WeaponDef('x', 'missing')])
 
     def test_import_brings_what_it_uses(self):
+        from bozkit import bundle
         groups = kino_groups()
-        weapons.apply(FakeGame(), groups, 'kino',
-                      [weapons.WeaponDef('humangun', '', 'callofthedead', {'m_clipSize': 5})])
+        game = FakeGame()
+        files = {'weapons_mymap.group.bin': groups['weapons'],
+                 'weapon_projectiles_mymap.group.bin': groups['projectiles'],
+                 'arms_mymap.group.bin': groups['arms']}
+        carrier = bundle.Bundle(bundle.Registry(game.read, list(game.files)), files, 'mymap')
+        weapons.apply(game, groups, 'kino',
+                      [weapons.WeaponDef('humangun', '', 'callofthedead', {'m_clipSize': 5})], bundle=carrier)
         present = names_in(groups['weapons'])
         for name in ('humangun', 'humangun_fire', 'humangun_mdl'):
             self.assertIn(iw_hash(name), present, name)

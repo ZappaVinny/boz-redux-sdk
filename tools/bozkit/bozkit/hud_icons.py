@@ -207,8 +207,7 @@ def apply(source: Path, defs, read, groups: dict, map_name: str, pack=None) -> l
             if atlas is None:
                 parsed = groups.get('ingame.group.bin')
                 if parsed is None:
-                    raw = read(INGAME)
-                    parsed = group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+                    parsed = group_module.read_parsed(read, INGAME)
                 atlas = atlas_image(parsed)
                 stock_height = atlas.height
                 slots = [(x, stock_height + y) for y in range(0, EXTRA_HEIGHT - SIZE[1] + 1, SIZE[1] + 2)
@@ -252,6 +251,5 @@ def preview(pack, source: Path, weapon, base_level: str = ''):
     rect = game_uv(pack, icon.get('like') or weapon.source)
     if rect is None:
         return None
-    raw = pack.read(INGAME)
-    parsed = group_module.parse(raw) if isinstance(raw, (bytes, bytearray)) else raw
+    parsed = group_module.read_parsed(pack.read, INGAME)
     return atlas_image(parsed).crop(rect)

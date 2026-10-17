@@ -303,7 +303,7 @@ class Surface:
     def uv_at(self, point, island):
         """The texture coordinates at *point*, read from *island* (projected onto its nearest
         triangle, extrapolated a little past its edges rather than clamped)."""
-        from mathutils.geometry import barycentric_transform, intersect_point_tri
+        from mathutils.geometry import barycentric_transform
         tree, members = self.trees[island]
         found = tree.find_nearest(point)
         if found[2] is None:

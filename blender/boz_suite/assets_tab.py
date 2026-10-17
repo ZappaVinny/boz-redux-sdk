@@ -22,10 +22,7 @@ from bpy.types import Menu, Operator, Panel, PropertyGroup, UIList
 
 from . import link
 
-try:
-    from bozkit import assets, blender_scene
-except ModuleNotFoundError:
-    from ._vendor.bozkit import assets, blender_scene
+from ._bozkit import assets, blender_scene
 
 WORKSPACE = "Assets"
 GAME_OBJECT = "BOZ asset game"
@@ -324,10 +321,7 @@ def placed(name: str) -> list:
 def place_asset(scene, name: str, position=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0, 1.0)):
     """A model of *name* in the map at *position* (game axes, centimetres)."""
     from . import convert
-    try:
-        from bozkit import world
-    except ModuleNotFoundError:
-        from ._vendor.bozkit import world
+    from ._bozkit import world
     data = asset_mesh(name)
     if data is None:
         return None

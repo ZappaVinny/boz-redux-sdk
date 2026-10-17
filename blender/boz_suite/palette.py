@@ -8,17 +8,13 @@ stand-ins; when one is dropped into the world it becomes the real entity, model 
 from __future__ import annotations
 
 import json
-import math
 import subprocess
 from pathlib import Path
 
 import bpy
 from bpy.app.handlers import persistent
 
-try:
-    from bozkit import levels, library, world
-except ModuleNotFoundError:
-    from ._vendor.bozkit import levels, library, world
+from ._bozkit import library, world
 
 from . import convert, game
 from . import link

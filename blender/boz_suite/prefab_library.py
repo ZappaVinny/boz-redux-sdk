@@ -17,10 +17,7 @@ from pathlib import Path
 
 import bpy
 
-try:
-    from bozkit import assets, library, png, world
-except ModuleNotFoundError:
-    from ._vendor.bozkit import assets, library, png, world
+from ._bozkit import assets, library, png, world
 
 CATALOG = "My prefabs"
 ASSET_CATALOG = "My assets"

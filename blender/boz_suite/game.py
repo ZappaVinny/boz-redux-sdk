@@ -8,13 +8,10 @@ from __future__ import annotations
 
 import bpy
 
-try:
-    from bozkit import blender_scene, chalk, levels, library, native, resources, toolkit, world
-    from bozkit.hashing import iw_hash
-except ModuleNotFoundError:
-    from ._vendor.bozkit import (blender_scene, chalk, levels, library, native, resources,
-                                 toolkit, world)
-    from ._vendor.bozkit.hashing import iw_hash
+from ._bozkit import blender_scene, chalk, levels, library, native, resources, toolkit, world
+from ._bozkit import hashing
+from . import meshes
+iw_hash = hashing.iw_hash
 
 PREFIX = "BOZ game"
 MATERIAL_PREFIX = "BOZ Material"   # the add-on's game materials
@@ -31,15 +28,8 @@ def game_models():
     return _state["models"]
 
 
-def _tools():
-    """The shipped-map add-on's mesh and material builders (game-accurate shading: vertex
-    colours, lightmaps, blend modes), shared so game models look the same everywhere."""
-    import importlib
-    return importlib.import_module("boz_redux.operators")
-
-
 class _Found:
-    """What the add-on's builders read: decoded textures and materials of one model."""
+    """What the mesh builders (boz_suite.meshes) read: decoded textures and materials of one model."""
 
     def __init__(self):
         self.textures, self.materials = {}, {}
@@ -56,7 +46,7 @@ def _image(texture_hash: int, body: bytes):
         return None
     item = blender_scene.SceneTexture(texture_hash, decoded.width, decoded.height, decoded.rgba,
                                       decoded.format, int.from_bytes(body[:4], "little"))
-    image = _tools()._upload_image(f"BOZ Texture {texture_hash:08x}", item)
+    image = meshes.upload_image(f"BOZ Texture {texture_hash:08x}", item)
     image["boz_resource_hash"] = f"0x{texture_hash:08x}"
     return image
 
@@ -96,15 +86,14 @@ def model_mesh(path: str, model_hash: int):
                 result.textures[texture_hash] = blender_scene.SceneTexture(
                     texture_hash, decoded.width, decoded.height, decoded.rgba, decoded.format,
                     int.from_bytes(textures[texture_hash][:4], "little"))
-    tools = _tools()
-    tools._native_materials(result)
+    meshes.native_materials(result)
     item = blender_scene.SceneMesh(
         "model", levels.MODEL, model_hash, 0, path, name, "BOZ game models",
         [blender_scene.to_blender(tuple(map(float, v))) for v in model.vertices],
         list(model.triangles), uvs=model.uvs, face_materials=model.face_materials,
         material_hashes=blender_scene._model_materials(body, set(materials)),
         vertex_colours=model.vertex_colours, uvs2=model.uvs2)
-    mesh = tools._build_mesh(item)
+    mesh = meshes.build_mesh(item)
     mesh.name = name
     mesh["boz_game_model"] = f"{path}#0x{model_hash:08x}"
     return mesh
@@ -303,10 +292,9 @@ def texture_material(path: str, texture_hash: int):
     result.textures[texture_hash] = blender_scene.SceneTexture(
         texture_hash, decoded.width, decoded.height, decoded.rgba, decoded.format,
         int.from_bytes(body[:4], "little"))
-    tools = _tools()
-    tools._native_materials(result)   # uploads "BOZ Texture <hash>"
+    meshes.native_materials(result)   # uploads "BOZ Texture <hash>"
     item = blender_scene.SceneMaterial(texture_hash, [texture_hash])
-    material = tools._build_material(item, result)
+    material = meshes.build_material(item, result)
     material["boz_texture_source"] = f"{path}#0x{texture_hash:08x}"
     return material
 
