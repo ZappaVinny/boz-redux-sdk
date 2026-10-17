@@ -613,7 +613,7 @@ def encode_model(model: Model, source: bytes | None = None) -> bytes:
 
 def build_model(vertices, uvs, triangles, materials: Sequence[int],
                 face_materials: Sequence[int] | None = None, flags: int = 0x20000) -> bytes:
-    """A complete ``CIwModel`` body from scratch (``CIwModel_Serialise`` layout)::
+    """A complete ``CIwModel`` body from scratch (``CIwModel::Serialise`` layout)::
 
         u32 flags, u16 render vertex count, u16 position count,
         bounding sphere (i32 x, y, z, u32 radius),
