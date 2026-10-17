@@ -116,29 +116,6 @@ def fit(picture):
     return out
 
 
-STICKS = iw_hash('HUD_ALL')
-STICK_RECTS = ((0, 0, 257, 236), (257, 0, 92, 72), (625, 431, 80, 80))
-
-
-def hide_sticks(parsed) -> bool:
-    """Make the on-screen joystick art of HUD_ALL transparent, as the client does to the shipped
-    ingame group (codboz_hide_virtual_stick_artwork: it only knows the shipped file's size, so a
-    patched copy needs it done here). Returns True when the art was found."""
-    import numpy as np
-    from PIL import Image
-    from . import native
-    for resource_type in parsed.types():
-        if resource_type.class_hash != TEXTURE:
-            continue
-        for resource in resource_type.resources:
-            if resource.in_group_hash != STICKS:
-                continue
-            pixels = np.array(native.decode_texture(resource.body).convert('RGBA'))
-            for x, y, w, h in STICK_RECTS:
-                pixels[y:y + h, x:x + w, 3] = 0
-            resource.body = native.encode_texture(Image.fromarray(pixels, 'RGBA'), resource.body)
-            return True
-    return False
 
 
 def apply(source: Path, defs, read, groups: dict, map_name: str, pack=None) -> list[str]:

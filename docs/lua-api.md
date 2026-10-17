@@ -75,7 +75,6 @@ Names from the game definition the client loaded (`gamedef/`).
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `gamedef.symbol(name)` | address or `nil` | Same as `game.symbol`. |
 | `gamedef.cvars()` | array | Every known console variable: `{name, type, default, used_by, lookup_only}`. |
 | `gamedef.commands()` | array | Every known console command: `{name, id, owner}`. |
 

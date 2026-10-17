@@ -469,9 +469,6 @@ def compile_map(project: Project, game, fixed=None):
         sound.apply(source, game.read, files.groups, layout.base, project.map_name)
         # The Weapons tab's HUD icons (own pictures in a patched hud_icons sheet).
         hud_icons.apply(source, defs, game.read, files.groups, project.map_name, pack=game)
-        if 'ingame.group.bin' in files.groups:
-            # A shipped ingame group replaces the client's own fix-up (it hides the touch sticks).
-            hud_icons.hide_sticks(files.groups['ingame.group.bin'])
         # The Effects tab's effects (from any map) under the names scripts use.
         files.runtime['effects'] = effects.apply(game.read, source, files.groups, project.map_name,
                                                  game, scripts=project.scripts)
