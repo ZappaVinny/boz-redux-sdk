@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the field reference in docs/weapons.md from bozkit.weapons.FIELDS (the same list the
+"""Regenerate the field reference in docs/weapons-and-assets.md from bozkit.weapons.FIELDS (the same list the
 editor's Weapons tab shows)."""
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ sys.path.insert(0, str(ROOT / 'tools' / 'bozkit'))
 
 from bozkit import weapons  # noqa: E402
 
-DOC = ROOT / 'docs' / 'weapons.md'
+DOC = ROOT / 'docs' / 'weapons-and-assets.md'
 START, END = '<!-- fields:start -->', '<!-- fields:end -->'
 
 
 def table() -> str:
     out = []
     for group in weapons.GROUPS:
-        out.append(f'### {group}\n')
+        out.append(f'#### {group} fields\n')
         out.append('| Field | Key | Unit | Default | What it does |')
         out.append('| --- | --- | --- | --- | --- |')
         for spec in weapons.FIELDS:

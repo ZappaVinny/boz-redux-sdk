@@ -13,7 +13,7 @@
 -- round + 1; WaveManager_FillNextWave picks the next wave or a special round) and ends with
 -- SUBJECT_WAVE_ENDED. The new-wave info SUBJECT_NEW_WAVE carries (a StartWaveInfo): +4 the wave,
 -- +8 / +0xc a special round's health and count, +0x10 the wave after it, +0x14 the round it
--- follows. The Game tab sets a map's rounds (docs/game.md).
+-- follows. The Game tab sets a map's rounds (docs/map-editor.md, Game rules).
 
 local rounds = {}
 

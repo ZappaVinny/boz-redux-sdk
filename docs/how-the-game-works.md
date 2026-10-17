@@ -1,9 +1,305 @@
-# Asset formats
+# How the game works
+
+A modder's tour of *Call of Duty: Black Ops Zombies* (1.0.11): first the systems you will meet,
+what they do and where to change them, then how the game loads a level, and finally how it
+stores its data in files.
+
+## The game's systems
+
+This section covers the systems you will meet, what they do, and where to change them. Function and event names are the ones in the game definition
+(`gamedef/`), so you can hook them or look up their notes. When the standard lib already covers
+something, that is the easier way; see the [standard library](standard-library.md).
+
+### The big picture
+
+The game is built in three layers, and the names tell you which one you are looking at:
+
+| Prefix | Layer | Examples |
+| --- | --- | --- |
+| `C...` (no `Is`/`Iw`) | The game itself | `CWaveManager`, `CMysteryBox`, `CPlayerController`, `CDO*` (Dead Ops) |
+| `CIs...` | The studio's engine (Ideaworks): entities, components, events, animation | `CIsEntityDB`, `CIsSubject`, `CIsCamera` |
+| `CIw...` | Marmalade, the cross-platform SDK: resources, UI, sound, console | `CIwResManager`, `CIwUISlider`, `CIwConsole` |
+
+Gameplay objects are **entities** made of **components** (a zombie has `CHealth`, an AI
+controller, a body, ...). Big systems are **singletons** (`CWaveManager`, `CScoreManager`,
+`CLevelManager`, ...). Systems talk through **events**.
+
+There are two game modes: **Zombies** (the first-person maps: Kino der Toten, Ascension, Call of
+the Dead, ...) and **Dead Ops Arcade** (top-down, its own `CDO*` systems). Most of this section is
+about Zombies.
+
+### Events
+
+Systems announce things with events named `SUBJECT_*`: `SUBJECT_NEW_WAVE`, `SUBJECT_ZOMBIE_DEATH`,
+`SUBJECT_ADD_SCORE`, `SUBJECT_ON_PERK_GAINED`, ... A system sends an event; everything that
+subscribed to it gets it in its `OnEvent`. `gamedef/events/boz-1.0.11.toml` lists all 337 events
+with the classes that send and handle them.
+
+For a mod, events are the natural place to react: hook the handler of the event you care about.
+
+### A frame
+
+Each frame the game updates the current state (main menu, playing, paused, ...), runs the world
+and every system and component, draws the scene and the HUD, and updates sound, music and the
+network. The client's `frame` event runs once per displayed frame, after all of that.
+
+### Rounds
+
+Rounds are run by `CWaveManager` from round definitions (`CWave`, game data):
+
+- while fewer zombies have spawned than the round's total, and fewer are alive than its maximum,
+  it spawns one after a short delay;
+- every zombie death counts; when the count reaches the total, the round ends
+  (`SUBJECT_WAVE_ENDED`) and after a pause `CWaveManager::StartWave` starts the next one;
+- later rounds grow: each value is `base * multiplier ^ (round - first round)`; special rounds
+  (hellhounds, monkeys) slot in between.
+
+Round sizes, zombie speeds and health are data, so they can be changed by editing the round
+definitions (bozkit) or by hooks at run time. The standard lib has `boz.rounds` for starting
+rounds and spawning or killing zombies.
+
+**Spawning.** Every zombie, dog and monkey is spawned from a spawn description
+(`ZombieSpawnInfo`: what spawns, a new name, a spawn point, a look, a position) through
+`CWaveManager::OnSpawnZombie`: its health is the round's (times the difficulty's multiplier), its
+speed tier is picked from the round's walk / run / sprint shares, and it counts toward the round
+when it is tracked. A plain zombie's spec comes from its look (`CZombieConfiguration`, the level
+lists the ones it picks from). George (Call of the Dead) spawns through the wave manager's boss
+spawn, which keeps him. An AI spawned off the navmesh dies within seconds.
+`boz.zombies.spawn` / `spawn_george` / `spawn_at_point` do this.
+
+### Points and purchases
+
+`CScoreManager` keeps each player's points:
+
+- earning: `SUBJECT_ADD_SCORE` (kills, repairs) adds points through `CScoreManager::AddScore`;
+- spending: every purchase (doors, the box, perks, Pack-a-Punch, traps, turrets) sends
+  `SUBJECT_CHARGE_POINTS`;
+- in single player, a purchase you cannot afford is paid with COD Points (the store currency) when
+  you have enough.
+
+The cheat `UnlimitedScore` makes purchases free; `StartingScore` sets the starting points.
+
+### Combat and health
+
+- **Shooting:** a weapon's shoot animation fires its bullets: each pellet gets spread, a ray is
+  cast, and what it hits gets `SUBJECT_WEAPON_HIT` with the body part. The knife does the same
+  for a target in front of the player.
+- **Health:** `CHealth` clamps damage, regenerates after a delay and sends `SUBJECT_DIED` below
+  1 health. `CHealth::Damage` is where damage arrives. The most health can be (+0x44) is set at
+  spawn (the round's health for a zombie) and doubled by Juggernog; the reflected
+  `m_MaxHealth` is only the spec's base.
+- **What weapons do to zombies:** a zombie's controller gets the hit as an event and reacts:
+  ice (the freeze ray: frozen, then shattered), fire, the full-body explosion, chain lightning,
+  the black hole and the Thundergun each have their own death. `boz.zombies` sends these
+  directly (`z:freeze()`, `z:burn()`, `z:explode()`, ...).
+- **Kills:** a dying zombie sends a kill-score event by how it died (head, torso, limb, knife,
+  grenade); the killer's score handler looks up the points (doubled during Double Points) and adds
+  them. `zombieHeadshotBonus` is extra for headshots.
+
+### Weapons
+
+A weapon is an entity with a `CPlayerWeapon` component: its definition (clip size, damage, fire
+rate) and live ammo. Each weapon type (automatic, shotgun, launcher, Wonder Weapons) is a small
+state machine: idle, firing, reloading. Weapon stats are data (`weapons_<map>.group.bin`),
+readable and editable with bozkit. `WeaponsUnlimitedAmmo` stops ammo use.
+
+### Perks, power-ups and the box
+
+- **Usable objects** (perk machines, the mystery box, Pack-a-Punch, doors, barricades, traps,
+  turrets) all have an `Interact`: check the cost, charge points, act.
+- **Perks** (`CPerkManager` on the player): Deadshot, Double Tap, Juggernog, Stamin-Up, PHD
+  Flopper, Quick Revive, Speed Cola, kept as bits with a HUD icon each.
+  `boz.player.give_perk` / `give_all_perks` grant them, `take_perk` / `take_all_perks` take them.
+- **Using something** only works when the player's points cover it as of the last frame (the
+  score updates a frame later); `piece:use_free()` credits the cost, uses it a frame later with
+  purchases free (the `UnlimitedScore` cvar, `boz.score.free_purchases`) and takes the credit back.
+- **Power-ups** drop from zombies based on points earned since the last drop; the last dog or
+  monkey of a round drops Max Ammo.
+- **The box** rolls a weapon and hands it over through `CWeaponManager::GiveWeapon`.
+
+### The player and the camera
+
+The local player's controller is `CPlayerController`; its weapon manager (`CWeaponManager`)
+also owns the view's field of view: it eases between the map's default and the weapon's
+aim-down-sights zoom each frame. `boz.camera.set_fov` changes it properly. `boz.fly` turns on
+the game's developer fly mode (noclip). Camera shakes are data (`CCameraShakeConfig`: duration,
+how far, how often it changes); one plays at a time (`boz.camera.shake`).
+
+Rotations are quaternions stored scalar first (s, x, y, z) everywhere: transforms, spawns,
+spawn descriptions. `boz.entities` takes and gives `{x, y, z, w}`.
+
+### Menus
+
+The game has two UI systems:
+
+- **The main menu** is one Flash movie (`fe_v4_cs4_swf.bin`, ActionScript 2) played by an
+  embedded Flash player (gameswf). Its screens talk to the game with named messages.
+  `boz.frontend` has the building blocks for changing it.
+- **The in-game menus** (pause menu, settings, HUD) are Marmalade IwUI pages: trees of widgets
+  (labels, images, buttons, sliders) found by name, whose widgets call named handlers on the page.
+  `boz.pause_settings` adds settings to the pause menu; `boz.iwui` is the toolkit underneath.
+
+Text is shown by **string id** (`S_MENU_MUSIC`) in the player's language; `boz.text` adds your
+own.
+
+### Saves
+
+Saves are `.i3d` files in the client's `saves/` folder: profiles, stats, settings, achievements,
+and the mid-match save written at each round start in single player. Each system saves its own
+section. bozkit reads them (`bozkit save`, `bozkit settings`); the format is in
+[Asset formats](#saves-i3d).
+
+### The console
+
+The game kept its developer console: about 660 variables (tuning values and cheats) and 150
+commands, listed in the [console reference](console-reference.md). Many variables exist only while
+a match runs. `boz.console` runs commands and reads and sets variables; the Developer mod gives it
+a window.
+
+### Dead Ops Arcade
+
+A separate mode with its own systems: `CDORoundManager` (rounds), `CDOHordeManager` (enemies),
+`CDOPickupManager` (power-ups) and `CDOPlayerController` (which can switch between walking, a
+helicopter and a tank). Each of its 42 rounds is data: arena, lighting, music, and which enemies
+unlock when.
+
+### Zombies and pathing
+
+Zombies move with Recast/Detour, the standard navigation-mesh library: each map has a navmesh,
+zombies are crowd agents (speed, avoidance, climbing are data), and window and barricade climbs
+are separate connection objects. Per-round speeds come from the round definitions.
+
+### Co-op
+
+The game has local Wi-Fi co-op (discovery plus TCP), with the host running the match and the
+other players following it. Online play used Activision's servers, which BOZ Redux does not use.
+
+## How levels load
+
+How the game finds and loads a level, and what a level the game does not ship needs to load. The
+SDK's map build (`bozkit.world_compile`, `bozkit.levels`) writes exactly these files; this section is
+for understanding a build, or for making levels with your own tools.
+
+### How a level is loaded
+
+`StartLevel <name>` (front-end console, `FrontEnd_StartGame`) and the menus send
+`CEventStartGame` with the level name. The game does not check the name against a list of levels.
+`CLevelManager+0x55` holds it, and `StartingLevel` (default `kino`) is used when it is empty.
+
+`CGameStateIngame::vf2` then:
+
+1. Loads the loading screen: the `CResolutionSpecificString` named `loading-<name>` in `fixed`
+   gives the screen's group per resolution (`LoadingScreen_GetGroupPath`). **If it is missing,
+   the game crashes** (`CIwResManager_LoadGroup` copies a null path).
+2. Loads `ResConfig_InGame` with four groups:
+   - `ingame/sound/snd_player_<character>`;
+   - `ingame/weapons/weapons_<name>`;
+   - `ingame/characters/arms/arms_<name>`;
+   - `levels/<name>/<name>`.
+
+   `tutorial` uses Kino's weapons and arms.
+3. `LevelManager_BindLevel` takes the `CLevel` named `<name>` from the group `<name>` or its
+   children.
+
+`CGameStateIngame::Enter` then runs `Level_Load`:
+
+- `<name>_sectors` is optional. It holds rooms, portals and occluders.
+- `<name>_statics`: every `CIsEntitySpec` in it becomes an entity.
+- `LevelManager_SpawnPlayers` spawns the players at `spawn_player_<n>`.
+- The navmesh is the `CIsNavMesh` named `NavMesh`.
+
+`StartFirstWave` queues the `CLevel`'s starting wave (default `wave1`).
+
+Level names are also compared in code for the following:
+
+| Name | What changes |
+|------|--------------|
+| `callofthedead` | George Romero, outdoor sectors, intro sounds |
+| `ascension` | Characters and sound list (`MPCharactersAsce`, `CharacterSoundListAsce`), power-on effects |
+| `kino` and `proto` | Teleporter intro sound and `start_kino` |
+| `tutorial` | Tutorial manager |
+
+Any other name gets the Kino defaults. The `DeathMachineLevels` and `LightningBoltLevels` cvars
+list which levels allow those pickups.
+
+### Level groups
+
+A group (`.group.bin`) has these sections:
+
+- **Members**: its name and a u32 flags field (1 marks a shared group).
+- **Children** (`0x3b495dc0`): a u8 count, then for each child its path (`levels/kino//kino_statics.group`), `\0`, 8 flag bytes, and the
+  hash of the child group's name.
+- **ResGroupResources**.
+
+Loading a group loads its children first. A new level can therefore reuse shipped groups by
+listing them as children, without copying them; its rooms are reused this way. Some groups are
+looked up by name and only their own resources are read, so those must be renamed copies:
+
+- `weapons_<name>`: the player's weapons. Without them the starting `colt45` is missing, and the
+  game crashes writing to a null weapon.
+- `weapon_projectiles_<name>`: the fallback, `weapon_projectiles_common`, isn't shipped.
+
+The client finds a mod's files by full path, then by base name, so a new level's files go flat
+into the mod's `assets` folder.
+
+### A copy of Kino (`levels.clone_level`)
+
+The smallest new level is a renamed copy of Kino:
+
+| File | What it is |
+|------|------------|
+| `fixed.group.bin` | The game's `fixed` with `loading-<name>` added (a copy of Kino's) |
+| `weapons_<name>`, `weapon_projectiles_<name>`, `arms_<name>` | Renamed copies of Kino's |
+| `<name>` | Children: Kino's `kino_dynamics` and `<name>_statics` |
+| `<name>_statics` | Kino's statics with its `CLevel` renamed; child `<name>_sectors` |
+| `<name>_sectors` | Kino's sectors renamed; its children are Kino's room groups |
+
+`bozkit.derbh` reads these groups straight from the client's `assets/blackops_etc.dz`, so no
+extraction is needed.
+
+Replacing `fixed.group.bin` from a mod conflicts with any other mod that also replaces it. A
+client feature for adding groups at startup would remove the conflict.
+
+### A level with its own geometry
+
+The **Debug arena** template (`world.template_world("debug")`, compiled by
+`world_compile.compile_world` like every map project) is a walled 24 m square built from scratch.
+It loads and plays: rounds, zombies, power, and a perk to buy.
+
+| Part | Where it comes from |
+|------|---------------------|
+| Floor and walls | A new `CIwModel` (`native.build_model`), drawn by one placed entity |
+| Texture and material | A generated raw BGRA texture (`native.build_texture`) and an opaque material (flags 0) |
+| Collision | The `COLLISION` entity's mesh, replaced with the floor, the walls and a box per prop |
+| Navmesh | Built fresh with Recast on the template's settings and tile grid (`navbuild.build`) |
+| Player and zombie spawns | The template's player spawns and starting-area spawn points, moved into the arena |
+| Juggernog, power switch | The template's entities, moved; their models come from `kino_dynamics` |
+| Rounds, zombie types, sounds, cameras | Kept from the template's statics |
+
+The level has no rooms (no `<name>_sectors` group). Renderables in render group 20 that are not
+inside any room are culled by their bounding sphere only, so they still draw.
+
+Shipped levels bake props into the level's collision and navmesh. A generated level gives every
+prop a solid box instead (`levels.prop_boxes`): the prop's own collision box, or else its model's
+bounds. Players walk on the navmesh, so a prop without a hole in it can be walked through.
+
+Model layout (`CIwModel_Serialise`), as written by `native.build_model`:
+
+- u32 flags.
+- u16 render vertex count, then u16 position count.
+- Bounding sphere: i32 x, y, z and u32 radius.
+- The block list: u32 count, then for each block its u32 class hash and the block itself (u32 class hash, u16 size in memory, u16 element count, u16 flags, data).
+- u32 0, for an empty second list.
+- The materials: u32 count, then the u32 material hashes.
+
+Positions are signed 16-bit centimetres. UVs are in 1/4096 units, and 4096 means 1.0.
+
+## Asset formats
 
 How Call of Duty: Black Ops Zombies 1.0.11 stores its data, and how `tools/bozkit` reads and
 writes it. Everything here was worked out from the game's own code. No game data is included in this repository.
 
-## Where the files are
+### Where the files are
 
 - **Packs:** the game's data is in two `.dz` packs (Marmalade derbh archives, extracted by
   `dade marmalade extract-dz --no-delete`). The client uses `blackops_etc.dz` (ETC textures) or
@@ -23,7 +319,7 @@ A map is split across several groups, for example Kino der Toten:
 | `kino_dynamics` | placed entities: doors, perk machines, the box, traps |
 | `weapons_kino`, `arms_kino`, `weapon_projectiles_kino` | the map's weapons and first-person arms |
 
-## Resource group (`.group.bin`)
+### Resource group (`.group.bin`)
 
 ```
 header[6]                  0x3d, padding, reserved u16
@@ -51,9 +347,9 @@ The 1.0.11 ETC pack uses 63 resource classes. By size, most are `CIwTexture` (ab
 `CIwModel`. `tools/destin` (dade) provides extraction and read-side conversions; `bozkit` owns
 BOZ-specific lossless writing and editing.
 
-## Writable-format status
+### Writable-format status
 
-### Material rendering (GLES1 path)
+#### Material rendering (GLES1 path)
 
 `Rendering_ApplyMaterialGLES` (`0x4a2b74fc`) applies a `CIwMaterial` to the fixed-function
 pipeline. Its flags word (runtime `+0x10`) selects:
@@ -82,7 +378,7 @@ everything in the game's display encoding and decodes the result once, under a S
 transform. It does not implement the bits 25–28 alpha functions, the stage-0 variants, or the dot3
 path that swaps the stages when normal mapping is active.
 
-### Texture coordinates
+#### Texture coordinates
 
 `CIwModelBlockGLUVs` and `CIwModelBlockGLUVs2` share one layout: a u16 render-vertex count at
 block `+6`, then one signed 16-bit (u, v) pair per render vertex from `+10`, in 1/4096 units. They
@@ -90,7 +386,7 @@ follow the GL convention: v = 0 addresses the first stored texel row. Readable t
 this. On the tutorial's "WISH too OFTEN" sign, its posters and its building facade, the geometric
 top of the surface has v = 0. Tools that display images upright must mirror v (`1 - v`).
 
-### Raw texture formats
+#### Raw texture formats
 
 Uncompressed textures use Marmalade's formats, named by channel from the most significant bits of
 a little-endian word: `0x0e` is ABGR_8888 (bytes **R, G, B, A**), `0x0a` is BGR_888 (bytes
@@ -118,7 +414,7 @@ mistake for texel data. Before 2026-10-09, bozkit read the texels from offset 24
 which shifted the colour channels. It also wrote textures without the final byte. The game then
 read a texel byte as "has mipmaps", which can crash it.
 
-### Cooked texture payloads
+#### Cooked texture payloads
 
 In the supported cooked ETC1/DXT1 layout, the u32 at body offset 35 is the mip
 count, followed by width and height at 39 and 43. The size table starts at 47
@@ -131,7 +427,7 @@ base block size and complete mip payload bounds. Synthetic tests exercise 7,
 in the private tutorial group. The old incorrect offset decoded table words as
 image blocks and rejected its seven-level texture altogether.
 
-### Resource coverage
+#### Resource coverage
 
 | Resource | Parse/write status | Editing status |
 | --- | --- | --- |
@@ -159,13 +455,13 @@ RGBA at load. 32-bit texture export was visually
 validated with the named `main_menu_logo` resource. ETC1 and DXT1 decoding was visually validated
 against the same tutorial floor material from the corresponding platform archives.
 
-## Hashes
+### Hashes
 
 Names are stored as `IwHashString(name)`: `h = 5381; h = h * 33 + c` for each byte, with A–Z
 lowercased, as a 32-bit value. Resource names are usually not stored. `bozkit names` builds a
 local dictionary from strings in your own game files to show them.
 
-## Reflected data (`LFER` blobs)
+### Reflected data (`LFER` blobs)
 
 Gameplay data is stored as property blobs that the engine's reflection system reads back by name.
 The field names and types are in `gamedef/reflection/boz-1.0.11.toml`.
@@ -207,14 +503,14 @@ child_count x: u32 class (CIsEntitySpec), u32 reserved, entity spec (this layout
 For Zombies content, bozkit decodes and re-encodes all 3,268 entity specs and 1,040 reflected
 resources byte-for-byte.
 
-## Navigation meshes (`CIsNavMesh`)
+### Navigation meshes (`CIsNavMesh`)
 
 Zombie pathing uses Recast/Detour.
 
 - **Layout:** each `CIsNavMesh` body begins with an 80-byte Recast build configuration and a
   40-byte Detour mesh-set header. Each tile then has an 8-byte reference/size header followed by
   Detour version 7 tile data (`DNAV`) with BOZ's widened 40-byte polygons and off-mesh
-  connections (see [navigation meshes](navmesh.md)). The settings begin with cell size, cell height,
+  connections (see [Navigation meshes](map-editor.md#navigation-meshes)). The settings begin with cell size, cell height,
   agent height, agent radius, max climb and max slope; Zombies maps commonly use
   0.1 / 0.15 / 1.5 / 0.4 / 0.4 / 50°.
 - **Where:** Zombies map `*_statics` groups hold one or more tiles.
@@ -236,7 +532,7 @@ bool field_0x5c, bool field_0x5d
 
 The offset-based names are intentional until behavior proves their semantics.
 
-## Visibility portals (`CIsPortal`)
+### Visibility portals (`CIsPortal`)
 
 ```text
 u32 vertex_count
@@ -248,7 +544,7 @@ cstring front_sector_name, cstring back_sector_name
 
 The hashes are regenerated from the sector names when written.
 
-## Collision meshes
+### Collision meshes
 
 `CIsCollisionMeshSpec` appends this data after its reflection blobs:
 
@@ -299,7 +595,7 @@ contribute). Editors can therefore treat those triangles as belonging to that mo
 Collision vertices are in the local space of the entity's `CIsTransform`. Call of the Dead and one
 Ascension collision entity have a non-zero position.
 
-## Entity transforms and hierarchy
+### Entity transforms and hierarchy
 
 `CIsTransform` component blobs store any of `m_localPosition` (`CIwFVec3`), `m_localRotation`
 (`CIwFQuat`, xyzw) and `m_localScale` (`CIwFVec3`); a missing field is the identity. Scales such as
@@ -307,7 +603,7 @@ Ascension collision entity have a non-zero position.
 renderable children exist in the Zombies levels. Reflection reads properties by name, so `bozkit`
 adds a missing field when an edit needs it.
 
-## Entity links and areas
+### Entity links and areas
 
 Gameplay entities refer to each other through `CIsNamed` names (IwHashString of the name). These
 field names are missing from the reflection export and were recovered by hashing the game's
@@ -329,7 +625,7 @@ entity names, and its resource name matches the visibility sector of the same na
 names the `m_StartingArea`, `MysteryBoxAvoid`, `m_zombiesConfigurations`, `m_StartingWavesSP/MP`,
 `m_PerksAvailable` and `m_Achievements`. Kino has 9 areas; its 137 links all resolve.
 
-## How levels create entities
+### How levels create entities
 
 A level has no list of its entities. `Level_Load` (`0x4a1aae4c`) loads `<level>_sectors`
 (portals and occluders), then `<level>_statics`, and `Entity_CreateAllFromGroup` creates an
@@ -344,7 +640,7 @@ name, only their in-group hash; a new one only needs a hash unique within its gr
 `CIsEntitySpec_Design_Door`, `_PerkMachine`, `_Art_Prop` and similar class names are factory
 aliases of `CIsEntitySpec` left over from the authoring tool.
 
-## Maps across groups
+### Maps across groups
 
 Placements reference resources by name hash, not by group. Kino's `kino_statics` places 73 objects
 using 23 models from `kino_dynamics` and `ingame`. Each room's `*_shared` group holds that room's
@@ -352,7 +648,7 @@ models, materials, portals, occluders and light boxes, while many of its texture
 groups. Editors must resolve references across all of a level's groups plus `ingame`, and write
 each edit back to the group that owns the resource.
 
-### Map-agnostic assets (bozkit.bundle)
+#### Map-agnostic assets (bozkit.bundle)
 
 Nothing in the game's data ties a resource to a map: `CIwResManager` finds a name in whatever
 groups are loaded. So a map can use anything from any map, provided its own groups carry it.
@@ -389,7 +685,7 @@ Verified in the game: every one of the 228 effects and projectiles of every map 
 built from Kino (Call of the Dead's draw there too); no reference of another map's effect is
 missing from the built map.
 
-## Saves (`.i3d`)
+### Saves (`.i3d`)
 
 Saves are written with IwSerialise (`CSaveManager::Serialise`). Every file begins:
 
@@ -423,26 +719,15 @@ section_count x: u32 owner (object name hash or class hash), u32 class_hash, u32
 
 Strings in these files end with a zero.
 
-## bozkit
+### Reading these files
 
-```bash
-cd /home/zappa/Work/boz/boz-redux-sdk
-.venv/bin/bozkit extract ../boz-redux/original/obb/blackops_etc.dz /tmp/boz-etc --kind dz
-.venv/bin/bozkit corpus /tmp/boz-etc --exclude '*deadops*' -o /tmp/boz-etc-corpus.json
-.venv/bin/bozkit dump /tmp/boz-etc/ingame/levels/kino/kino.group.bin -o /tmp/kino.json
-.venv/bin/bozkit texture-export /tmp/boz-etc/frontend/frontend.group.bin \
-  main_menu_logo /tmp/main_menu_logo.png
-.venv/bin/bozkit model-export /tmp/boz-etc/ingame/weapons/weapons_kino.group.bin \
-  colt45 /tmp/colt45.gltf
-.venv/bin/python -m unittest discover tools/bozkit/tests
-```
+The [bozkit command line](sdk-reference.md#bozkit-command-line) reads and writes every format in this section:
+`dump` writes every reflected resource and entity spec of a group as JSON, with named fields
+and typed values, `set` changes one field, and the resource commands export and import models,
+textures, materials, collision, portals and navmeshes. `corpus` checks that a whole extracted
+pack reads and writes back byte for byte.
 
-`dump` writes every reflected resource and entity spec with named fields and typed values. `set`
-changes one field and writes a new group. Complete edited game files are valid project inputs and
-may be built into local test mods. Official BOZ repositories must not track those files;
-distribution validation warns when their game-derived provenance is recorded.
-
-## Skeletal animation (CIwAnimSkel, CIwAnimSkin, CIwAnim, CIsAnimStateMachine)
+### Skeletal animation (CIwAnimSkel, CIwAnimSkin, CIwAnim, CIsAnimStateMachine)
 
 First-person arms and guns are skinned models. A skeleton lists its bones (name, parent, a
 compressed rotation, a position relative to the parent); a skin stores, for each set of up to
@@ -464,7 +749,7 @@ flags are 0x30000 (rigid: 0x20000); a weapon's spec points at its model and skin
 renderableAsset, renderableAssetADS (aiming down the sights, on some guns) and LODS (three
 distance models).
 
-## Sounds (CIwSoundData, CIwSoundSpec, CSoundSequence)
+### Sounds (CIwSoundData, CIwSoundSpec, CSoundSequence)
 
 About 730 sounds, in `ingame/ingame.group.bin` (the shared ones: weapons, zombies, power-ups,
 rounds, buying), each map's statics group, `ingame/sound/snd_player_<character>.group.bin`
@@ -489,4 +774,3 @@ rounds, buying), each map's statics group, `ingame/sound/snd_player_<character>.
 
 `bozkit/sound.py` reads all of these, encodes ADPCM, lists a level's sounds as slots and
 replaces a slot by swapping its CIwSoundData (the spec, its settings and every sequence stay).
-

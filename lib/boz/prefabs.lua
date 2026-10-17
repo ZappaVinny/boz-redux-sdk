@@ -1,5 +1,5 @@
 -- boz.prefabs: scripts for the map's prefabs, models, volumes and weapons, and the event bus
--- between them. Map scripts see this module as `boz`; docs/map-scripting.md is the guide.
+-- between them. Map scripts see this module as `boz`; docs/map-editor.md (Map scripting) is the guide.
 --
 --   function on_hit(volume, info)              -- in a script attached to a prefab
 --       self:part("Door"):hide():set_collision(false):open_navmesh()

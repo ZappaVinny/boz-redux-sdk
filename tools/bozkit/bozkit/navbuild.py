@@ -50,7 +50,7 @@ def helper_path() -> Path:
     if found:
         return Path(found)
     raise FileNotFoundError('boz-navmesh is not built; run cmake in tools/navmesh '
-                            '(see docs/navmesh.md)')
+                            '(see docs/map-editor.md, Navigation meshes)')
 
 
 @dataclass

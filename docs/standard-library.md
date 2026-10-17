@@ -3,10 +3,10 @@
 The standard lib (`boz.*`) is the friendly layer for writing mods: plain functions for the
 player, menus, the console and more, with the game's addresses, offsets and events hidden
 inside. Mods should use it instead of the client's low-level `game`/`hook` functions
-([lua-api.md](lua-api.md)) wherever it covers what they need.
+([client Lua API](lua-mods.md#client-lua-api)) wherever it covers what they need.
 
 This page is generated from the comments in `lib/boz/*.lua` (`tools/stdlib/generate_doc.py`); see
-[making-mods.md](making-mods.md) for how to use it in a mod.
+[Lua mods](lua-mods.md) for how to use it in a mod.
 
 Using it in a mod: an SDK project's build adds it to the mod as `scripts/boz`; then
 `local player = require("boz.player")`. Each mod carries its own copy; copies in different
@@ -17,11 +17,11 @@ Functions that need a Zombies match return `nil` (or `false`) outside one instea
 ## Contents
 
 - **Gameplay**: [boz.player](#bozplayer), [boz.camera](#bozcamera), [boz.rounds](#bozrounds), [boz.zombies](#bozzombies), [boz.weapons](#bozweapons), [boz.effects](#bozeffects), [boz.score](#bozscore), [boz.pickups](#bozpickups), [boz.pieces](#bozpieces), [boz.map](#bozmap), [boz.fly](#bozfly), [boz.deadops](#bozdeadops)
-- **Map scripting**: [boz.world](#bozworld), [boz.prefabs](#bozprefabs), [boz.objects](#bozobjects), [boz.match_events](#bozmatchevents), [boz.timers](#boztimers), [boz.saved](#bozsaved), [boz.hooks](#bozhooks), [boz.game](#bozgame), [boz.levels](#bozlevels)
-- **Engine access**: [boz.entities](#bozentities), [boz.components](#bozcomponents), [boz.reflect](#bozreflect), [boz.resources](#bozresources), [boz.physics](#bozphysics), [boz.game_events](#bozgameevents), [boz.spawns](#bozspawns), [boz.audio](#bozaudio), [boz.screen](#bozscreen), [boz.hud](#bozhud), [boz.stats](#bozstats), [boz.saves](#bozsaves), [boz.network](#boznetwork)
+- **Map scripting**: [boz.world](#bozworld), [boz.prefabs](#bozprefabs), [boz.objects](#bozobjects), [boz.match_events](#bozmatch_events), [boz.timers](#boztimers), [boz.saved](#bozsaved), [boz.hooks](#bozhooks), [boz.game](#bozgame), [boz.levels](#bozlevels)
+- **Engine access**: [boz.entities](#bozentities), [boz.components](#bozcomponents), [boz.reflect](#bozreflect), [boz.resources](#bozresources), [boz.physics](#bozphysics), [boz.game_events](#bozgame_events), [boz.spawns](#bozspawns), [boz.audio](#bozaudio), [boz.screen](#bozscreen), [boz.hud](#bozhud), [boz.stats](#bozstats), [boz.saves](#bozsaves), [boz.network](#boznetwork)
 - **Controls**: [boz.input](#bozinput)
 - **Console**: [boz.console](#bozconsole), [boz.cvars](#bozcvars)
-- **Menus and text**: [boz.pause_settings](#bozpausesettings), [boz.text](#boztext)
+- **Menus and text**: [boz.pause_settings](#bozpause_settings), [boz.text](#boztext)
 - **Game UI building blocks**: [boz.iwui](#boziwui), [boz.frontend](#bozfrontend), [boz.flash](#bozflash), [boz.swf](#bozswf), [boz.avm1](#bozavm1)
 - **Low-level helpers**: [boz.hash](#bozhash), [boz.enums](#bozenums)
 
@@ -113,7 +113,7 @@ rounds.on_start(fn)         rounds.on_end(fn)
 
 <details><summary>How it works</summary>
 
-CWaveManager (singleton) runs the rounds: +0x50 the round's CWave, +0x70 zombies alive, +0x78 the round number, +0x7c spawned and +0x84 killed this round (the round ends when killed reaches the wave's zombie count: vtable +0x50 GetZombieCount(round, powerOn)), +0x88 the next round's wave, timers +0x8c (next spawn), +0x90 (next round), +0x94 (spawning starts), +0xb8 power on. A round starts with SUBJECT_NEW_WAVE (CWaveManager::StartWave: the next wave, round + 1; WaveManager_FillNextWave picks the next wave or a special round) and ends with SUBJECT_WAVE_ENDED. The new-wave info SUBJECT_NEW_WAVE carries (a StartWaveInfo): +4 the wave, +8 / +0xc a special round's health and count, +0x10 the wave after it, +0x14 the round it follows. The Game tab sets a map's rounds (docs/game.md).
+CWaveManager (singleton) runs the rounds: +0x50 the round's CWave, +0x70 zombies alive, +0x78 the round number, +0x7c spawned and +0x84 killed this round (the round ends when killed reaches the wave's zombie count: vtable +0x50 GetZombieCount(round, powerOn)), +0x88 the next round's wave, timers +0x8c (next spawn), +0x90 (next round), +0x94 (spawning starts), +0xb8 power on. A round starts with SUBJECT_NEW_WAVE (CWaveManager::StartWave: the next wave, round + 1; WaveManager_FillNextWave picks the next wave or a special round) and ends with SUBJECT_WAVE_ENDED. The new-wave info SUBJECT_NEW_WAVE carries (a StartWaveInfo): +4 the wave, +8 / +0xc a special round's health and count, +0x10 the wave after it, +0x14 the round it follows. The Game tab sets a map's rounds (docs/map-editor.md, Game rules).
 
 </details>
 
@@ -358,7 +358,7 @@ pickups.active()                       {insta_kill = ms left, double_points = ..
 pickups.on_collect(fn)                 fn(name) when the player collects one
 ```
 
-Names: double_points, insta_kill, max_ammo, nuke, carpenter, firesale, deathmachine, perkbottle, lightningbolt (the game's order). How often they drop is the Game tab's economy (docs/game.md).
+Names: double_points, insta_kill, max_ammo, nuke, carpenter, firesale, deathmachine, perkbottle, lightningbolt (the game's order). How often they drop is the Game tab's economy (docs/map-editor.md, Game rules).
 
 <details><summary>How it works</summary>
 
@@ -389,7 +389,7 @@ pieces.perks()[1]:use()                         -- as if the player pressed use 
 pieces.doors()                                  -- every door, with :get("m_DoorState")
 ```
 
-A piece handle: piece.entity, piece.class, piece.component, piece:get(field), piece:set(field, value), piece:fields() (every field and value), piece:position(), piece:use(), piece:name_hash(), piece:send(event), piece:cost(), piece:use_free() (opens, buys, spins without points); boxes :spawn_box() / :despawn_box() (pieces.move_box(to)), Pack-a-Punch :spawn_pack_a_punch() / :despawn_pack_a_punch(), barricades :fix_barricade() (pieces.fix_all_barricades()), doors :is_open() (pieces.open_all_doors()). The fields are the game's (reflected): docs/toolkit-fields.md explains them; boz.reflect has the rest.
+A piece handle: piece.entity, piece.class, piece.component, piece:get(field), piece:set(field, value), piece:fields() (every field and value), piece:position(), piece:use(), piece:name_hash(), piece:send(event), piece:cost(), piece:use_free() (opens, buys, spins without points); boxes :spawn_box() / :despawn_box() (pieces.move_box(to)), Pack-a-Punch :spawn_pack_a_punch() / :despawn_pack_a_punch(), barricades :fix_barricade() (pieces.fix_all_barricades()), doors :is_open() (pieces.open_all_doors()). The fields are the game's (reflected): docs/map-editor.md (Game prefab fields) explains them; boz.reflect has the rest.
 
 <details><summary>How it works</summary>
 
@@ -562,13 +562,13 @@ Perk machines that work without power: the editor's "Needs power" off writes the
 
 | Function | Description |
 | --- | --- |
-| `world.start()` | Turns on what map projects need from the standard library (call once, from main.lua). |
+| `world.start()` | Turns on what map projects need from the standard library (call once, from main.lua), and starts the mod's map when the launcher asked for it (its "autostart_level" setting). |
 
 ### boz.prefabs
 
 Scripts for the map's prefabs, models, volumes and weapons, and the event bus
 
-between them. Map scripts see this module as `boz`; docs/map-scripting.md is the guide.
+between them. Map scripts see this module as `boz`; docs/map-editor.md (Map scripting) is the guide.
 
 ```lua
 function on_hit(volume, info)              -- in a script attached to a prefab
@@ -915,7 +915,7 @@ local waves = reflect.singleton("CWaveManager")      -- managers by class name
 for name, value in pairs(reflect.dump(perk, "CPerk")) do print(name, value) end
 ```
 
-The game describes its components and resources to its own reflection system (CIsClassInfo: 359 classes, their bases and fields with offset, size and type); boz/reflection_data.lua holds that description (tools/stdlib/generate_data.py, from the game definition). docs/toolkit-fields.md explains what the fields do.
+The game describes its components and resources to its own reflection system (CIsClassInfo: 359 classes, their bases and fields with offset, size and type); boz/reflection_data.lua holds that description (tools/stdlib/generate_data.py, from the game definition). docs/map-editor.md (Game prefab fields) explains what the fields do.
 
 Types read: unsigned int, int, short, char, unsigned char, bool, float, CIwFVec3 {x, y, z}, CIwFQuat {x, y, z, w}, CIwColour {r, g, b, a}, string (std::string: its characters' pointer first), NetworkProperty<T> (the value at +4; writing marks it changed at +8), vector<T> (begin, end), list<T> (header pointer; nodes: next, previous, value at +8), enums (unsigned int), CIsTimer, bitset (raw bits). Containers and strings are read-only.
 
@@ -1235,7 +1235,7 @@ console.set("WeaponsUnlimitedAmmo", true)
 print(console.exec("listVars Unlimited"))
 ```
 
-Runs console lines, reads and sets console variables (cvars), registers new ones, and passes on everything the console prints. Every variable and command is listed in console-reference.md.
+Runs console lines, reads and sets console variables (cvars), registers new ones, and passes on everything the console prints. Every variable and command is listed in docs/console-reference.md.
 
 <details><summary>How it works</summary>
 

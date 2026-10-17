@@ -1,6 +1,6 @@
 """The shipped-map tools: import the game's own group files (one, or a level folder) into the
 scene, edit them, and write them back to files or into a mod, without a project
-(docs/blender-existing-maps.md). The editor's sidebar shows them under Shipped files."""
+(docs/map-editor.md). The editor's sidebar shows them under Shipped files."""
 from __future__ import annotations
 
 import json

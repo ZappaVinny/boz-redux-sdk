@@ -1,9 +1,13 @@
 # Console reference
 
 Every console variable (cvar) and developer command in *Call of Duty: Black Ops Zombies*
-1.0.11, generated from the game definition (`gamedef/console/boz-1.0.11.toml`) and the
-notes in `tools/symbols/console_notes.toml`. Regenerate with
-`python3 tools/symbols/symbols.py console-doc gamedef/console/boz-1.0.11.toml tools/symbols/console_notes.toml docs/console-reference.md`; do not edit by hand.
+1.0.11. Variables are the game's settings and cheats (`WalkSpeed`, `UnlimitedHealth`);
+commands do things (`SwitchPowerOn`, `RestartLevel`). Mods use them through
+[`boz.console`](standard-library.md), and players through the Developer mod's console.
+
+This page is generated from the game definition (`gamedef/console/boz-1.0.11.toml`) and the
+notes in `tools/symbols/console_notes.toml`; see
+[Contributing to the game definition](contributing.md#contributing-to-the-game-definition) to change it.
 
 ## How to use them
 

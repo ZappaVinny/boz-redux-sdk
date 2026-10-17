@@ -7,7 +7,7 @@
 --
 -- Names: double_points, insta_kill, max_ammo, nuke, carpenter, firesale, deathmachine,
 -- perkbottle, lightningbolt (the game's order). How often they drop is the Game tab's economy
--- (docs/game.md).
+-- (docs/map-editor.md, Game rules).
 --
 -- How it works: CPickupManager (singleton) spawns them with SpawnPickupAt(manager, type,
 -- transform, offset) (the spec <name>_pickup at the transform's position +0xa8 plus the offset)

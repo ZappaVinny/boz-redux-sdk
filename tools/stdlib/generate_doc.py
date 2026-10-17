@@ -115,10 +115,10 @@ def render(lib):
         "The standard lib (`boz.*`) is the friendly layer for writing mods: plain functions for the",
         "player, menus, the console and more, with the game's addresses, offsets and events hidden",
         "inside. Mods should use it instead of the client's low-level `game`/`hook` functions",
-        "([lua-api.md](lua-api.md)) wherever it covers what they need.",
+        "([client Lua API](lua-mods.md#client-lua-api)) wherever it covers what they need.",
         "",
         "This page is generated from the comments in `lib/boz/*.lua` (`tools/stdlib/generate_doc.py`); see",
-        "[making-mods.md](making-mods.md) for how to use it in a mod.",
+        "[Lua mods](lua-mods.md) for how to use it in a mod.",
         "",
         "Using it in a mod: an SDK project's build adds it to the mod as `scripts/boz`; then",
         "`local player = require(\"boz.player\")`. Each mod carries its own copy; copies in different",
@@ -133,10 +133,10 @@ def render(lib):
     for title, names in GROUPS:
         present = [n for n in names if n in modules]
         listed.update(present)
-        out.append("- **%s**: %s" % (title, ", ".join("[boz.%s](#boz%s)" % (n, n.replace("_", "")) for n in present)))
+        out.append("- **%s**: %s" % (title, ", ".join("[boz.%s](#boz%s)" % (n, n) for n in present)))
     others = [n for n in modules if n not in listed]
     if others:
-        out.append("- **Other**: " + ", ".join("[boz.%s](#boz%s)" % (n, n.replace("_", "")) for n in others))
+        out.append("- **Other**: " + ", ".join("[boz.%s](#boz%s)" % (n, n) for n in others))
     out.append("")
     for title, names in GROUPS + [("Other", others)]:
         present = [n for n in names if n in modules]

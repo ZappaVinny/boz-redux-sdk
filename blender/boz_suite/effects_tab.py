@@ -4,7 +4,7 @@ Game effects lists what the game can spawn (bozkit.effects.catalog): the shared 
 map's own, and each map's projectiles (grenades, bolts, monkey bombs, the Gersch device) with
 what they do. Every one works on any map: the build bundles what a map uses (bozkit.bundle).
 Name it gives one a name scripts use (source/effects.json), and the changes a projectile can have
-(Hide its model, Stays where spawned). Scripts spawn them with boz.effects (docs/effects.md).
+(Hide its model, Stays where spawned). Scripts spawn them with boz.effects (docs/weapons-and-assets.md).
 """
 from __future__ import annotations
 

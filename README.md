@@ -12,77 +12,42 @@ the client.
 
 This was created with a human steered Generative AI (LLM) setup, minimal human verification was done besides functionality tests.
 
-## Contents
+## Documentation
 
-| Path             | What it is                                                                                                                                            |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gamedef/`       | The game definition ([boz-redux-gamedef](https://github.com/ZappaVinny/boz-redux-gamedef), submodule): named functions, data layouts, events, console |
-| `tools/bozkit/`  | Shared project compiler and asset toolkit: build/install/package mods and edit game data                                                             |
-| `tools/ghidra/`  | Ghidra scripts and converters that build and export the reverse-engineering project                                                                   |
-| `tools/symbols/` | Turns Ghidra exports into the game definition files                                                                                                   |
-| `tools/destin/`  | [destin](https://github.com/Tatsh/destin) (submodule): `.dz` pack extraction, textures, models                                                        |
-| `tools/navmesh/` | Native Recast helper that rebuilds navmesh tiles (with its `third_party/recast` submodule) |
-| `blender/`       | Blender 5.2 LTS add-on for importing, validating, editing, and exporting existing native map resources                                            |
-| `lib/boz/`       | The standard lib (`boz.*`): the Lua library mods are built from ([reference](docs/standard-library.md))                                               |
-| `mods/`          | Reference mods: `developer` (the game's developer console in an overlay), `redux` (PC settings in the pause menu)                                    |
-| `docs/`          | [Roadmap](docs/roadmap.md), [SDK projects](docs/sdk-projects.md), [Blender editing](docs/blender-existing-maps.md), [native editing](docs/native-editing.md), [making mods](docs/making-mods.md), [standard library](docs/standard-library.md), [Lua API](docs/lua-api.md), [compatibility](docs/compatibility.md), [asset formats](docs/asset-formats.md), and RE references |
+Start at the [introduction](docs/README.md), or go straight to
+[Getting started](docs/getting-started.md), [Lua mods](docs/lua-mods.md),
+[The map editor](docs/map-editor.md) or the [standard library](docs/standard-library.md).
+Maintainers: [Contributing](docs/contributing.md).
 
-## Setup
+## Quick start
 
 ```bash
-git clone --recurse-submodules git@github.com:ZappaVinny/boz-redux-sdk.git
+git clone --recurse-submodules https://github.com/ZappaVinny/boz-redux-sdk.git
 cd boz-redux-sdk
-ln -s ../boz-redux game          # your client checkout with the game set up (see sdk.toml)
+python3 -m pip install -e '.[desktop]'
+boz-sdk                                   # the SDK app: projects, the asset library, the editor
 ```
 
-Python 3.11+ for bozkit and the symbol tools; Ghidra 12.1+ only for reverse engineering.
-
-Install the SDK CLI and optional desktop application:
-
-```bash
-python3 -m pip install -e .
-python3 -m pip install -e '.[desktop]'  # optional: boz-sdk desktop application
-```
-
-## Quick start: make a mod
-
-Create an [SDK project](docs/sdk-projects.md), then build or install it. The compiler adds the
-standard library automatically:
+Or from the command line:
 
 ```bash
 bozkit new hello --id hello --name Hello --author you
-bozkit build hello
-bozkit install hello --client ../boz-redux
+bozkit install hello --client path/to/boz-redux
 ```
 
-Read [making mods](docs/making-mods.md) for the Lua side. A script can use the standard library:
+## Contents
 
-```lua
-local pause_settings = require("boz.pause_settings")
-local camera = require("boz.camera")
-
-pause_settings.add_slider{id = "fov", label = "Field of view", min = 50, max = 120, step = 1,
-    get = function() return settings.get("fov", 50) end,
-    set = function(v) settings.set("fov", v); camera.set_fov(v) end}
-```
-
-`mods/developer` is a complete example.
-
-## Quick start: change a weapon's data
-
-```bash
-cd /home/zappa/Work/boz/boz-redux-sdk
-.venv/bin/bozkit extract ../boz-redux/original/obb/blackops_etc.dz /tmp/boz-etc --kind dz
-.venv/bin/bozkit dump /tmp/boz-etc/ingame/weapons/weapons_kino.group.bin \
-  --class CIsEntitySpec -o /tmp/weapons-kino.json
-```
-
-Extract groups with `bozkit extract`, edit them, and put complete or modified files in a project's
-`assets/` folder. The SDK supports these files for local development and packaging. Authors are
-responsible for deciding what game-derived content they may distribute; game assets must never be
-committed to this repository. See [native asset editing](docs/native-editing.md) for tested
-material, collision, portal, navigation, texture, and static-model workflows using files in this
-workspace, plus the explicit limits for unsupported native layouts.
+| Path | What it is |
+| --- | --- |
+| `tools/bozkit/` | The SDK in Python: project compiler, game file formats, asset library, the SDK app |
+| `blender/` | The map editor (a Blender 5.2 LTS application template) |
+| `lib/boz/` | The standard library (`boz.*`), the Lua library mods are built from |
+| `mods/developer/` | The Developer mod: the game's developer console in an overlay, cheats, noclip |
+| `gamedef/` | The game definition ([boz-redux-gamedef](https://github.com/ZappaVinny/boz-redux-gamedef), submodule): named functions, data layouts, events, console |
+| `tools/ghidra/`, `tools/symbols/` | Reverse-engineering scripts and the converters to the game definition |
+| `tools/navmesh/` | The native Recast helper that rebuilds navmesh tiles |
+| `tools/destin/` | [destin](https://github.com/Tatsh/destin) (submodule): `.dz` pack extraction |
+| `docs/` | The documentation |
 
 ## License
 

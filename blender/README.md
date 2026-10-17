@@ -1,113 +1,44 @@
-# Blender: the BOZ Redux editor
+# Blender: the BOZ Redux editor (code)
 
-`boz_suite/` is the **BOZ Redux editor**, a Blender application template. The SDK launcher opens
-map projects in it (**Open in Editor**). `tools/build_suite.py` assembles it with the bozkit
-modules into `build/suite/` (a Blender user scripts folder) and generates its `startup.blend`
-from `boz_suite/tabs.py`; the launcher rebuilds it in a checkout when the sources change.
-Tests: `python3 blender/tests/run_suite_test.py` (the editor) and
-`blender -b --factory-startup --python blender/tests/headless_roundtrip.py` (the shipped-file
-tools).
+`boz_suite/` is the BOZ Redux editor, a Blender 5.2 LTS application template. How to use it is in
+the documentation: [The map editor](../docs/map-editor.md) and [Weapons, models, effects and sounds](../docs/weapons-and-assets.md). This file is
+a map of the code.
 
-## The editor
+`tools/build_suite.py` assembles the editor with the bozkit modules into `build/suite/` (a Blender
+user scripts folder) and generates its `startup.blend` from `boz_suite/tabs.py`; the SDK app
+rebuilds it in a checkout when the sources change. Tests: `python3 blender/tests/run_suite_test.py`
+(the editor) and `blender -b --factory-startup --python blender/tests/headless_roundtrip.py` (the
+shipped-file tools); see [Contributing](../docs/contributing.md#working-on-the-sdk).
 
-- **Weapons tab:** the project's weapons: Import from game (this map's or another map's, with
-  models and animations), New weapon (a copy), every field with units and help, Pack-a-Punch
-  result, Add script, your own model with its own skeleton (fit, bones, ghost), the arms and
-  gun as armatures. See [docs/weapons.md](../docs/weapons.md).
-- **Animation tab:** change a weapon's animations: one rig (hands on the gun with IK), arms
-  and gun each with their own timeline; a change holds from its frame on; copy and paste poses
-  and original frames.
-- **Assets tab:** your own models: Import a high-quality .blend, FBX, glTF or OBJ as a Prop or
-  a Weapon, Make game version (reduced to the Stock or PC preset's triangles and textures, the
-  normal map baked into the colour), Game checks with fixes, Save edits, Refresh from source,
-  Place in map (also Add → My assets and the palette's My assets). See
-  [docs/assets.md](../docs/assets.md).
-- **Audio tab:** the map's sounds as slots (Play the original, Replace with one of your sounds,
-  Reset), and the processor: Import a recording, trim, level, fades and rate, Preview as the
-  game plays it, Save. The Weapons tab's Sounds panel shows a weapon's slots. See
-  [docs/sounds.md](../docs/sounds.md).
-- **Effects tab:** every effect and projectile of the game (each map's grenades, bolts, lures and
-  the Gersch device's black hole); Use in this map under a name scripts spawn with boz.effects
-  (carried in from other maps when the map builds). See [docs/effects.md](../docs/effects.md).
-- **Game tab:** the map's rules: name, loading screen, power at the start; each game's rounds
-  (with a graph of zombies and health), special rounds, zombie looks, points, power-ups and the
-  box; hook scripts for every event. See [docs/game.md](../docs/game.md).
-- **Tabs:** Game, World, Weapons, Characters, Assets, Effects, Animation, Scripts, Audio,
-  UI / HUD, drawn in the top bar in that order. **Build & Run** (and its ⚙ settings) is at the
-  right of the top bar on every tab. The menus are Project, Edit and Help.
-- **Properties** shows only Object, Modifiers, Data and Material; stock panels that cannot reach
-  the game are hidden. The object tab's **Game** panel shows what the object is and its settings.
-- **Log** areas show build output and the game's `boz-log.txt`; the sidebar's **Problems** tab
-  lists what would stop a build, with a button that selects the object.
-- **Three kinds of object** (`boz_suite/convert.py`; the world format in `docs/sdk-projects.md`).
-  Every object's name is its name in the game and in scripts.
-  - **Model**: a mesh you see and bump into. A **game model** (from the palette) or **your own
-    mesh** (built in Blender, Add → Game shapes, Project → Import model, or **Make editable** on
-    a game model). Collision **Walkable / Blocking / None** with **Box / Mesh**; copies made with
-    Alt+D share one mesh.
-  - **Volume**: an invisible box that sends script events: **Trigger** (enter / exit), **Hit**
-    (shot), **Use** (the player presses use; prompt text and cost). Drawn as a see-through box
-    (teal, red, green); its size is its scale (100 cm at 1).
-  - **Prefab**: one object made of parts. **Make prefab** (Ctrl+G, or Object menu) groups the
-    selected models, volumes and prefabs under an Empty; **Ungroup** (Ctrl+Alt+G) takes it apart.
-    A part keeps its **part name** inside the prefab (in the game: `<Prefab>.<Part>`); its
-    object is named `<Prefab> › <Part>`, so searching the outliner for a prefab shows all of it.
-    **Game prefabs** are the game's own: perk machines, Pack-a-Punch, the box, the power switch,
-    wall buys, doors, barricades, traps, and the **level markers** (spawns, jump points, sound
-    emitters), with their settings (cost, needs power, ...). They can be parts of your prefabs.
-- **When the level starts** (models and prefabs): Visible, Collision, and **Blocks the walkable
-  area** (the navmesh under it stays shut until a script opens it).
-- **Script** (any object): **New** makes `scripts/prefabs/<Name>.lua` from a template and opens
-  it in the **Scripts** tab's text editor (saving the map saves edited scripts; the small link
-  button opens your own editor instead); **Pick…** uses an existing one. The script's `---@property` lines become fields in the
-  panel, with values for each object ([docs/map-scripting.md](../docs/map-scripting.md)).
-- **Prefab library:** **Save as new prefab** stores a prefab in `source/prefabs`; it appears in
-  the asset browser under **My prefabs** (`boz_suite/prefab_library.py` writes the open project's
-  prefabs into the palette folder), and dropping it places a copy. Each copy is independent.
-  Project → Prefab library deletes library prefabs.
-- **Original maps:** the base level's own entities (perks, doors, wall buys, spawns, triggers,
-  traps, ...) are game prefabs from the original map: move, rotate, scale, delete (X) or copy
-  (Shift+D) them, change their settings, start them hidden. Only what changed is written; **Put
-  back as the level has it** undoes the edits. Rooms stay read only.
-- **Building:** Add → **Game shapes** (also the World header's **Shapes** button) adds blocks,
-  walls, floors, ramps, stairs and pillars at game size with a tiling default texture and the
-  right Collision. Blender's own Add → Mesh shapes are 2 cm big here (one unit is a centimetre);
-  the Problems panel flags anything that small. Project → **Import model…** brings in FBX, glTF
-  and OBJ files, scaled from metres.
-- **Markers:** game prefabs that draw no model are small cubes coloured by type.
-- **Show** (World viewport header, and the sidebar's BOZ tab): Markers, Triggers (entity volumes),
-  Links, and **Walkable** / **Collision**, which compile the map and show its navmesh (blue, orange
-  where a door blocks it) and collision mesh. **Refresh** compiles again after edits.
-- **Palettes:** the World tab's asset browser shows the "BOZ Game" library: **Game prefabs**
-  (Machines, Buying, Doors, Barricades, Defence), **Level markers** (Spawns, Jump points, Sound),
-  **Volumes** (Trigger, Hit, Use), and **Models** and **Textures** from every map. A dropped game
-  prefab resolves to a working entity of the map's base level (else another map's, repacked,
-  else the shared `ingame` template). `palette_build.py` builds it in a background Blender from
-  the SDK's asset library (about 30 s, the first time and after the library changes);
-  `palette.py` turns a dropped stand-in into the real thing, where it was dropped.
-- **Edit its model** on a game prefab gives it an editable copy of its mesh: it keeps its
-  behaviour (a Pack-a-Punch still upgrades weapons) and the game draws your mesh. **Use the
-  game's model** goes back.
-- **Wall buy** is one game prefab: **Choose…** picks any weapon of the level; the editor shows the
-  weapon and its chalk (the weapon's own, one drawn from its model, your image, or none). **Doors**
-  and **barricades** come in every design the game's maps have.
-- **Textures** (Properties → Material): every slot's texture with its preview, **Replace…** from
-  an image file, **From game…** (any game texture, with game shading) and **✕** (back to the
-  default grid texture). Game models' textures need **Make editable** first. Dropping a texture from
-  the palette gives the same game-shaded material.
-- **Shading** matches the game: game models use the shipped-map tools' materials (vertex colours,
-  lightmaps, blend modes), project materials are unlit, and the viewport is in material preview
-  with the Standard view transform.
-- **Placeholders:** every planned feature is a panel in its tab (`boz_suite/placeholders.py`).
-- **Project link:** the launcher passes the project in `BOZ_PROJECT`. The first open builds the
-  scene from `source/world.json` and saves `map.blend`; every save writes `source/` back (one
-  Blender unit is one game centimetre). Scenes from older editors are converted when they open
-  (level meshes and props become models, entities game prefabs).
-- Background Blender cannot split areas or create editors in screens that are not shown, so
-  each tab's editors are changed the first time the tab is on screen.
+## Modules
 
-What Python cannot change in Blender (the case for a fork) is tracked in
-`docs/internal/blender-walls.md`.
+| Module | What it does |
+| --- | --- |
+| `__init__.py` | Registers the editor |
+| `_bozkit.py` | Imports bozkit: the SDK checkout's, else the copy the build carries |
+| `shell.py` | Blender's top bar, menus and Properties editor reshaped for the game |
+| `tabs.py` | The tabs (one workspace each) and how the startup file lays them out |
+| `link.py` | The link to the project: open and save the world, the logs, Problems, Build & Run |
+| `convert.py` | The project's world (`source/world.json`) and the Blender scene, both ways |
+| `objects.py` | Models, volumes and prefabs: the Game panel, prefabs, scripts and their properties |
+| `shapes.py` | Game-sized building shapes and model import |
+| `game.py` | Game models built from the SDK's asset library, cached per model |
+| `meshes.py` | Game resources as Blender objects: meshes, game-like materials, markers |
+| `palette.py`, `palette_build.py` | The "BOZ Game" asset library in the World tab's asset browser |
+| `prefab_library.py` | The "My prefabs" and "My assets" catalogs |
+| `preview.py` | The navmesh and collision previews |
+| `scene_view.py` | The overlays: show switches, link lines, the Selected panel |
+| `game_tab.py` | The Game tab |
+| `weapons_tab.py`, `weapon_view.py` | The Weapons and Animation tabs, and the weapon as one armature |
+| `assets_tab.py`, `asset_build.py` | The Assets tab, and making a game version in a background Blender |
+| `effects_tab.py` | The Effects tab |
+| `sounds_tab.py` | The Audio tab |
+| `placeholders.py` | Planned features, as panels in their tabs |
+| `shipped_maps.py` | The Shipped files tools |
+
+Background Blender cannot split areas or create editors in screens that are not shown, so each
+tab's editors are changed the first time the tab is on screen. What Python cannot change in
+Blender at all (the case for a fork) is tracked in `docs/internal/blender-walls.md`.
 
 ## Shipped-file tools
 
@@ -145,5 +76,4 @@ decoded texture directly. It deliberately does not combine the colour stream wit
 stage zero: shipped materials commonly use a second stage or shader technique, and presenting an
 incomplete composition would make valid geometry misleadingly dark.
 
-Do not save extracted game content inside this repository. Blender projects may contain it for
-local development, but official BOZ repositories must not track those `.blend` files or exports.
+Never commit extracted game content or `.blend` files made from it.

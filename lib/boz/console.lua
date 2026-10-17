@@ -6,7 +6,7 @@
 --
 -- Runs console lines, reads and sets console variables (cvars), registers new ones, and passes
 -- on everything the console prints. Every variable and command is listed in
--- console-reference.md.
+-- docs/console-reference.md.
 --
 -- How it works: the release build kept the console (CIwConsole, g_console) but no display, so
 -- Console_Print has nowhere to send text. This module hooks Console_Print and wraps the console's

@@ -13,7 +13,7 @@
 -- :spawn_box() / :despawn_box() (pieces.move_box(to)), Pack-a-Punch
 -- :spawn_pack_a_punch() / :despawn_pack_a_punch(), barricades :fix_barricade()
 -- (pieces.fix_all_barricades()), doors :is_open() (pieces.open_all_doors()).
--- The fields are the game's (reflected): docs/toolkit-fields.md explains them; boz.reflect has the
+-- The fields are the game's (reflected): docs/map-editor.md (Game prefab fields) explains them; boz.reflect has the
 -- rest.
 --
 -- How it works: each kind is a component class (its table lists them). "Use" is what the game does
