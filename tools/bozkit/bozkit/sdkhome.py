@@ -467,14 +467,15 @@ def load_last(root: Path, mod_id: str) -> None:
 
 
 def start_vars_text(start_vars: dict | None) -> str:
-    """Console variables for the level start, as the Developer mod reads them."""
+    """Console variables for the level start, as boz.levels.autostart_from_settings reads them."""
     return ';'.join(f'{name}={value}' for name, value in (start_vars or {}).items())
 
 
 def run_in_game(project: sdk_project.Project, root: str | Path,
                 start_vars: dict | None = None) -> str:
     """Install a project (and the Developer mod) into the client and start the game. A map
-    project is compiled first, and the Developer mod starts its level once the menu is up."""
+    project is compiled first, and its own mod starts its level once the menu is up (boz.world
+    reads the one-shot autostart settings, as it does for the client launcher's map choice)."""
     from . import library
 
     root = Path(root).expanduser().resolve()
@@ -496,12 +497,9 @@ def run_in_game(project: sdk_project.Project, root: str | Path,
         set_mod_enabled(root, DEVELOPER_MOD, True)
     message = f'installed {installed.name} and started the game'
     if project.kind == 'map':
-        if developer is None or not (developer / 'scripts' / 'boz' / 'levels.lua').is_file():
-            raise sdk_project.ProjectError('the Developer mod in the client is too old to start '
-                                           'levels; replace it with the SDK\'s copy')
         load_last(root, project.mod.id)
-        set_mod_setting(root, DEVELOPER_MOD, 'autostart_level', project.map_name)
-        set_mod_setting(root, DEVELOPER_MOD, 'autostart_vars', start_vars_text(start_vars))
+        set_mod_setting(root, project.mod.id, 'autostart_level', project.map_name)
+        set_mod_setting(root, project.mod.id, 'autostart_vars', start_vars_text(start_vars))
         message = f'built {project.map_name}; the game starts it after the main menu'
     start_detached(command, root, root / 'boz-log.txt')
     return message

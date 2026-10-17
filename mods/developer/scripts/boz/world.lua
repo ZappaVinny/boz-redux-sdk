@@ -84,7 +84,8 @@ local function start_state()
     end)
 end
 
---- Turns on what map projects need from the standard library (call once, from main.lua).
+--- Turns on what map projects need from the standard library (call once, from main.lua), and
+--- starts the mod's map when the launcher asked for it (its "autostart_level" setting).
 function world.start()
     if started then
         return
@@ -92,6 +93,7 @@ function world.start()
     started = true
     power_unpowered_perks()
     start_state()
+    require("boz.levels").autostart_from_settings()
 end
 
 return world

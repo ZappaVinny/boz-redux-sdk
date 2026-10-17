@@ -1,6 +1,7 @@
 """SDK project/compiler tests using only authored synthetic files."""
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import sys
@@ -81,6 +82,12 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual((output / 'assets' / 'made-by-test.txt').read_text(), 'asset\n')
         self.assertEqual(json.loads((output / project.BUILD_REPORT).read_text())['files'], report['files'])
         self.assertIn('id = "example"', (output / 'mod.toml').read_text())
+
+    def test_map_mods_list_their_map(self) -> None:
+        loaded = self.make_project()
+        self.assertNotIn('maps =', project._mod_manifest(loaded))
+        level = dataclasses.replace(loaded, kind='map', map_name='my_map')
+        self.assertIn('maps = ["my_map"]', project._mod_manifest(level))
 
     def test_distribution_warns_but_allows_game_derived_assets(self) -> None:
         loaded = self.make_project()

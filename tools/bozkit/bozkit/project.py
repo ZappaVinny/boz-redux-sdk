@@ -394,6 +394,8 @@ def _mod_manifest(project: Project) -> str:
         f'version = {_toml_string(mod.version)}', f'author = {_toml_string(mod.author)}',
         f'game = {_toml_string(mod.game)}', f'description = {_toml_string(mod.description)}',
     ]
+    if project.kind == 'map':
+        lines.append(f'maps = [{_toml_string(project.map_name)}]')
     if project.dependencies:
         lines.extend(['', '[sdk]', f'project_schema = {PROJECT_SCHEMA}', '', '[[sdk.dependencies]]'])
         dependency_lines: list[str] = []
