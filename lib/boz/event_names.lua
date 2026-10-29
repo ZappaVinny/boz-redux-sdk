@@ -51,7 +51,7 @@ return {
     "SUBJECT_DEACTIVATING_CC",  -- sent by CMysteryBox; handled by CLevelManager, CMysteryBox, CPackAPunch
     "SUBJECT_DEATH_BY_PENETRATIVE_WEAPON",  -- sent by CAIControllerZombie; handled by CAIControllerZombie
     "SUBJECT_DEVICE_BACK",  -- sent by CGameStateFrontEnd; handled by CFlashMenuState
-    "SUBJECT_DIED",  -- sent by ?; handled by CAIControllerHellhound, CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CDamageActionSpawn, CHealth
+    "SUBJECT_DIED",  -- sent by CHealth; handled by CAIControllerHellhound, CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CDamageActionSpawn, CHealth
     "SUBJECT_DIRTY_APES",  -- sent by ?; handled by CPlayerController, CWaveManager
     "SUBJECT_DIRTY_APES_INTERNAL",  -- sent by CWaveMonkey; handled by CWaveManager
     "SUBJECT_DISABLE_COLLISION",  -- sent by ?; handled by CDoor, CIsCollisionObject, CPerk
@@ -69,7 +69,7 @@ return {
     "SUBJECT_ENTER_HELP_SCREEN",
     "SUBJECT_ENTER_MAP_VOTE",
     "SUBJECT_ENTITY_DIED",  -- sent by ?; handled by CDOAIControllerBossSilverback, CDOBuffalo, CDODamageActionSpawn, CDOHordeManager, CDOPlayerController, CDOSpawnPointZombie
-    "SUBJECT_EXIT_COLLISION",  -- sent by ?; handled by CCentrifuge, CDOPlayerController, CLunarLander, CProjectileEntity, CSnowTrigger, CTeleporter
+    "SUBJECT_EXIT_COLLISION",  -- sent by CIsCollisionObject; handled by CCentrifuge, CDOPlayerController, CLunarLander, CProjectileEntity, CSnowTrigger, CTeleporter
     "SUBJECT_EXIT_RESULTS",  -- sent by ?; handled by CDOIngameStateResult
     "SUBJECT_EXPLODE",  -- sent by CAIControllerZombie, CProjectileEntity; handled by CAIControllerZombie, CBodyDamageController, CExplosion, CProjectileEntity
     "SUBJECT_EXPLODED",  -- sent by ?; handled by CAIControllerMonkey
@@ -77,11 +77,11 @@ return {
     "SUBJECT_FINISH_INTERPOLATION",  -- sent by ?; handled by CShortcut
     "SUBJECT_FLING_ENTITY",  -- sent by ?; handled by CAIControllerRomero, CAIControllerZombie, CBodyHandler, CFlinger, CPlayerController, CRemotePlayer
     "SUBJECT_FORCE_ZOMBIE_DEATH",  -- sent by ?; handled by CAIControllerHellhound, CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie
-    "SUBJECT_FREEZE_ME",  -- sent by ?; handled by CRemotePlayer
+    "SUBJECT_FREEZE_ME",  -- sent by CPlayerController; handled by CRemotePlayer
     "SUBJECT_GROUND_POUND_FX",  -- sent by CAIControllerMonkey; handled by CAIControllerMonkey
-    "SUBJECT_HEALTH_DECREASE",  -- sent by ?; handled by CHealth
+    "SUBJECT_HEALTH_DECREASE",  -- sent by CHealth; handled by CHealth
     "SUBJECT_HEALTH_DECREASED",  -- sent by CHealth; handled by CAIControllerRomero
-    "SUBJECT_HEALTH_MODIFY",  -- sent by ?; handled by CHealth, CPlayerController
+    "SUBJECT_HEALTH_MODIFY",  -- sent by CHealth; handled by CHealth, CPlayerController
     "SUBJECT_HEALTH_SYNC_REQUEST",  -- sent by ?; handled by CHealth
     "SUBJECT_HEALTH_SYNC_RESPONSE",  -- sent by CHealth; handled by CHealth
     "SUBJECT_HIDE_MODAL_POPUP",  -- sent by ?; handled by CFlashMenuState
@@ -96,7 +96,7 @@ return {
     "SUBJECT_LEVEL_VOTED",
     "SUBJECT_LIGHTNING_BOLT_FINISH",  -- sent by ?; handled by CPickupManager
     "SUBJECT_LIGHTNING_STRIKE",
-    "SUBJECT_LOAD",  -- sent by ?; handled by CAnimatedScenery, CBarricade, CCentrifuge, CDOAIController, CDOAIControllerSilverback, CDOASMHandler
+    "SUBJECT_LOAD",  -- sent by CSaveManager; handled by CAnimatedScenery, CBarricade, CCentrifuge, CDOAIController, CDOAIControllerSilverback, CDOASMHandler
     "SUBJECT_LOD_QUOTA_REGISTER",  -- sent by CIsLODControllerQuota; handled by CIsLODControllerQuota, CIsLODControllerQuotaManager
     "SUBJECT_LOD_QUOTA_UNREGISTER",  -- sent by CIsLODControllerQuota; handled by CIsLODControllerQuota, CIsLODControllerQuotaManager
     "SUBJECT_LOSE_PERK",  -- sent by CPerk; handled by CPerk, CPerkManager
@@ -109,7 +109,7 @@ return {
     "SUBJECT_MAIN_MENU_ACHIEVEMENT",
     "SUBJECT_MAIN_MENU_LEADERBOARD",
     "SUBJECT_MB_ADD_WEAPON",  -- sent by ?; handled by CMysteryBox
-    "SUBJECT_MB_CHOOSE_WEAPON",  -- sent by ?; handled by CMysteryBox
+    "SUBJECT_MB_CHOOSE_WEAPON",  -- sent by CMysteryBox; handled by CMysteryBox
     "SUBJECT_MB_DESPAWN",  -- sent by ?; handled by CMysteryBox
     "SUBJECT_MB_DO_SYNC",  -- sent by ?; handled by CMysteryBox
     "SUBJECT_MB_FIRESALE_COMPLETE",  -- sent by ?; handled by CMysteryBox
@@ -162,18 +162,18 @@ return {
     "SUBJECT_ON_TRAP_IDLE",  -- sent by ?; handled by CTrapSwitch
     "SUBJECT_ON_TURRET_ACTIVATE",  -- sent by CTurret; handled by CTurret
     "SUBJECT_OPEN_LINK",
-    "SUBJECT_OPTIONS_AUTO_AIM",
+    "SUBJECT_OPTIONS_AUTO_AIM",  -- sent by ?; handled by CFrontendStateOptions
     "SUBJECT_OPTIONS_BRIGHTNESS",
-    "SUBJECT_OPTIONS_CONTROL_METHOD",
-    "SUBJECT_OPTIONS_DEFAULT_SETTINGS",
-    "SUBJECT_OPTIONS_DETAIL_LEVEL",
-    "SUBJECT_OPTIONS_INVERT_Y_AXIS",
-    "SUBJECT_OPTIONS_LEFTY_CONTROLS",
-    "SUBJECT_OPTIONS_SENSITIVITY_X_AXIS",
-    "SUBJECT_OPTIONS_SENSITIVITY_Y_AXIS",
-    "SUBJECT_OPTIONS_SFX",
-    "SUBJECT_OPTIONS_USER_RADIO",
-    "SUBJECT_OPTIONS_VOLUME",
+    "SUBJECT_OPTIONS_CONTROL_METHOD",  -- sent by ?; handled by CFrontendStateOptions
+    "SUBJECT_OPTIONS_DEFAULT_SETTINGS",  -- sent by ?; handled by CFrontendStateOptions
+    "SUBJECT_OPTIONS_DETAIL_LEVEL",  -- sent by ?; handled by CFrontendStateOptions
+    "SUBJECT_OPTIONS_INVERT_Y_AXIS",  -- sent by ?; handled by CFrontendStateOptions
+    "SUBJECT_OPTIONS_LEFTY_CONTROLS",  -- sent by ?; handled by CFrontendStateOptions
+    "SUBJECT_OPTIONS_SENSITIVITY_X_AXIS",  -- sent by ?; handled by CFrontendStateOptions
+    "SUBJECT_OPTIONS_SENSITIVITY_Y_AXIS",  -- sent by ?; handled by CFrontendStateOptions
+    "SUBJECT_OPTIONS_SFX",  -- sent by ?; handled by CFrontendStateOptions
+    "SUBJECT_OPTIONS_USER_RADIO",  -- sent by ?; handled by CFrontendStateOptions
+    "SUBJECT_OPTIONS_VOLUME",  -- sent by ?; handled by CFrontendStateOptions
     "SUBJECT_PACKAPUNCH_DEACTIVATING",
     "SUBJECT_PACKAPUNCH_DESPAWN",  -- sent by ?; handled by CPackAPunch
     "SUBJECT_PACKAPUNCH_DO_SYNC",  -- sent by ?; handled by CPackAPunch
@@ -204,9 +204,9 @@ return {
     "SUBJECT_POI_INTERACT",
     "SUBJECT_POI_TRIGGER",  -- sent by ?; handled by CIngameStatePlaying
     "SUBJECT_POPUP_CODPOINTS_HELP",  -- sent by ?; handled by CFlashMenuState
-    "SUBJECT_POPUP_MODAL",
+    "SUBJECT_POPUP_MODAL",  -- sent by ?; handled by CFrontendStateOptions
     "SUBJECT_POWERSWITCH_SYNCH",  -- sent by CPowerSwitch; handled by CPowerSwitch
-    "SUBJECT_PRIVACY_POLICY",
+    "SUBJECT_PRIVACY_POLICY",  -- sent by ?; handled by CFrontendStateOptions
     "SUBJECT_PROCESS_CAMERA_VIEW_MATRIX",
     "SUBJECT_PROFILE_GC_LOGIN",
     "SUBJECT_PROJECTER_START_SEQUENCE",  -- sent by ?; handled by CProjectorScreen, CRocketLauncher, CTVScreen
@@ -225,7 +225,7 @@ return {
     "SUBJECT_REQUEST_LOCK",  -- sent by ?; handled by CLock
     "SUBJECT_REQUEST_SYNC",
     "SUBJECT_REQUEST_TARGET_CHANGE",  -- sent by CDOAIController; handled by CDOAIController
-    "SUBJECT_RESPAWN",  -- sent by ?; handled by CDOPlayerController
+    "SUBJECT_RESPAWN",  -- sent by CDOPlayerController; handled by CDOPlayerController
     "SUBJECT_RESPAWN_DO_ZOMBIE",  -- sent by ?; handled by CDOSpawnPointZombie
     "SUBJECT_RESPAWN_ENTITY",  -- sent by ?; handled by CDOSpawnPointBase
     "SUBJECT_RESTART_LEVEL",  -- sent by ?; handled by CPickupManager, CProjectileManager, CScoreManager, CSpawnManager, CTeleportManager, CVFXManager
@@ -249,7 +249,7 @@ return {
     "SUBJECT_ROMERO_TRIGGER_ANIM",  -- sent by ?; handled by CAIControllerRomero
     "SUBJECT_ROMERO_TRIGGER_GROUND_ATTACK",  -- sent by ?; handled by CAIControllerRomero
     "SUBJECT_ROMERO_TRIGGER_SWIPE_ATTACK",  -- sent by ?; handled by CAIControllerRomero
-    "SUBJECT_SAVE",  -- sent by ?; handled by CAnimatedScenery, CBarricade, CCentrifuge, CDOAIController, CDOAIControllerSilverback, CDOASMHandler
+    "SUBJECT_SAVE",  -- sent by CSaveManager; handled by CAnimatedScenery, CBarricade, CCentrifuge, CDOAIController, CDOAIControllerSilverback, CDOASMHandler
     "SUBJECT_SENTRY_GUN_EXPIRED",  -- sent by CDOSentryGunController; handled by ?
     "SUBJECT_SET_IN_MONKEY_BOMB_EFFECT_AREA",  -- sent by CDOAIController; handled by CDOAIController
     "SUBJECT_SET_IN_RAINBOW_RING",  -- sent by ?; handled by CDOAIController
@@ -313,7 +313,7 @@ return {
     "SUBJECT_TELEPORT_PLAYER",  -- sent by ?; handled by CTeleportManager
     "SUBJECT_TEMP_MOVEMENT_SLOW_DOWN",  -- sent by ?; handled by CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CPlayerController, CRemotePlayer
     "SUBJECT_TERMINATE",  -- sent by CProjectileEntity; handled by CProjectileEntity
-    "SUBJECT_TERMS_OF_USE",
+    "SUBJECT_TERMS_OF_USE",  -- sent by ?; handled by CFrontendStateOptions
     "SUBJECT_TRANSFORM_UPDATED",
     "SUBJECT_TRANSITION_MENU",  -- sent by ?; handled by CFlashMenuState
     "SUBJECT_TRANSITION_MENU_POPSTACK",  -- sent by ?; handled by CFlashMenuState
@@ -338,9 +338,9 @@ return {
     "SUBJECT_WEAPON_EQUIPPED",  -- sent by ?; handled by CMysteryBox, CWeaponChalkOutline
     "SUBJECT_WEAPON_HIT",  -- sent by ?; handled by CAIControllerHellhound, CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CBodyDamageController, CEasterEgg
     "SUBJECT_WEAPON_MELEE",  -- sent by ?; handled by CRemotePlayer, CRemotePlayerWeapon
-    "SUBJECT_WEAPON_RELOAD",  -- sent by ?; handled by CRemotePlayer, CRemotePlayerWeapon
-    "SUBJECT_WEAPON_SET",  -- sent by ?; handled by CRemotePlayer, CRemotePlayerWeapon
-    "SUBJECT_WEAPON_SHOOT",  -- sent by ?; handled by CAITutor, CRemotePlayer, CRemotePlayerWeapon
+    "SUBJECT_WEAPON_RELOAD",  -- sent by CWeaponManager; handled by CRemotePlayer, CRemotePlayerWeapon
+    "SUBJECT_WEAPON_SET",  -- sent by CWeaponManager; handled by CRemotePlayer, CRemotePlayerWeapon
+    "SUBJECT_WEAPON_SHOOT",  -- sent by CPlayerController; handled by CAITutor, CRemotePlayer, CRemotePlayerWeapon
     "SUBJECT_WEAPON_SHOOT_STOP",  -- sent by ?; handled by CRemotePlayerWeapon
     "SUBJECT_WEAPON_SPAWN_PROJECTILE",  -- sent by ?; handled by CRemotePlayerWeapon, CWeaponManager
     "SUBJECT_WEAPON_UNEQUIPPED",  -- sent by ?; handled by CMysteryBox, CWeaponChalkOutline
@@ -348,7 +348,7 @@ return {
     "SUBJECT_ZOMBIE_CHANGE_TARGET",  -- sent by ?; handled by CAIControllerHellhound, CAIControllerMonkey, CAIControllerZombie
     "SUBJECT_ZOMBIE_CHANGE_TARGET_ACK",  -- sent by ?; handled by CAIControllerZombie
     "SUBJECT_ZOMBIE_CHANGE_TARGET_SYNACK",  -- sent by ?; handled by CAIControllerZombie
-    "SUBJECT_ZOMBIE_DEATH",  -- sent by ?; handled by CAIControllerHellhound, CAIControllerMonkey, CAIControllerZombie, CPickupManager, CPlayerController, CTutorialManager
+    "SUBJECT_ZOMBIE_DEATH",  -- sent by CAIControllerZombie; handled by CAIControllerHellhound, CAIControllerMonkey, CAIControllerZombie, CPickupManager, CPlayerController, CTutorialManager
     "SUBJECT_ZOMBIE_GASSY_DEATH",  -- sent by ?; handled by CAIControllerZombie
     "SUBJECT_ZOMBIE_GERSCH_DEATH",  -- sent by CAIControllerZombie; handled by CAIControllerZombie
     "SUBJECT_ZOMBIE_ICE_SHATTER",  -- sent by CAIControllerZombie; handled by CAIControllerZombie

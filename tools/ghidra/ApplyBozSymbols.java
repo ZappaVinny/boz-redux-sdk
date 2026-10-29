@@ -210,6 +210,38 @@ public class ApplyBozSymbols extends GhidraScript {
                     : table.createClass(parent, parts.get(i), SourceType.USER_DEFINED);
         }
         symbol.setNameAndNamespace(parts.get(parts.size() - 1), parent, SourceType.USER_DEFINED);
+        // A name that was already right (from the class map, say) keeps its old source otherwise,
+        // and ExportBozSymbols only exports user-defined names.
+        if (symbol.getSource() != SourceType.USER_DEFINED) {
+            symbol.setSource(SourceType.USER_DEFINED);
+        }
+    }
+
+    // The user label named *name* at *address*, made primary. Reuses a label that already has the
+    // name (renaming a new label onto it would be a duplicate), and drops user labels there with
+    // the same base name in another namespace (left over from an interrupted run).
+    private Symbol labelAt(Address address, String name) throws Exception {
+        java.util.List<String> parts = scopes(name);
+        String qualified = String.join("::", parts);
+        String base = parts.get(parts.size() - 1);
+        Symbol found = null;
+        for (Symbol symbol : currentProgram.getSymbolTable().getSymbols(address)) {
+            if (symbol.getName(true).equals(qualified)) {
+                found = symbol;
+            }
+        }
+        for (Symbol symbol : currentProgram.getSymbolTable().getSymbols(address)) {
+            if (symbol != found && symbol.getSource() == SourceType.USER_DEFINED &&
+                    symbol.getSymbolType() == SymbolType.LABEL && symbol.getName().equals(base)) {
+                symbol.delete();
+            }
+        }
+        if (found == null) {
+            found = createLabel(address, base, true, SourceType.USER_DEFINED);
+            setQualifiedName(found, name);
+        }
+        found.setPrimary();
+        return found;
     }
 
     // Names in the database are unique: drop a user label with this name anywhere else (left over
@@ -306,9 +338,7 @@ public class ApplyBozSymbols extends GhidraScript {
             }
             // Label after the data: clearing conflicting data can drop or move existing labels.
             removeStaleNames(name, address);
-            Symbol label = createLabel(address, scopes(name).get(
-                    scopes(name).size() - 1), true, SourceType.USER_DEFINED);
-            setQualifiedName(label, name);
+            Symbol label = labelAt(address, name);
             StringBuilder plate = new StringBuilder();
             String subsystem = text(entry, "subsystem");
             if (!subsystem.isEmpty()) {

@@ -475,20 +475,20 @@ Available: unknown owner.
 
 | Variable | Type | Default | Used by | Notes | Status |
 | --- | --- | --- | --- | --- | --- |
-| `doAchievementEasyRhinoKillCount` | int | `20` | CDOPlayerController::vf23 |  |  |
-| `doAchievementWholeNineYardsFireTime` | int | `2` | CDOPersistentStorage::vf6 |  |  |
-| `doAnaloguePadAimingResponse` | graph | `0,0;4096,4096;` |  |  |  |
-| `doAnaloguePadMovingResponse` | graph | `0,0;4096,4096;` |  |  |  |
+| `doAchievementEasyRhinoKillCount` | int | `20` | CDOPlayerController::OnEvent |  |  |
+| `doAchievementWholeNineYardsFireTime` | int | `2` | CDOPersistentStorage::FixedStep |  |  |
+| `doAnaloguePadAimingResponse` | graph | `0,0;4096,4096;` | CDOTouchComponentSticky::CDOTouchComponentSticky |  |  |
+| `doAnaloguePadMovingResponse` | graph | `0,0;4096,4096;` | CDOTouchComponentSticky::CDOTouchComponentSticky |  |  |
 | `doArmouryChance` | int | `20` |  |  |  |
 | `doArmouryUnlock` | int | `5` |  |  |  |
-| `doArrowDisplayTime` | int | `4` |  |  |  |
+| `doArrowDisplayTime` | int | `4` | CDORoomOfFateHelper::CDORoomOfFateHelper |  |  |
 | `doAutoAimAngleWeight` | float | `0.7` |  |  |  |
 | `doAutoAimConeLength` | float | `2000` |  |  |  |
-| `doAutoAimHorizAngle` | floatangle | `15` |  |  |  |
-| `doAutoAimVertAngle` | floatangle | `15` |  |  |  |
+| `doAutoAimHorizAngle` | floatangle | `15` | CIsComponentRef<CIsTransform>::CIsComponentRef<CIsTransform> |  |  |
+| `doAutoAimVertAngle` | floatangle | `15` | CIsComponentRef<CIsTransform>::CIsComponentRef<CIsTransform> |  |  |
 | `doBattleChickenApproachSpeed` | graph | `0,0;300,4096;` |  |  |  |
 | `doBattleChickenDragCoeffient` | float | `0.1` | CDOBattleChickenBodyHandler::vf24 |  |  |
-| `doBattleChickenFlightHeight` | float | `120` | CDOPlayerController::vf23 |  |  |
+| `doBattleChickenFlightHeight` | float | `120` | CDOPlayerController::OnEvent |  |  |
 | `doBattleChickenLife` | int | `20000` | CDOPickupSpawn::vf25 |  |  |
 | `doBattleChickenMaxAcceleration` | float | `10.0` | CDOBattleChickenBodyHandler::vf24 |  |  |
 | `doBattleChickenSpinSpeed` | float | `3.0` | CDOBattleChickenController::vf24 |  |  |
@@ -499,20 +499,20 @@ Available: unknown owner.
 | `doBonusRoomMusic` | string | `temple` |  |  |  |
 | `doBootsDuration` | int | `10000` | CDOPickupBoots::vf24 |  |  |
 | `doBootsSpeed` | float | `1.3` |  |  |  |
-| `doBuffaloMinMaxX` | floatarray | `{-2000,2000}` | CDOBuffalo::vf23 |  |  |
-| `doBuffaloMinMaxZ` | floatarray | `{-2000,2000}` | CDOBuffalo::vf23 |  |  |
+| `doBuffaloMinMaxX` | floatarray | `{-2000,2000}` | CDOBuffalo::OnEvent |  |  |
+| `doBuffaloMinMaxZ` | floatarray | `{-2000,2000}` | CDOBuffalo::OnEvent |  |  |
 | `doBuffaloSpawnDelayTime` | int | `1000` | CDORoundManager::vf11 |  |  |
 | `doDeathGemStartDistance` | float | `100.0` |  |  |  |
 | `doDeathGemStartHeight` | float | `50.0` |  |  |  |
 | `doDeathGemStartImpulse` | float | `100.0` |  |  |  |
-| `doFadeInTime` | int | `1000` |  |  |  |
-| `doFadeOutTime` | int | `1000` |  |  |  |
+| `doFadeInTime` | int | `1000` | CDOGameStateIngame::CDOGameStateIngame |  |  |
+| `doFadeOutTime` | int | `1000` | CDOGameStateIngame::CDOGameStateIngame |  |  |
 | `doFateChance` | int | `30` |  |  |  |
-| `doFateLightningSpawnHeight` | float | `1000` | CDOFateBonusTrigger::vf23 |  |  |
-| `doFateMaxTriggers` | int | `4` |  |  |  |
-| `doFatePickupAcceleration` | float | `7000` | CDOPickupFate::vf22 |  |  |
-| `doFateSpawnHeight` | float | `1000` | CDOPlayerController::vf23 |  |  |
-| `doFateTimeout` | int | `5000` | CDORoomOfFateHelper::vf8 |  |  |
+| `doFateLightningSpawnHeight` | float | `1000` | CDOFateBonusTrigger::OnEvent |  |  |
+| `doFateMaxTriggers` | int | `4` | CDORoomOfFateHelper::CDORoomOfFateHelper |  |  |
+| `doFatePickupAcceleration` | float | `7000` | CDOPickupFate::Init |  |  |
+| `doFateSpawnHeight` | float | `1000` | CDOPlayerController::OnEvent |  |  |
+| `doFateTimeout` | int | `5000` | CDORoomOfFateHelper::OnEvent |  |  |
 | `doFlameDeceleration` | float | `1500` |  |  |  |
 | `doFlameSizeIncrease` | float | `2.5` |  |  |  |
 | `doFlamingBarrelSpawnInterval` | intarray | `{1000,3000}` |  |  |  |
@@ -523,7 +523,7 @@ Available: unknown owner.
 | `doGoreMaxRange` | floatarray | `{0.2,1.0}` | CDOGoreManager::CDOGoreManager |  |  |
 | `doGravity` | float | `980.6650391` | CDOAIControllerBossSilverback::vf23 |  |  |
 | `doHelicopterDragCoeffient` | float | `0.1` | CDOHelicopterBodyHandler::vf24 |  |  |
-| `doHelicopterFlightHeight` | float | `100.0` | CDOHelicopterBodyHandler::vf22 |  |  |
+| `doHelicopterFlightHeight` | float | `100.0` | CDOHelicopterBodyHandler::Init |  |  |
 | `doHelicopterMaxAcceleration` | float | `10.0` | CDOHelicopterBodyHandler::vf24 |  |  |
 | `doHelicopterTilt` | graph | `0.0,0.0;2.0,0.2;` | CDOHelicopterBodyHandler::vf24 |  |  |
 | `doHelicopterTurnDamping` | float | `0.1` |  |  |  |
@@ -548,7 +548,7 @@ Available: unknown owner.
 | `doMetallicBallCount` | int | `4` | CDOPickupPlayerShield::vf24 |  |  |
 | `doMetallicBallDistance` | float | `200.0` |  |  |  |
 | `doMetallicBallSpinSpeed` | float | `2.0` |  |  |  |
-| `doMoarSpawnPoints` | intarray | `{4,18,34}` |  |  |  |
+| `doMoarSpawnPoints` | intarray | `{4,18,34}` | CDOHordeManager::CDOHordeManager |  |  |
 | `doMultiplayerDeadDownTime` | int | `90000` |  |  |  |
 | `doMutliplierBracket` | intarray | `{1000,1500,2500,4500,6500,9000,12000,16000,22500}` | CDOPersistentStorage::CDOPersistentStorage |  |  |
 | `doNetworkPositionThresholdSqr` | int | `15000` | CDOTransformSynchroniser::vf23 |  |  |
@@ -561,27 +561,27 @@ Available: unknown owner.
 | `doPickupArmouryMaxSpawn` | int | `5` |  |  |  |
 | `doPickupArmouryMinItemsPerSpawnpoint` | int | `6` |  |  |  |
 | `doPickupArmouryMinSpawn` | int | `5` |  |  |  |
-| `doPickupBonusMaxItemsPerSpawnpoint` | int | `10` | CDOPickupManager::vf2 |  |  |
-| `doPickupBonusMaxSpawn` | int | `4` | CDOPickupManager::vf2 |  |  |
-| `doPickupBonusMinItemsPerSpawnpoint` | int | `8` | CDOPickupManager::vf2 |  |  |
-| `doPickupBonusMinSpawn` | int | `4` | CDOPickupManager::vf2 |  |  |
+| `doPickupBonusMaxItemsPerSpawnpoint` | int | `10` | CDOPickupManager::OnEvent |  |  |
+| `doPickupBonusMaxSpawn` | int | `4` | CDOPickupManager::OnEvent |  |  |
+| `doPickupBonusMinItemsPerSpawnpoint` | int | `8` | CDOPickupManager::OnEvent |  |  |
+| `doPickupBonusMinSpawn` | int | `4` | CDOPickupManager::OnEvent |  |  |
 | `doPickupRadius` | float | `50.000000` |  |  |  |
-| `doPickupRoundBeginMaxItemsPerSpawnpoint` | int | `10` | CDOPickupManager::vf2 |  |  |
-| `doPickupRoundBeginMaxSpawn` | int | `4` | CDOPickupManager::vf2 |  |  |
-| `doPickupRoundBeginMinItemsPerSpawnpoint` | int | `2` | CDOPickupManager::vf2 |  |  |
-| `doPickupRoundBeginMinSpawn` | int | `1` | CDOPickupManager::vf2 |  |  |
-| `doPickupRoundCompleteMaxItemsPerSpawnpoint` | int | `10` | CDOPickupManager::vf2 |  |  |
-| `doPickupRoundCompleteMaxSpawn` | int | `4` | CDOPickupManager::vf2 |  |  |
-| `doPickupRoundCompleteMinItemsPerSpawnpoint` | int | `2` | CDOPickupManager::vf2 |  |  |
-| `doPickupRoundCompleteMinSpawn` | int | `3` | CDOPickupManager::vf2 |  |  |
-| `doPickupWaveCompleteMaxItemsPerSpawnpoint` | int | `10` | CDOPickupManager::vf2 |  |  |
-| `doPickupWaveCompleteMaxSpawn` | int | `4` | CDOPickupManager::vf2 |  |  |
-| `doPickupWaveCompleteMinItemsPerSpawnpoint` | int | `2` | CDOPickupManager::vf2 |  |  |
-| `doPickupWaveCompleteMinSpawn` | int | `1` | CDOPickupManager::vf2 |  |  |
-| `doPlayerJumpDuration` | float | `2` | CDOIngameStateResult::vf11 |  |  |
-| `doPlayerRepelFactor` | float | `0.75` | CDOPlayerController::vf23 |  |  |
+| `doPickupRoundBeginMaxItemsPerSpawnpoint` | int | `10` | CDOPickupManager::OnEvent |  |  |
+| `doPickupRoundBeginMaxSpawn` | int | `4` | CDOPickupManager::OnEvent |  |  |
+| `doPickupRoundBeginMinItemsPerSpawnpoint` | int | `2` | CDOPickupManager::OnEvent |  |  |
+| `doPickupRoundBeginMinSpawn` | int | `1` | CDOPickupManager::OnEvent |  |  |
+| `doPickupRoundCompleteMaxItemsPerSpawnpoint` | int | `10` | CDOPickupManager::OnEvent |  |  |
+| `doPickupRoundCompleteMaxSpawn` | int | `4` | CDOPickupManager::OnEvent |  |  |
+| `doPickupRoundCompleteMinItemsPerSpawnpoint` | int | `2` | CDOPickupManager::OnEvent |  |  |
+| `doPickupRoundCompleteMinSpawn` | int | `3` | CDOPickupManager::OnEvent |  |  |
+| `doPickupWaveCompleteMaxItemsPerSpawnpoint` | int | `10` | CDOPickupManager::OnEvent |  |  |
+| `doPickupWaveCompleteMaxSpawn` | int | `4` | CDOPickupManager::OnEvent |  |  |
+| `doPickupWaveCompleteMinItemsPerSpawnpoint` | int | `2` | CDOPickupManager::OnEvent |  |  |
+| `doPickupWaveCompleteMinSpawn` | int | `1` | CDOPickupManager::OnEvent |  |  |
+| `doPlayerJumpDuration` | float | `2` | CDOIngameStateResult::OnEvent |  |  |
+| `doPlayerRepelFactor` | float | `0.75` | CDOPlayerController::OnEvent |  |  |
 | `doPlayerSpawnRadius` | float | `150` |  |  |  |
-| `doPlayerSpecs` | string |  |  |  |  |
+| `doPlayerSpecs` | string |  | CDORoundManager::CDORoundManager |  |  |
 | `doPointsPerBonusLife` | int | `200000` |  |  |  |
 | `doRainbowRingRepelSpeed` | graph | `0,0;300,4096;` | CDOAIController::vf24 |  |  |
 | `doRainbowRingTrapDistance` | float | `210` | CDOAIController::vf24 |  |  |
@@ -589,10 +589,10 @@ Available: unknown owner.
 | `doRainbowShieldContractTime` | int | `1000` | CDOShieldRainbow::vf24 |  |  |
 | `doRainbowShieldExpandTime` | int | `1000` | CDOShieldRainbow::vf24 |  |  |
 | `doRainbowShieldMaxScale` | float | `1.5` | CDOShieldRainbow::vf24 |  |  |
-| `doResultsGravity` | float | `3000` |  |  |  |
+| `doResultsGravity` | float | `3000` | CDOIngameStateResult::CDOIngameStateResult |  |  |
 | `doReturnToSpawnPointDistance` | float | `200` | CDOAIController::vf24 |  |  |
 | `doReviveDownTime` | int | `2000` |  |  |  |
-| `doReviveEffectActiveTime` | int | `9000` | CDOPlayerController::vf23 |  |  |
+| `doReviveEffectActiveTime` | int | `9000` | CDOPlayerController::OnEvent |  |  |
 | `doReviveEffectAnimatePeriod` | float | `1000.0` |  |  |  |
 | `doReviveEffectColour` | intarray | `{0,255,0,255}` |  |  |  |
 | `doReviveEffectHalfTime` | int | `4000` |  |  |  |
@@ -634,8 +634,8 @@ Available: unknown owner.
 | `doTankMinTurnThreshold` | float | `0.005000` | CDOTankBodyHandler::vf24 |  |  |
 | `doTankTurretMaxTurn` | float | `6.0` | CDOTankBodyHandler::vf24 |  |  |
 | `doTeleporterRiseSpeed` | float | `25` |  |  |  |
-| `doTeleporterRotationSpeed` | float | `0.5` | CDOTeleporter::vf23 |  |  |
-| `doTeleporterStartHeight` | float | `100.0` | CDOTeleporter::vf22 |  |  |
+| `doTeleporterRotationSpeed` | float | `0.5` | CDOTeleporter::OnEvent |  |  |
+| `doTeleporterStartHeight` | float | `100.0` | CDOTeleporter::Init |  |  |
 | `doTeslaEnemyDamageRadius` | float | `115.0` | CDOTeslaTower::vf23 |  |  |
 | `doTeslaPlayerDamageRadius` | float | `90.0` | CDOTeslaTower::vf23 |  |  |
 | `DOToolTipCount` | int | `14` |  |  |  |
@@ -660,9 +660,11 @@ Available: unknown owner.
 | `RemotePlayerNetworkPositionErrorSquared` | int | `500` |  |  |  |
 | `RemotePlayerNetworkRollError` | float | `0.15f` |  |  |  |
 | `RoomMaxPlayers` | int | `2` | CIwNetworkRoom::vf15 |  |  |
-| `TeleportProbabilityToRandomRoom` | int | `50` |  |  |  |
-| `TeleportProjectorRoomTimeMS` | int | `30000` |  |  |  |
-| `TeleportRandomRoomTimeMS` | int | `5000` |  |  |  |
+| `TeleportProbabilityToRandomRoom` | int | `50` | CTeleportManager::CTeleportManager |  |  |
+| `TeleportProjectorRoomTimeMS` | int | `30000` | CTeleportManager::CTeleportManager |  |  |
+| `TeleportRandomRoomTimeMS` | int | `5000` | CTeleportManager::CTeleportManager |  |  |
+| `UDPPacketCorruptionRate` | int | `0` | CIwNetworkSocketStun::CIwNetworkSocketStun |  |  |
+| `UDPPacketLossRate` | int | `0` | CIwNetworkSocketStun::CIwNetworkSocketStun |  |  |
 | `ZombieNetworkAngleError` | float | `0.05` |  |  |  |
 | `ZombieNetworkPositionErrorSquared` | int | `15000` |  |  |  |
 
@@ -670,15 +672,15 @@ Available: unknown owner.
 
 | Variable | Type | Default | Used by | Notes | Status |
 | --- | --- | --- | --- | --- | --- |
-| `AIGodmode` | bool | `false` | CAIControllerRomero::vf26 | Zombies and other AI cannot be hurt. |  |
+| `AIGodmode` | bool | `false` | CAIControllerRomero::OnEvent | Zombies and other AI cannot be hurt. |  |
 | `AIHostTimeoutToFrozen` | int | `3000` |  |  |  |
 | `AIIgnoreGersch` | bool | `false` | CAIControllerZombie::vf26 |  |  |
 | `AIMonkeyClaymoreDestroyRadius` | float | `800` |  |  |  |
 | `AIMonkeyGerschAboutToShutTime` | int | `1000` |  |  |  |
 | `AIMonkeyGroundAttackProbability` | int | `5` |  |  |  |
-| `AIMonkeyGroundPoundBlurFadeInTime` | int | `500` | CAIControllerMonkey::vf26 |  |  |
-| `AIMonkeyGroundPoundSlowDownFactor` | float | `0.5` | CAIControllerMonkey::vf26 |  |  |
-| `AIMonkeyGroundPoundSlowDownTime` | int | `3000` | CAIControllerMonkey::vf26 |  |  |
+| `AIMonkeyGroundPoundBlurFadeInTime` | int | `500` | CAIControllerMonkey::OnEvent |  |  |
+| `AIMonkeyGroundPoundSlowDownFactor` | float | `0.5` | CAIControllerMonkey::OnEvent |  |  |
+| `AIMonkeyGroundPoundSlowDownTime` | int | `3000` | CAIControllerMonkey::OnEvent |  |  |
 | `AIMonkeyMaxDistFromAgentTreshold` | int | `4000` |  |  |  |
 | `AIMonkeyPickUpGranadeMaxVelocity` | float | `100` |  |  |  |
 | `AIMonkeyPickUpGranadeRadius` | float | `150` |  |  |  |
@@ -689,35 +691,35 @@ Available: unknown owner.
 | `AIMonkeyTryThrowBackGranadeRadius` | float | `250` |  |  |  |
 | `AIPlayerTargetChangeFarDistTrashold` | float | `1000` |  |  |  |
 | `AIPlayerTargetChangeMinSqDistance` | float | `100.0f` |  |  |  |
-| `AIRomeroGroundPoundSlowDownFactor` | float | `0.5` | CAIControllerRomero::vf26 |  |  |
-| `AIRomeroGroundPoundSlowDownTime` | int | `3000` | CAIControllerRomero::vf26 |  |  |
+| `AIRomeroGroundPoundSlowDownFactor` | float | `0.5` | CAIControllerRomero::OnEvent |  |  |
+| `AIRomeroGroundPoundSlowDownTime` | int | `3000` | CAIControllerRomero::OnEvent |  |  |
 | `AITargetChangeLogicUpdateMs` | int | `2000` | CAIControllerHellhound::vf24 |  |  |
-| `AIZombieElectricAttackSlowDownFactor` | float | `0.5` | CAIControllerZombie::vf28 |  |  |
-| `AIZombieElectricAttackSlowDownTime` | int | `3000` | CAIControllerZombie::vf28 |  |  |
+| `AIZombieElectricAttackSlowDownFactor` | float | `0.5` | CAIControllerZombie::OnEvent |  |  |
+| `AIZombieElectricAttackSlowDownTime` | int | `3000` | CAIControllerZombie::OnEvent |  |  |
 | `AmbientZombiesMaxRange` | float | `3000.0` |  |  |  |
 | `baseZombieHealth` | int | `20` |  |  |  |
-| `DisableZombieSpawning` | bool | `false` |  |  |  |
+| `DisableZombieSpawning` | bool | `false` | CWaveManager::CreateZombie |  |  |
 | `DrawToAgentPosition` | bool | `false` | CAIControllerHellhound::vf21 |  |  |
 | `ForceZombiePositionToAgent` | bool | `false` | CAIControllerHellhound::vf25 |  |  |
 | `HangingZombieOffset` | float | `250.0f` |  |  |  |
 | `maxSpawnedZombies` | int | `32` |  |  |  |
 | `MonkeyDeathRingLifetime` | int | `500` |  |  |  |
 | `MonkeyDeathRingSpeed` | float | `15` |  |  |  |
-| `NumZombiesToInterval` | fixed | `0.1` |  |  |  |
+| `NumZombiesToInterval` | fixed | `0.1` | CAmbienceManager::CAmbienceManager |  |  |
 | `PlayerCollideZombieHeight` | float | `3.5` |  |  |  |
 | `PlayerCollideZombieRadius` | float | `3.5` |  |  |  |
-| `PlayerVoxRomeroNearlyDead` | int | `50` | CAIControllerRomero::vf26 |  |  |
+| `PlayerVoxRomeroNearlyDead` | int | `50` | CAIControllerRomero::OnEvent |  |  |
 | `RomeroAttackRange` | float | `280` |  |  |  |
 | `RomeroCheckRoaringChanceDelay` | int | `1000` |  |  |  |
 | `RomeroClimbFinishDist` | float | `75.0` |  |  |  |
 | `RomeroClimbSnapSpeed` | float | `0.5` |  |  |  |
-| `RomeroDeathMachineDamageMultiplier` | float | `0.1` | CAIControllerRomero::vf26 |  |  |
+| `RomeroDeathMachineDamageMultiplier` | float | `0.1` | CAIControllerRomero::OnEvent |  |  |
 | `RomeroDistOffsetFromBarricade` | float | `100` |  |  |  |
 | `RomeroFastWalkStopDistance` | float | `180` |  |  |  |
-| `RomeroHeavyDamagePercentage` | float | `0.25` | CAIControllerRomero::vf26 |  |  |
+| `RomeroHeavyDamagePercentage` | float | `0.25` | CAIControllerRomero::OnEvent |  |  |
 | `RomeroJumpFinishDist` | float | `200.0` |  |  |  |
-| `RomeroLightDamagePercentage` | float | `0.75` | CAIControllerRomero::vf26 |  |  |
-| `RomeroMediumDamagePercentage` | float | `0.5` | CAIControllerRomero::vf26 |  |  |
+| `RomeroLightDamagePercentage` | float | `0.75` | CAIControllerRomero::OnEvent |  |  |
+| `RomeroMediumDamagePercentage` | float | `0.5` | CAIControllerRomero::OnEvent |  |  |
 | `RomeroPerkXSparationOffset` | float | `80` |  |  |  |
 | `RomeroRoaringChance` | float | `0.6` |  |  |  |
 | `RomeroSlowWalkStopDistance` | float | `100` |  |  |  |
@@ -728,7 +730,7 @@ Available: unknown owner.
 | `RomeroVoxRomeroNearlyDead` | int | `20` | CAIControllerRomero::vf25 |  |  |
 | `RomeroVoxTargetCloseDistSq` | float | `70000` | CAIControllerRomero::vf25 |  |  |
 | `RomeroVoxTimeMinMax` | intarray | `{50000, 90000}` | CAIControllerRomero::vf25 |  |  |
-| `StaggerStartingZombies` | int | `500` | CWaveManager::vf2 |  |  |
+| `StaggerStartingZombies` | int | `500` | CWaveManager::Update |  |  |
 | `Tcolor` | intarray | `{255,204,204,204}` | CAIControllerMonkey::OnEvent |  |  |
 | `TutorShootAngleDelta` | float | `0.05f` | CAITutor::vf23 |  |  |
 | `TutorShootTimeMS` | int | `800` | CAITutor::vf23 |  |  |
@@ -736,35 +738,35 @@ Available: unknown owner.
 | `TutorTargetTimer` | int | `500` | CAITutor::vf23 |  |  |
 | `TutorTurnRate` | float | `5.0f` | CAITutor::vf23 |  |  |
 | `ZombieAllowHostMigrationDelay` | int | `1000` |  |  |  |
-| `ZombieAttackingDistanceBarricadeIncrease` | float | `55` | CAIControllerZombie::vf22 |  |  |
+| `ZombieAttackingDistanceBarricadeIncrease` | float | `55` | CAIControllerZombie::Init |  |  |
 | `ZombieAttackingDistancePushBack` | float | `0.1` |  |  |  |
-| `ZombieAttackingDistanceTolerance` | float | `0.1` | CAIControllerZombie::vf22 |  |  |
+| `ZombieAttackingDistanceTolerance` | float | `0.1` | CAIControllerZombie::Init |  |  |
 | `ZombieAttackPauseTime` | int | `500` |  |  |  |
 | `ZombieClimbFinishDist` | float | `75.0` |  |  |  |
 | `ZombieClimbSnapSpeed` | float | `0.5` |  |  |  |
 | `ZombieDamageFreezeFraction` | float | `0.25` | CAIControllerZombie::vf26 |  |  |
 | `zombieDeathFadeTime` | int | `5` |  |  |  |
 | `ZombieDistOffsetFromBarricade` | int | `10000` |  |  |  |
-| `ZombieEasyHealthMultiplier` | float | `0.5` |  |  |  |
-| `ZombieFreezeTimeMS` | int | `3000` | CAIControllerZombie::vf28 |  |  |
+| `ZombieEasyHealthMultiplier` | float | `0.5` | CWaveManager::CreateZombie |  |  |
+| `ZombieFreezeTimeMS` | int | `3000` | CAIControllerZombie::OnEvent |  |  |
 | `ZombieHangTime` | int | `10000` |  |  |  |
-| `ZombieHardHealthMultiplier` | float | `1.0` |  |  |  |
+| `ZombieHardHealthMultiplier` | float | `1.0` | CWaveManager::CreateZombie |  |  |
 | `zombieHeadshotBonus` | intarray | `{0,0,0,10,10,20,20,30,30,40}` | CAIControllerZombie::State_Dead | Extra points for a headshot kill, by zombie type index (read in CAIControllerZombie::State_Dead). |  |
 | `ZombieHellhoundMaxDistFromAgentTreshold` | int | `4000` |  |  |  |
 | `zombieHordeSize` | floatarray | `{500,2000}` |  |  |  |
-| `ZombieIceOffset` | float | `15.0` | CAIControllerZombie::vf28 |  |  |
+| `ZombieIceOffset` | float | `15.0` | CAIControllerZombie::OnEvent |  |  |
 | `ZombieJumpFinishDist` | float | `260.0` |  |  |  |
 | `ZombieMaxDistFromAgentTolerance` | int | `200` |  |  |  |
-| `ZombieMoonWalkWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::vf28 |  |  |
-| `ZombieNormalHealthMultiplier` | float | `1.0` |  |  |  |
+| `ZombieMoonWalkWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::OnEvent |  |  |
+| `ZombieNormalHealthMultiplier` | float | `1.0` | CWaveManager::CreateZombie |  |  |
 | `ZombieOffMeshLinkEngageTimeout` | int | `30000` |  |  |  |
-| `ZombieRunWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::vf28 |  |  |
+| `ZombieRunWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::OnEvent |  |  |
 | `ZombiesCheckDistanceFromGershDeviceInterval` | int | `1000` |  |  |  |
-| `ZombieScreamAltTimer` | int | `3000` | CAIControllerZombie::vf22 |  |  |
-| `ZombieSnapSpeed` | float | `1.0` | CAIControllerZombie::vf22 |  |  |
-| `ZombieSprintWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::vf28 |  |  |
-| `ZombieWalkFastWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::vf28 |  |  |
-| `ZombieWalkWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::vf28 |  |  |
+| `ZombieScreamAltTimer` | int | `3000` | CAIControllerZombie::Init |  |  |
+| `ZombieSnapSpeed` | float | `1.0` | CAIControllerZombie::Init |  |  |
+| `ZombieSprintWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::OnEvent |  |  |
+| `ZombieWalkFastWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::OnEvent |  |  |
+| `ZombieWalkWaterSpeedModifier` | float | `1.0` | CAIControllerZombie::OnEvent |  |  |
 | `ZombieZiplineStartFailsafeTime` | int | `2000` |  |  |  |
 
 ### Weapons and the mystery box
@@ -772,12 +774,12 @@ Available: unknown owner.
 | Variable | Type | Default | Used by | Notes | Status |
 | --- | --- | --- | --- | --- | --- |
 | `AllWeapons` | bool | `false` |  | Developer cheat: gives every weapon, including ones from other maps whose animations are not loaded. Those have no ammo, cannot be switched away from, and equipping one crashed the game in CWeaponManager::SetWeapon (null animation state machine); the client now recovers from that fault. | crashes |
-| `ClipPlaneNearZ` | int | `10` |  |  |  |
-| `DeathMachineWeapon` | string | `olympia` |  |  |  |
+| `ClipPlaneNearZ` | int | `10` | CIwFogManager::CIwFogManager |  |  |
+| `DeathMachineWeapon` | string | `olympia` | CPickupManager::CPickupManager |  |  |
 | `DisableGerschOpenFX` | bool | `false` | CProjectileEntity::OnEvent |  |  |
 | `DisableImpactDecals` | bool | `false` | CImpactEffect::Init |  |  |
 | `EndWaveGrenades` | int | `2` |  |  |  |
-| `FastReloadFactor` | float | `2.0` |  |  |  |
+| `FastReloadFactor` | float | `2.0` | CPerkManager::CPerkManager |  |  |
 | `GrenadeFuseLength` | float | `3.0` |  |  |  |
 | `GrenadeSpawnOffsetY` | float | `25.0` |  |  |  |
 | `GrenadeSpawnOffsetZ` | float | `100.0` |  |  |  |
@@ -794,36 +796,36 @@ Available: unknown owner.
 | `GunSwayY` | float | `0.04` |  |  |  |
 | `LastStandWeaponMulti` | string | `colt45_laststand` |  |  |  |
 | `LastStandWeaponSingle` | string | `m_sally_laststand` |  |  |  |
-| `LightningBoltWeapon` | string | `dragunov` |  |  |  |
+| `LightningBoltWeapon` | string | `dragunov` | CPickupManager::CPickupManager |  |  |
 | `MaxRecoilPitch` | float | `0.5` |  |  |  |
 | `MaxRecoilYaw` | float | `0.5` |  |  |  |
 | `MinigunBarrelMaxSpeed` | int | `3996` | CDeathMachineBehaviour::vf10 |  |  |
-| `MysteryBoxMaxGoodSound` | int | `3` | CMysteryBox::vf24 |  |  |
-| `MysteryBoxOverrideWeaponCount` | int | `-1` | CMysteryBox::vf23 |  |  |
-| `MysteryBoxPauseTime` | int | `1000` | CMysteryBox::vf23 |  |  |
+| `MysteryBoxMaxGoodSound` | int | `3` | CMysteryBox::Interact |  |  |
+| `MysteryBoxOverrideWeaponCount` | int | `-1` | CMysteryBox::OnEvent |  |  |
+| `MysteryBoxPauseTime` | int | `1000` | CMysteryBox::OnEvent |  |  |
 | `MysteryBoxRespawnTime` | int | `20000` |  |  |  |
-| `MysteryBoxTeddyHeight` | float | `700.0` | CMysteryBox::vf23 |  |  |
+| `MysteryBoxTeddyHeight` | float | `700.0` | CMysteryBox::OnEvent |  |  |
 | `MysteryBoxTeddyScale` | float | `1.0` |  |  |  |
-| `MysteryBoxTeddyTime` | int | `1000` | CMysteryBox::vf23 |  |  |
-| `MysteryBoxWeaponHeight` | float | `100.0` | CMysteryBox::vf23 |  |  |
+| `MysteryBoxTeddyTime` | int | `1000` | CMysteryBox::OnEvent |  |  |
+| `MysteryBoxWeaponHeight` | float | `100.0` | CMysteryBox::OnEvent |  |  |
 | `MysteryBoxWeaponLOD` | int | `1` |  |  |  |
-| `MysteryBoxWeaponLowerTime` | int | `3000` | CMysteryBox::vf23 |  |  |
+| `MysteryBoxWeaponLowerTime` | int | `3000` | CMysteryBox::OnEvent |  |  |
 | `MysteryBoxWeaponScale` | float | `0.015625f` |  |  |  |
-| `MysteryBoxWeaponStartHeight` | float | `20.0` | CMysteryBox::vf24 |  |  |
-| `MysteryBoxWeaponSwitchTime` | int | `2000` | CMysteryBox::vf23 |  |  |
-| `MysteryBoxWeaponSwitchTimeMax` | int | `1500` | CMysteryBox::vf23 |  |  |
-| `MysteryBoxWeaponSwitchTimeMin` | int | `50` | CMysteryBox::vf23 |  |  |
-| `MysteryBoxWeaponTime` | int | `1500` | CMysteryBox::vf23 |  |  |
-| `PackAPunchRespawnTime` | int | `150000` |  |  |  |
-| `PackAPunchSpawnDelay` | int | `2000` | CPackAPunch::vf23 |  |  |
+| `MysteryBoxWeaponStartHeight` | float | `20.0` | CMysteryBox::Interact |  |  |
+| `MysteryBoxWeaponSwitchTime` | int | `2000` | CMysteryBox::OnEvent |  |  |
+| `MysteryBoxWeaponSwitchTimeMax` | int | `1500` | CMysteryBox::OnEvent |  |  |
+| `MysteryBoxWeaponSwitchTimeMin` | int | `50` | CMysteryBox::OnEvent |  |  |
+| `MysteryBoxWeaponTime` | int | `1500` | CMysteryBox::OnEvent |  |  |
+| `PackAPunchRespawnTime` | int | `150000` | CCycleController::CCycleController |  |  |
+| `PackAPunchSpawnDelay` | int | `2000` | CPackAPunch::OnEvent |  |  |
 | `PAPMachineWeaponEndX` | float | `0.0` |  |  |  |
 | `PAPMachineWeaponHeight` | float | `90.0` |  |  |  |
 | `PAPMachineWeaponInPAPTime` | int | `8000` |  |  |  |
 | `PAPMachineWeaponInTime` | int | `8000` |  |  |  |
 | `PAPMachineWeaponOutTime` | int | `8000` |  |  |  |
 | `PAPMachineWeaponStartX` | float | `90.0` |  |  |  |
-| `PlayerStartAmmo` | int | `40` |  |  |  |
-| `PlayerStartWeapon` | string | `colt45` |  |  |  |
+| `PlayerStartAmmo` | int | `40` | WeaponManager_GiveStartWeapons |  |  |
+| `PlayerStartWeapon` | string | `colt45` | WeaponManager_GiveStartWeapons |  |  |
 | `RecoilDamping` | float | `5.0` |  |  |  |
 | `RecoilDampingADS` | float | `20.0` |  |  |  |
 | `RecoilDrag` | float | `0.4` |  |  |  |
@@ -839,25 +841,25 @@ Available: unknown owner.
 | `RecoilYScaleHeavy` | float | `1.2` |  |  |  |
 | `RecoilYScaleLight` | float | `0.47` |  |  |  |
 | `RecoilYScaleMedium` | float | `0.65` |  |  |  |
-| `VFXDecalFadeDuration` | int | `3000` | CImpactEffect::vf22 |  |  |
+| `VFXDecalFadeDuration` | int | `3000` | CImpactEffect::Init |  |  |
 | `WeaponsUnlimitedAmmo` | bool | `false` |  | Firing takes no ammo (checked in the weapon's firing state). | works |
 
 ### Camera, aiming and controls
 
 | Variable | Type | Default | Used by | Notes | Status |
 | --- | --- | --- | --- | --- | --- |
-| `AccelAimXSensitivity` | floatarray | `{ 1.0, 1.0 }` |  |  |  |
-| `AccelAimYSensitivity` | floatarray | `{ 1.0, 1.0 }` |  |  |  |
-| `accelDampingHorizontal` | fixed | `0.1` |  |  |  |
+| `AccelAimXSensitivity` | floatarray | `{ 1.0, 1.0 }` | CHUDManager::GetAimXSensitivity |  |  |
+| `AccelAimYSensitivity` | floatarray | `{ 1.0, 1.0 }` | CHUDManager::GetAimYSensitivity |  |  |
+| `accelDampingHorizontal` | fixed | `0.1` | CPlayerController::GetTiltTurn |  |  |
 | `accelDampingVertical` | fixed | `0.1` |  |  |  |
 | `accelerometerSmoothingEnabled` | bool | `true` | CAccelerometerInput::CAccelerometerInput |  |  |
 | `accelerometerSmoothingProfile` | graph | `0,5;6000,500;` | CAccelerometerInput::CAccelerometerInput |  |  |
-| `AccelHorizontalRampAiming` | graph | `0,0;216,0;1034,470;3873,1477;` |  |  |  |
-| `AccelHorizontalRampRunning` | graph | `0,0;216,0;1034,470;3873,1477;` |  |  |  |
-| `AccelHorizontalRampWalking` | graph | `0,0;216,0;1034,470;3416,3008;` |  |  |  |
-| `accelScreenTiltCorrectionDamping` | fixed | `0.25` |  |  |  |
+| `AccelHorizontalRampAiming` | graph | `0,0;216,0;1034,470;3873,1477;` | CPlayerController::GetTiltTurn |  |  |
+| `AccelHorizontalRampRunning` | graph | `0,0;216,0;1034,470;3873,1477;` | CPlayerController::GetTiltTurn |  |  |
+| `AccelHorizontalRampWalking` | graph | `0,0;216,0;1034,470;3416,3008;` | CPlayerController::GetTiltTurn |  |  |
+| `accelScreenTiltCorrectionDamping` | fixed | `0.25` | CAccelerometerInput::CAccelerometerInput |  |  |
 | `accelScreenTiltCorrectionDampingShift` | int | `3` | CAccelerometerInput::CAccelerometerInput |  |  |
-| `accelScreenTiltCorrectionStrength` | fixed | `0.5` |  |  |  |
+| `accelScreenTiltCorrectionStrength` | fixed | `0.5` | CAccelerometerInput::CAccelerometerInput |  |  |
 | `AccelVerticalRampAiming` | graph | `-4096,-512;0,512;` |  |  |  |
 | `AccelVerticalRampRunning` | graph | `-4096,-512;0,512;` |  |  |  |
 | `AccelVerticalRampWalking` | graph | `-4096,-512;0,512;` |  |  |  |
@@ -875,157 +877,170 @@ Available: unknown owner.
 | `AimAssistUnlockHeightMin` | float | `-0.4f` |  |  |  |
 | `AimAssistUnlockRange` | float | `12.0f` |  |  |  |
 | `AimAssistUnlockSpeed` | float | `1.0f` |  |  |  |
-| `AimCrouchSpeed` | float | `0.6` | CPlayerController::vf23 |  |  |
-| `AimPitchSpeed` | float | `1.0` |  |  |  |
-| `AimProneSpeed` | float | `0.3` | CPlayerController::vf23 |  |  |
-| `AimTurnSpeed` | float | `1.0` |  |  |  |
-| `AimWalkSpeed` | float | `1.0` | CPlayerController::vf23 |  |  |
-| `AnalogueAimXSensitivity` | floatarray | `{ 1.0, 1.0 }` |  |  |  |
-| `AnalogueAimYSensitivity` | floatarray | `{ 1.0, 1.0 }` |  |  |  |
-| `analoguePadAimingResponse` | graph | `0,0;4096,4096;` |  |  |  |
+| `AimCrouchSpeed` | float | `0.6` | CPlayerController::OnEvent |  |  |
+| `AimPitchSpeed` | float | `1.0` | CPlayerController::FixedStep |  |  |
+| `AimProneSpeed` | float | `0.3` | CPlayerController::OnEvent |  |  |
+| `AimTurnSpeed` | float | `1.0` | CPlayerController::FixedStep |  |  |
+| `AimWalkSpeed` | float | `1.0` | CPlayerController::OnEvent |  |  |
+| `AnalogueAimXSensitivity` | floatarray | `{ 1.0, 1.0 }` | CHUDManager::GetAimXSensitivity |  |  |
+| `AnalogueAimYSensitivity` | floatarray | `{ 1.0, 1.0 }` | CHUDManager::GetAimYSensitivity |  |  |
+| `analoguePadAimingResponse` | graph | `0,0;4096,4096;` | CTouchComponentAnaloguePad::CTouchComponentAnaloguePad |  |  |
+| `analoguePadMovingResponse` | graph | `0,0;4096,4096;` | CTouchComponentAnaloguePad::CTouchComponentAnaloguePad |  |  |
 | `AutoFaceTurnRate` | float | `5.0f` |  |  |  |
 | `AutoPitchTurnRate` | float | `2.0f` |  |  |  |
-| `ButtonDoubleTapTimeOut` | int | `400` | CInputManager::vf4 |  |  |
+| `ButtonDoubleTapTimeOut` | int | `400` | CInputManager::OnInputAction |  |  |
 | `DoubleTapTimeOut` | int | `200` | CTouchComponentAnaloguePad::vf2 |  |  |
-| `EnableSetFov` | bool | `false` |  | Turns on the SetFov override (CWeaponManager::UpdateFov). | works |
+| `EnableSetFov` | bool | `false` | CWeaponManager::UpdateFov | Turns on the SetFov override (CWeaponManager::UpdateFov). | works |
 | `FiringTapTimeOut` | int | `200` | CTouchComponentAnaloguePad::vf2 |  |  |
 | `FreeFlySpeed` | float | `60.0` | CPlayerFreeFly::Init | Speed of the developer fly mode (CPlayerFreeFly, registered as "Flying!"): distance per movement event at full stick, and per SUBJECT_PLAYER_ASCEND. Registered when the player spawns. The Developer mod's `noclip` toggles the mode. | works |
-| `InputWaitingTime` | int | `1000` | CIngameStateResults::vf2 |  |  |
-| `MaxPitch` | float | `0.5` |  |  |  |
+| `InputWaitingTime` | int | `1000` | CIngameStateResults::Enter |  |  |
+| `MaxPitch` | float | `0.5` | CPlayerController::FixedStep |  |  |
 | `MinigunBarrelAcceleration` | int | `300` |  |  |  |
-| `PerkedAimCrouchSpeed` | float | `1.2` | CPlayerController::vf23 |  |  |
-| `PerkedAimPitchSpeed` | float | `2.0` |  |  |  |
-| `PerkedAimProneSpeed` | float | `0.6` | CPlayerController::vf23 |  |  |
-| `PerkedAimTurnSpeed` | float | `2.0` |  |  |  |
-| `PerkedAimWalkSpeed` | float | `1.0` | CPlayerController::vf23 |  |  |
-| `PerkedPitchSpeed` | float | `2.0` |  |  |  |
-| `PerkedSprintPitchSpeed` | float | `2.0` |  |  |  |
-| `PerkedSprintTurnSpeed` | float | `2.0` |  |  |  |
-| `PerkedTurnSpeed` | float | `2.0` |  |  |  |
-| `PitchSpeed` | float | `1.0` |  | Vertical look speed multiplier. |  |
+| `PerkedAimCrouchSpeed` | float | `1.2` | CPlayerController::OnEvent |  |  |
+| `PerkedAimPitchSpeed` | float | `2.0` | CPlayerController::FixedStep |  |  |
+| `PerkedAimProneSpeed` | float | `0.6` | CPlayerController::OnEvent |  |  |
+| `PerkedAimTurnSpeed` | float | `2.0` | CPlayerController::FixedStep |  |  |
+| `PerkedAimWalkSpeed` | float | `1.0` | CPlayerController::OnEvent |  |  |
+| `PerkedPitchSpeed` | float | `2.0` | CPlayerController::FixedStep |  |  |
+| `PerkedSprintPitchSpeed` | float | `2.0` | CPlayerController::FixedStep |  |  |
+| `PerkedSprintTurnSpeed` | float | `2.0` | CPlayerController::FixedStep |  |  |
+| `PerkedTurnSpeed` | float | `2.0` | CPlayerController::FixedStep |  |  |
+| `PitchSpeed` | float | `1.0` | CPlayerController::FixedStep | Vertical look speed multiplier. |  |
 | `RocketAcceleration` | float | `0.01` |  |  |  |
-| `SetFov` | float | `50.0` |  | Field of view in degrees while EnableSetFov is on, clamped to at most the base FOV (the map's MainCamera m_fov, 50 on Kino): it can only narrow the view. Widen it by raising CWeaponManager +0xc4 (the Developer mod's FOV slider). | partial |
+| `SetFov` | float | `50.0` | CWeaponManager::UpdateFov | Field of view in degrees while EnableSetFov is on, clamped to at most the base FOV (the map's MainCamera m_fov, 50 on Kino): it can only narrow the view. Widen it by raising CWeaponManager +0xc4 (the Developer mod's FOV slider). | partial |
 | `SprintDownFactor` | float | `1.2` | CTouchComponentStickyStick::vf6 |  |  |
-| `SprintPitchSpeed` | float | `1.0` |  |  |  |
-| `SprintTurnSpeed` | float | `1.0` |  |  |  |
-| `StickyAimXSensitivity` | floatarray | `{ 1.0, 1.0 }` |  |  |  |
-| `StickyAimYSensitivity` | floatarray | `{ 1.0, 1.0 }` |  |  |  |
+| `SprintPitchSpeed` | float | `1.0` | CPlayerController::FixedStep |  |  |
+| `SprintTurnSpeed` | float | `1.0` | CPlayerController::FixedStep |  |  |
+| `StickyAimXSensitivity` | floatarray | `{ 1.0, 1.0 }` | CHUDManager::GetAimXSensitivity |  |  |
+| `StickyAimYSensitivity` | floatarray | `{ 1.0, 1.0 }` | CHUDManager::GetAimYSensitivity |  |  |
 | `StickyEdgeBehaviour` | int | `100` |  |  |  |
-| `StickySpeed` | float | `0.1` |  |  |  |
+| `StickySpeed` | float | `0.1` | CTouchComponentStickyStick::CTouchComponentStickyStick |  |  |
 | `TimeToMove` | int | `100` | CTouchComponentControl::vf2 |  |  |
-| `TouchAimXSensitivity` | floatarray | `{ 1.0, 1.0 }` |  |  |  |
-| `TouchAimYSensitivity` | floatarray | `{ 1.0, 1.0 }` |  |  |  |
+| `TouchAimXSensitivity` | floatarray | `{ 1.0, 1.0 }` | CHUDManager::GetAimXSensitivity |  |  |
+| `TouchAimYSensitivity` | floatarray | `{ 1.0, 1.0 }` | CHUDManager::GetAimYSensitivity |  |  |
 | `TouchControlAimingResponse` | graph | `0,0;50,0;50,2048;4096,4096;` | CTouchComponentControl::CTouchComponentControl |  |  |
-| `TouchControlBalance` | float | `12.0` |  |  |  |
-| `TurnMult` | float | `0.25` | CPlayerController::vf23 |  |  |
-| `TurnSpeed` | float | `1.0` |  | Horizontal look speed multiplier. |  |
-| `UIDoubleClickReleaseTime` | int | `150` | CInputManager::vf4 |  |  |
+| `TouchControlBalance` | float | `12.0` | CTouchComponentControl::CTouchComponentControl |  |  |
+| `TurnMult` | float | `0.25` | CPlayerController::OnEvent |  |  |
+| `TurnSpeed` | float | `1.0` | CPlayerController::FixedStep | Horizontal look speed multiplier. |  |
+| `UIDoubleClickReleaseTime` | int | `150` | CInputManager::OnInputAction |  |  |
 
 ### Player
 
 | Variable | Type | Default | Used by | Notes | Status |
 | --- | --- | --- | --- | --- | --- |
 | `baseMiniBossHealth` | int | `200` |  |  |  |
-| `CrouchSpeed` | float | `0.6` | CPlayerController::vf23 |  |  |
-| `EnableAutoCrouch` | bool | `false` | CPlayerController::vf23 |  |  |
+| `CrouchSpeed` | float | `0.6` | CPlayerController::OnEvent |  |  |
+| `EnableAutoCrouch` | bool | `false` | CPlayerController::OnEvent |  |  |
 | `HealthIgnoreBleedOutTime` | bool | `false` | CHealth::Update | Downed players never bleed out (read in CHealth::Update). | works |
 | `HealthLowTreshold` | float | `0.7` |  |  |  |
-| `KillStreakQuota` | int | `50` | CPlayerController::vf23 |  |  |
-| `KillStreakVoxDelayTime` | int | `10000` | CPlayerController::vf23 |  |  |
-| `LastStandDuration` | int | `30000` | CPlayerController::vf24 |  |  |
-| `LastStandDurationSinglePlayer` | int | `10000` | CPlayerController::vf24 |  |  |
-| `LastStandSpeed` | float | `0.2` | CPlayerController::vf23 |  |  |
+| `KillStreakQuota` | int | `50` | CPlayerController::OnEvent |  |  |
+| `KillStreakVoxDelayTime` | int | `10000` | CPlayerController::OnEvent |  |  |
+| `LastStandDuration` | int | `30000` | CPlayerController::HandleState |  |  |
+| `LastStandDurationSinglePlayer` | int | `10000` | CPlayerController::HandleState |  |  |
+| `LastStandSpeed` | float | `0.2` | CPlayerController::OnEvent |  |  |
+| `LazarusTime` | int | `15000` | CPlayerController::CPlayerController |  |  |
 | `MaxNumPlayers` | int | `4` |  |  |  |
-| `MaxTimeInWater` | int | `30000` | CPlayerController::vf22 |  |  |
-| `MTXReviveCost` | int | `1000` | CIngameStateQuickRevive::vf2 |  |  |
-| `PerkedCrouchSpeed` | float | `1.2` | CPlayerController::vf23 |  |  |
-| `PerkedProneSpeed` | float | `0.6` | CPlayerController::vf23 |  |  |
+| `MaxTimeInWater` | int | `30000` | CPlayerController::Init |  |  |
+| `moveVecMinimumSquaredLength` | float | `0.005` | CPlayerController::FixedStep |  |  |
+| `MTXReviveCost` | int | `1000` | CIngameStateQuickRevive::Enter |  |  |
+| `PerkedCrouchSpeed` | float | `1.2` | CPlayerController::OnEvent |  |  |
+| `PerkedProneSpeed` | float | `0.6` | CPlayerController::OnEvent |  |  |
 | `PerkedSprintingCapacity` | float | `200.0` |  |  |  |
 | `PerkedSprintingRatePerSec` | float | `30.0` |  |  |  |
 | `PerkedSprintingRecoveryRatePerSec` | float | `400.0` |  |  |  |
 | `PerkedSprintingThreshold` | float | `200.0` |  |  |  |
-| `PerkedSprintSpeed` | float | `6.0` | CPlayerController::vf23 |  |  |
-| `PerkedWalkSpeed` | float | `2.0` | CPlayerController::vf23 |  |  |
-| `PerkUnderAttackFadeTimeMS` | int | `500` | CPerkManager::vf25 |  |  |
-| `PerkUnderAttackFlashTimeMS` | int | `6000` | CPerkManager::vf23 |  |  |
+| `PerkedSprintSpeed` | float | `6.0` | CPlayerController::OnEvent |  |  |
+| `PerkedWalkSpeed` | float | `2.0` | CPlayerController::OnEvent |  |  |
+| `PerkUnderAttackFadeTimeMS` | int | `500` | CPerkManager::UpdateHUD |  |  |
+| `PerkUnderAttackFlashTimeMS` | int | `6000` | CPerkManager::OnEvent |  |  |
 | `PlayerChangeHeightTime` | float | `0.5` |  |  |  |
 | `PlayerCollideMoveFactor` | float | `0.25` |  |  |  |
-| `playerCrouchFootstepsMultipler` | float | `2.0` |  |  |  |
-| `PlayerDownScorePenalty` | float | `0.05` | CPlayerController::vf24 |  |  |
+| `playerCrouchFootstepsMultipler` | float | `2.0` | CPlayerController::FixedStep |  |  |
+| `PlayerDownScorePenalty` | float | `0.05` | CPlayerController::HandleState |  |  |
 | `PlayerExplosionVoxMinInterval` | int | `30000` |  |  |  |
-| `playerLastStandFootstepsMultipler` | float | `0.0` |  |  |  |
+| `playerLastStandFootstepsMultipler` | float | `0.0` | CPlayerController::FixedStep |  |  |
 | `PlayerLowHealthThreshold` | int | `15` |  |  |  |
-| `playerProneFootstepsMultipler` | float | `0.0` |  |  |  |
+| `playerMoveSpeedDamp` | float | `300.0` | CPlayerController::FixedStep |  |  |
+| `playerNormalFootstepsMultipler` | float | `1.0` | CPlayerController::FixedStep |  |  |
+| `playerProneFootstepsMultipler` | float | `0.0` | CPlayerController::FixedStep |  |  |
 | `PlayerQuickReviveTime` | int | `2500` |  |  |  |
 | `PlayerReviveMaxDist` | float | `300.0` |  |  |  |
 | `PlayerReviveTime` | int | `10000` |  |  |  |
-| `playerSprintFootstepsMultipler` | float | `0.5` |  |  |  |
-| `PlayerVoxWaterDelay` | int | `3000` |  |  |  |
-| `ProneSpeed` | float | `0.3` | CPlayerController::vf23 |  |  |
+| `playerSprintFootstepsMultipler` | float | `0.5` | CPlayerController::FixedStep |  |  |
+| `PlayerVoxWaterDelay` | int | `3000` | CPlayerController::FixedStep |  |  |
+| `ProneSpeed` | float | `0.3` | CPlayerController::OnEvent |  |  |
 | `RemotePlayerLastStandBackAngle` | floatangle | `135.0f` |  |  |  |
 | `RemotePlayerLastStandFrontAngle` | floatangle | `45.0f` |  |  |  |
-| `RenderFromPlayer` | bool | `false` | CGameStateIngame::vf6 |  |  |
+| `RenderFromPlayer` | bool | `false` | CGameStateIngame::Render |  |  |
 | `ReviveImmunityTime` | int | `500` |  |  |  |
 | `ReviveIndicatorAngle` | float | `0.5` |  |  |  |
 | `ReviveIndicatorEndCol` | intarray | `{255,0,0,255}` |  |  |  |
 | `ReviveIndicatorHeight` | float | `150.0` |  |  |  |
 | `ReviveIndicatorMinScale` | float | `0.5` |  |  |  |
 | `ReviveIndicatorStartCol` | intarray | `{255,255,0,255}` |  |  |  |
-| `SprintAngle` | float | `0.5` | CPlayerController::vf23 |  |  |
+| `SprintAngle` | float | `0.5` | CPlayerController::OnEvent |  |  |
 | `SprintingCapacity` | float | `100.0` |  |  |  |
 | `SprintingRatePerSec` | float | `30.0` |  |  |  |
 | `SprintingRecoveryRatePerSec` | float | `100.0` |  |  |  |
 | `SprintingThreshold` | float | `80.0` |  |  |  |
-| `SprintSpeed` | float | `3.0` | CPlayerController::vf23 |  |  |
+| `SprintSpeed` | float | `3.0` | CPlayerController::OnEvent |  |  |
 | `StartSinglePlayerGame` | bool | `true` | CFrontendStateSinglePlayer::CFrontendStateSinglePlayer |  |  |
-| `TrapNonDamagePeriodMS` | int | `1000` | CPlayerController::vf23 |  |  |
+| `TrapNonDamagePeriodMS` | int | `1000` | CPlayerController::OnEvent |  |  |
 | `UnlimitedHealth` | bool | `false` |  | Player takes no damage. | works |
 | `UnlimitedScore` | bool | `false` | CScoreManager::CScoreManager | Purchases cost nothing: CScoreManager skips SUBJECT_CHARGE_POINTS and SUBJECT_POINTS_PENALTY. Registered with the description "Unlimited points to buy stuff". | works |
-| `UnlimitedStamina` | bool | `false` | CPlayerController::vf23 | Sprint never runs out. | works |
-| `UnlimitedWaterMove` | bool | `false` |  |  |  |
-| `WalkFraction` | float | `0.9` | CPlayerController::vf23 |  |  |
-| `WalkSpeed` | float | `1.0` | CPlayerController::vf23 |  |  |
+| `UnlimitedStamina` | bool | `false` | CPlayerController::OnEvent | Sprint never runs out. | works |
+| `UnlimitedWaterMove` | bool | `false` | CPlayerController::FixedStep |  |  |
+| `WalkFraction` | float | `0.9` | CPlayerController::OnEvent |  |  |
+| `WalkSpeed` | float | `1.0` | CPlayerController::OnEvent |  |  |
 
 ### Rounds, spawning, score and pickups
 
 | Variable | Type | Default | Used by | Notes | Status |
 | --- | --- | --- | --- | --- | --- |
 | `baseSpawnDelay` | intarray | `{500,2000}` |  |  |  |
-| `CarpenterScoreTime` | int | `1000` |  |  |  |
+| `CarpenterScoreTime` | int | `1000` | CPickupManager::CPickupManager |  |  |
 | `CentrifugeWavesStart` | int | `2` |  |  |  |
-| `DefaultPowerSwitchName` | string | `PowerSwitch` |  |  |  |
-| `DefaultSpawnedRocketName` | string | `SpawnedRocket` | CRocketLauncher::vf23 |  |  |
-| `GeorgeRomero` | bool | `true` | CWaveManager::vf2 |  |  |
+| `DeathMachineTime` | int | `30000` | CPickupManager::CPickupManager |  |  |
+| `DefaultPowerSwitchName` | string | `PowerSwitch` | Level_Load |  |  |
+| `DefaultSpawnedRocketName` | string | `SpawnedRocket` | CRocketLauncher::OnEvent |  |  |
+| `DoublePointsTime` | int | `30000` | CPickupManager::CPickupManager |  |  |
+| `FastShootingFactor` | float | `1.333333333333333` | CPerkManager::CPerkManager |  |  |
+| `FireSaleEnableTime` | int | `3000` | CPickupManager::CPickupManager |  |  |
+| `FireSaleTime` | int | `20000` | CPickupManager::CPickupManager |  |  |
+| `GeorgeRomero` | bool | `true` | CWaveManager::Update |  |  |
+| `InstaKillTime` | int | `30000` | CPickupManager::CPickupManager |  |  |
 | `LighthouseFaceInterpTime` | int | `500` | CLighthouse::vf24 |  |  |
 | `LighthouseSpinSpeed` | float | `30.0` | CLighthouse::vf24 |  |  |
 | `LighthouseSpinTime` | int | `20000` | CLighthouse::vf24 |  |  |
-| `MaxPickupsPerWave` | int | `4` |  |  |  |
+| `MaxPickupsPerWave` | int | `4` | CPickupManager::CPickupManager |  |  |
 | `midroundPickups` | floatarray | `{1,25}` |  |  |  |
 | `midroundPickupTime` | intarray | `{1000,2000}` |  |  |  |
 | `minSpawnDelay` | intarray | `{0,500}` |  |  |  |
-| `PickupDropOnDeathProbability` | int | `2` |  |  |  |
-| `PickupKillThreshold` | int | `0` |  |  |  |
+| `PickupDropOnDeathProbability` | int | `2` | CPickupManager::CPickupManager |  |  |
+| `PickupKillThreshold` | int | `0` | CPickupManager::CPickupManager |  |  |
 | `PickupOverrideType` | int | `-1` |  |  |  |
-| `PickupPointsThreshold` | int | `1000` |  |  |  |
+| `PickupPointsThreshold` | int | `1000` | CPickupManager::CPickupManager |  |  |
 | `ProbabilityOfSpawningEachPickup` | intarray | `{10,10,10,10,10,10,10,10,0}` | CPickupManager::CPickupManager |  |  |
 | `RateMeWaveNos` | intarray | `{5,10,15,20}` |  |  |  |
-| `ScoreConfigName` | string | `score_table` |  |  |  |
+| `ScoreConfigName` | string | `score_table` | CScoreManager::GetConfig |  |  |
 | `spawnDelayRoundDecrement` | int | `25` |  |  |  |
-| `SpawnMaxDistance` | float | `5000.0` |  |  |  |
+| `SpawnMaxDistance` | float | `5000.0` | SpawnManager_PickPoint |  |  |
 | `StartingScore` | int | *lookup only* | CScoreManager::GetScore | Points each player starts a match with (read by CScoreManager::GetScore / AddScore when a player's score is created). Never registered by the game; register it first (Developer mod: cvar StartingScore 5000). | works |
-| `TeleportDurationMS` | int | `1000` | CTeleportManager::vf2 |  |  |
-| `TeleportFadeMS` | int | `100` | CTeleportManager::vf2 |  |  |
-| `TeleportWormholeTimeMS` | int | `2000` |  |  |  |
+| `TeleportDurationMS` | int | `1000` | CTeleportManager::OnEvent |  |  |
+| `TeleportFadeMS` | int | `100` | CTeleportManager::OnEvent |  |  |
+| `TeleportWormholeTimeMS` | int | `2000` | CTeleportManager::CTeleportManager |  |  |
 
 ### Audio
 
 | Variable | Type | Default | Used by | Notes | Status |
 | --- | --- | --- | --- | --- | --- |
 | `DefaultSoundSpecMaxPolyphony` | int | `3` | CIwSoundSpec::CIwSoundSpec |  |  |
-| `GameResultsFXVolume` | float | `0.3` | CIngameStateResults::vf2 |  |  |
-| `masterVolume` | int | `5` |  |  |  |
-| `musicEnabled` | int | `1` |  | 1 plays music, 0 mutes it. |  |
-| `soundEnabled` | int | `1` |  | 1 plays sound effects, 0 mutes them. |  |
+| `GameResultsFXVolume` | float | `0.3` | CIngameStateResults::Enter |  |  |
+| `masterVolume` | int | `5` | CIwGame::CIwGame |  |  |
+| `MaxIntervalMul` | fixed | `1.5` | CAmbienceManager::CAmbienceManager |  |  |
+| `MinIntervalMul` | fixed | `0.0` | CAmbienceManager::CAmbienceManager |  |  |
+| `musicEnabled` | int | `1` | CIwGame::CIwGame | 1 plays music, 0 mutes it. |  |
+| `soundEnabled` | int | `1` | CIwGame::CIwGame | 1 plays sound effects, 0 mutes them. |  |
 | `UseFastIwVolumesIntersection` | bool | `true` |  |  |  |
 
 ### Graphics and effects
@@ -1038,9 +1053,9 @@ Available: unknown owner.
 | `DisableAllWeather` | bool | `false` |  |  |  |
 | `DisableFogExtraFarPlane` | bool | `false` |  |  |  |
 | `DisableImpactVFX` | bool | `false` |  |  |  |
-| `FogAltTransitionTime` | int | `5000` | CVFXManager::vf2 |  |  |
-| `FogBaseZRange` | int | `12256` |  |  |  |
-| `FogLevelsMax` | int | `3` |  |  |  |
+| `FogAltTransitionTime` | int | `5000` | CVFXManager::OnEvent |  |  |
+| `FogBaseZRange` | int | `12256` | CIwFogManager::CIwFogManager |  |  |
+| `FogLevelsMax` | int | `3` | Level_Load |  |  |
 | `FogOverrideColour` | intarray | `{-1,-1,-1}` | CIwFogManager::CIwFogManager |  |  |
 | `FogOverrideFarPlane` | float | `-0.001` |  |  |  |
 | `FogOverrideLength` | float | `0.1` |  |  |  |
@@ -1059,9 +1074,9 @@ Available: unknown owner.
 | `LODOverrideQualitySetting` | float | `-1.0` | CIsLODControllerDistance::vf23 |  |  |
 | `LODQuotaDeathQualityModifier` | float | `3.0` |  |  |  |
 | `LODQuotaFrustrumRadiusBuffer` | float | `70.0f` | CIsLODControllerQuotaManager::FixedStep |  |  |
-| `LODQuotaLevelsMax` | int | `3` | CIsLODControllerQuotaManager::vf2 |  |  |
-| `LODQuotaQualityReducer` | int | `2` | CIsLODControllerQuotaManager::vf2 |  |  |
-| `MaterialFrameTime` | int | `60` | CFullscreenFXManager::vf2 |  |  |
+| `LODQuotaLevelsMax` | int | `3` | CIsLODControllerQuotaManager::FixedStep |  |  |
+| `LODQuotaQualityReducer` | int | `2` | CIsLODControllerQuotaManager::FixedStep |  |  |
+| `MaterialFrameTime` | int | `60` | CFullscreenFXManager::OnEvent |  |  |
 | `NumSubOTRenderableSlots` | float | `0.66666` |  |  |  |
 | `RenderOccluder` | bool | `false` |  |  |  |
 | `RenderPortals` | bool | `false` |  |  |  |
@@ -1071,7 +1086,7 @@ Available: unknown owner.
 | `SnowDetectRaycastLength` | float | `1000` |  |  |  |
 | `SnowObeyOverride` | bool | `false` |  |  |  |
 | `SnowOverrideEnabled` | bool | `false` |  |  |  |
-| `StartMaterialFadeTime` | int | `500` | CFullscreenFXManager::vf2 |  |  |
+| `StartMaterialFadeTime` | int | `500` | CFullscreenFXManager::OnEvent |  |  |
 | `VFXPosZOffset` | float | `2` |  |  |  |
 | `WaterLayer0TimeMult` | float | `-0.05` |  |  |  |
 | `WaterLayer0XScale` | float | `1.0` |  |  |  |
@@ -1089,26 +1104,26 @@ Available: unknown owner.
 | `EnableVideo` | bool | `true` |  |  |  |
 | `FreeCODPointsOnBuildUpdate` | int | `5000` | CGameStore::vf7 |  |  |
 | `FreeCODPointsOnNewDay` | int | `100` | CGameStore::vf7 |  |  |
-| `GameOverWaitingTime` | int | `5000` | CIngameStateResults::vf2 |  |  |
+| `GameOverWaitingTime` | int | `5000` | CIngameStateResults::Enter |  |  |
 | `HUDMessagingFont` | string | `CCAdamKubertItalic_10pt` |  |  |  |
 | `HUDMessagingXY` | intarray | `{ 100, 5 }` |  |  |  |
-| `HUDPointsMaxCount` | int | `5` |  |  |  |
-| `HUDPointsPosX` | int | `25` |  |  |  |
-| `HUDPointsPosY` | int | `50` |  |  |  |
-| `HUDPointsRandomDisplacementX` | int | `20` |  |  |  |
-| `HUDPointsRandomDisplacementY` | int | `10` |  |  |  |
+| `HUDPointsMaxCount` | int | `5` | CHUDManager::CHUDManager |  |  |
+| `HUDPointsPosX` | int | `25` | CHUDManager::SetScore |  |  |
+| `HUDPointsPosY` | int | `50` | CHUDManager::SetScore |  |  |
+| `HUDPointsRandomDisplacementX` | int | `20` | CHUDManager::SetScore |  |  |
+| `HUDPointsRandomDisplacementY` | int | `10` | CHUDManager::SetScore |  |  |
 | `MessageFadeTime` | int | `500` |  |  |  |
 | `MessageQueueMaxSize` | int | `7` |  |  |  |
 | `MessageTime` | int | `4000` |  |  |  |
 | `OnlineRetrievingTimeout` | int | `30000` | CFrontendStateMTXStore::vf10 |  |  |
-| `RateMeDelayTimer` | int | `2000` | CIngameStateResults::vf2 |  |  |
+| `RateMeDelayTimer` | int | `2000` | CIngameStateResults::Enter |  |  |
 | `SaveOnPause` | bool | `true` | CIngameStatePaused::Enter | Saves the game when the pause menu opens. |  |
 | `SaveOnSuspend` | bool | `true` | CIngameStatePlaying::OnEvent | Saves the game when the app is suspended. |  |
 | `UICallReleaseTime` | int | `250` |  |  |  |
 | `UIDoubleClickTime` | int | `250` |  |  |  |
 | `VideoResolution` | intarray | `{480,270}` |  |  |  |
 | `VideoResolutionHires` | intarray | `{960,540}` |  |  |  |
-| `XPBarSpeed` | float | `0.2f` | CIngameStateResults::vf2 |  |  |
+| `XPBarSpeed` | float | `0.2f` | CIngameStateResults::Enter |  |  |
 
 ### Saves
 
@@ -1121,13 +1136,12 @@ Available: unknown owner.
 | Variable | Type | Default | Used by | Notes | Status |
 | --- | --- | --- | --- | --- | --- |
 | `ADSDeltaYThreshold` | float | `0.05` |  |  |  |
-| `ADSZoomInSpeed` | float | `80.0` |  |  |  |
-| `ADSZoomOutSpeed` | float | `80.0` |  |  |  |
-| `analoguePadMovingResponse` | graph | `0,0;4096,4096;` |  |  |  |
+| `ADSZoomInSpeed` | float | `80.0` | CWeaponManager::UpdateFov |  |  |
+| `ADSZoomOutSpeed` | float | `80.0` | CWeaponManager::UpdateFov |  |  |
 | `AscensionMaxAttackDistPolys` | int | `4` |  |  |  |
-| `BIHMaxDepth` | int | `20` |  |  |  |
-| `BIHMaxSingled` | int | `6` |  |  |  |
-| `BOGravity` | float | `-981.0` | CBodyHandler::vf22 |  |  |
+| `BIHMaxDepth` | int | `20` | Collision_BuildBIH |  |  |
+| `BIHMaxSingled` | int | `6` | Collision_BuildBIH |  |  |
+| `BOGravity` | float | `-981.0` | CBodyHandler::Init |  |  |
 | `BOToolTipCount` | int | `58` |  |  |  |
 | `ConnControlAttempts` | int | `15` |  |  |  |
 | `ConnControlMsgTimeMs` | int | `1000` |  |  |  |
@@ -1136,21 +1150,16 @@ Available: unknown owner.
 | `ConstrainHeightExtendsZ` | float | `0.1` |  |  |  |
 | `ConstrainHeightThreshold` | float | `50.0` |  |  |  |
 | `crazyFudgeSpeed` | float | `6.0` |  |  |  |
-| `DeathMachineTime` | int | `30000` |  |  |  |
 | `DetailDistance` | int | `1300` |  |  |  |
-| `DoublePointsTime` | int | `30000` |  |  |  |
 | `DoubleTapCancelThreshold` | int | `100` |  |  |  |
 | `DropRaycastDistance` | float | `10000` |  |  |  |
 | `ExplosionHeightOffset` | float | `75.0f` |  |  |  |
-| `ExplosionRayCast` | bool | `true` |  |  |  |
-| `failsafeMeleeBloodSplatDisplacement` | float | `20.0` |  |  |  |
+| `ExplosionRayCast` | bool | `true` | Explosion_DamageEntity |  |  |
+| `failsafeMeleeBloodSplatDisplacement` | float | `20.0` | CWeaponManager::MeleeAttack |  |  |
 | `FallHeightFailSafe` | float | `-1000.0` |  |  |  |
 | `FallRaycastDistance` | float | `5000` |  |  |  |
-| `FastShootingFactor` | float | `1.333333333333333` |  |  |  |
-| `FireSaleEnableTime` | int | `3000` |  |  |  |
-| `FireSaleTime` | int | `20000` |  |  |  |
-| `flingerGravity` | float | `-981.0f` | CFlinger::vf23 |  |  |
-| `flingerTime` | float | `2.4f` | CFlinger::vf23 |  |  |
+| `flingerGravity` | float | `-981.0f` | CFlinger::OnEvent |  |  |
+| `flingerTime` | float | `2.4f` | CFlinger::OnEvent |  |  |
 | `ForceBaddiesPositionSynchRandTimeoutMs` | int | `1500` | CBodyHandler::vf23 |  |  |
 | `ForceBaddiesPositionSynchTimeoutMs` | int | `3000` | CBodyHandler::vf23 |  |  |
 | `ForceGoodiePositionSynchTimeoutMs` | int | `2000` |  |  |  |
@@ -1158,32 +1167,25 @@ Available: unknown owner.
 | `HeadBobScale` | float | `3.0` |  |  |  |
 | `HeadBobSpeedMult` | float | `10.0` |  |  |  |
 | `healthIncrease` | int | `3` |  |  |  |
-| `InstaKillTime` | int | `30000` |  |  |  |
 | `IsASMNumReservedTriggers` | int | `32` |  |  |  |
 | `IsDirectionSmoothingSpeed` | int | `24570` |  |  |  |
 | `JumpCheckTimer` | int | `200` |  |  |  |
-| `LazarusTime` | int | `15000` |  |  |  |
 | `maxDyingEntities` | int | *lookup only* | CIwWorld::CIwWorld |  |  |
-| `MaxIntervalMul` | fixed | `1.5` |  |  |  |
 | `MinigunBarrelDeceleration` | int | `200` |  |  |  |
-| `MinIntervalMul` | fixed | `0.0` |  |  |  |
-| `moveVecMinimumSquaredLength` | float | `0.005` |  |  |  |
-| `NoExplosions` | bool | `false` | CExplosion::vf23 |  |  |
+| `NoExplosions` | bool | `false` | CExplosion::OnEvent |  |  |
 | `NotableEntAngle` | float | `90.0` |  |  |  |
 | `NotableEntFilterDistance` | float | `700.0` |  |  |  |
 | `numGasSmokes` | int | `8` |  |  |  |
 | `OnlineIsHostNotClient` | bool | `true` |  |  |  |
 | `OnlineUseGameCenterMM` | bool | `true` |  |  |  |
 | `OverrideClimbTriggerVal` | int | `0` |  |  |  |
-| `OwnExplosionDamageModifier` | float | `50.0f` |  |  |  |
+| `OwnExplosionDamageModifier` | float | `50.0f` | Explosion_DamageEntity |  |  |
 | `PauseInTime` | int | `4000` |  |  |  |
 | `PauseInTimeCOTD` | int | `200` |  |  |  |
 | `PauseOutTime` | int | `8000` |  |  |  |
 | `PauseOutTimeCOTD` | int | `3000` |  |  |  |
-| `playerMoveSpeedDamp` | float | `300.0` |  |  |  |
-| `playerNormalFootstepsMultipler` | float | `1.0` |  |  |  |
 | `POIGridSize` | int | `300` |  |  |  |
-| `RayCastTestEnabled` | bool | `true` | CGameStateIngame::vf6 |  |  |
+| `RayCastTestEnabled` | bool | `true` | CGameStateIngame::Render |  |  |
 | `RocketMaxHeight` | float | `25000.0` |  |  |  |
 | `RocketSwitchHeight` | float | `5000.0` |  |  |  |
 | `romeroHitReactionDelay` | int | `4000` |  |  |  |
@@ -1192,5 +1194,3 @@ Available: unknown owner.
 | `TapOffset3GS` | int | `50` |  |  |  |
 | `TapOffsetIpad` | int | `50` |  |  |  |
 | `TimerSync` | int | `10000` |  |  |  |
-| `UDPPacketCorruptionRate` | int | `0` |  |  |  |
-| `UDPPacketLossRate` | int | `0` |  |  |  |

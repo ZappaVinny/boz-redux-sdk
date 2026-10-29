@@ -76,7 +76,7 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_DEACTIVATING_CC` | CMysteryBox | CLevelManager, CMysteryBox, CPackAPunch |  |
 | `SUBJECT_DEATH_BY_PENETRATIVE_WEAPON` | CAIControllerZombie | CAIControllerZombie |  |
 | `SUBJECT_DEVICE_BACK` | CGameStateFrontEnd | CFlashMenuState |  |
-| `SUBJECT_DIED` |  | CAIControllerHellhound, CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CDamageActionSpawn | A CHealth fell below 1 (CHealth::CheckDeath, host). b: the last attacker (m_LastDamagerEnt). |
+| `SUBJECT_DIED` | CHealth | CAIControllerHellhound, CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CDamageActionSpawn | A CHealth fell below 1 (CHealth::CheckDeath, host). b: the last attacker (m_LastDamagerEnt). |
 | `SUBJECT_DIRTY_APES` |  | CPlayerController, CWaveManager |  |
 | `SUBJECT_DIRTY_APES_INTERNAL` | CWaveMonkey | CWaveManager |  |
 | `SUBJECT_DISABLE_COLLISION` |  | CDoor, CIsCollisionObject, CPerk |  |
@@ -94,7 +94,7 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_ENTER_HELP_SCREEN` |  |  |  |
 | `SUBJECT_ENTER_MAP_VOTE` |  |  |  |
 | `SUBJECT_ENTITY_DIED` |  | CDOAIControllerBossSilverback, CDOBuffalo, CDODamageActionSpawn, CDOHordeManager, CDOPlayerController |  |
-| `SUBJECT_EXIT_COLLISION` |  | CCentrifuge, CDOPlayerController, CLunarLander, CProjectileEntity, CSnowTrigger |  |
+| `SUBJECT_EXIT_COLLISION` | CIsCollisionObject | CCentrifuge, CDOPlayerController, CLunarLander, CProjectileEntity, CSnowTrigger |  |
 | `SUBJECT_EXIT_RESULTS` |  | CDOIngameStateResult |  |
 | `SUBJECT_EXPLODE` | CAIControllerZombie, CProjectileEntity | CAIControllerZombie, CBodyDamageController, CExplosion, CProjectileEntity |  |
 | `SUBJECT_EXPLODED` |  | CAIControllerMonkey |  |
@@ -102,11 +102,11 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_FINISH_INTERPOLATION` |  | CShortcut |  |
 | `SUBJECT_FLING_ENTITY` |  | CAIControllerRomero, CAIControllerZombie, CBodyHandler, CFlinger, CPlayerController |  |
 | `SUBJECT_FORCE_ZOMBIE_DEATH` |  | CAIControllerHellhound, CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie |  |
-| `SUBJECT_FREEZE_ME` |  | CRemotePlayer |  |
+| `SUBJECT_FREEZE_ME` | CPlayerController | CRemotePlayer |  |
 | `SUBJECT_GROUND_POUND_FX` | CAIControllerMonkey | CAIControllerMonkey |  |
-| `SUBJECT_HEALTH_DECREASE` |  | CHealth | CHealth::Damage sends it to the damaged health component; its OnEvent applies the damage. |
+| `SUBJECT_HEALTH_DECREASE` | CHealth | CHealth | CHealth::Damage sends it to the damaged health component; its OnEvent applies the damage. |
 | `SUBJECT_HEALTH_DECREASED` | CHealth | CAIControllerRomero |  |
-| `SUBJECT_HEALTH_MODIFY` |  | CHealth, CPlayerController | CHealth::SetHealth: a: the new health (whole number), b: the source. |
+| `SUBJECT_HEALTH_MODIFY` | CHealth | CHealth, CPlayerController | CHealth::SetHealth: a: the new health (whole number), b: the source. |
 | `SUBJECT_HEALTH_SYNC_REQUEST` |  | CHealth |  |
 | `SUBJECT_HEALTH_SYNC_RESPONSE` | CHealth | CHealth |  |
 | `SUBJECT_HIDE_MODAL_POPUP` |  | CFlashMenuState |  |
@@ -121,7 +121,7 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_LEVEL_VOTED` |  |  |  |
 | `SUBJECT_LIGHTNING_BOLT_FINISH` |  | CPickupManager |  |
 | `SUBJECT_LIGHTNING_STRIKE` |  |  |  |
-| `SUBJECT_LOAD` |  | CAnimatedScenery, CBarricade, CCentrifuge, CDOAIController, CDOAIControllerSilverback | Every system reads its state back from the save. |
+| `SUBJECT_LOAD` | CSaveManager | CAnimatedScenery, CBarricade, CCentrifuge, CDOAIController, CDOAIControllerSilverback | Every system reads its state back from the save. |
 | `SUBJECT_LOD_QUOTA_REGISTER` | CIsLODControllerQuota | CIsLODControllerQuota, CIsLODControllerQuotaManager |  |
 | `SUBJECT_LOD_QUOTA_UNREGISTER` | CIsLODControllerQuota | CIsLODControllerQuota, CIsLODControllerQuotaManager |  |
 | `SUBJECT_LOSE_PERK` | CPerk | CPerk, CPerkManager |  |
@@ -134,7 +134,7 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_MAIN_MENU_ACHIEVEMENT` |  |  |  |
 | `SUBJECT_MAIN_MENU_LEADERBOARD` |  |  |  |
 | `SUBJECT_MB_ADD_WEAPON` |  | CMysteryBox |  |
-| `SUBJECT_MB_CHOOSE_WEAPON` |  | CMysteryBox |  |
+| `SUBJECT_MB_CHOOSE_WEAPON` | CMysteryBox | CMysteryBox |  |
 | `SUBJECT_MB_DESPAWN` |  | CMysteryBox |  |
 | `SUBJECT_MB_DO_SYNC` |  | CMysteryBox |  |
 | `SUBJECT_MB_FIRESALE_COMPLETE` |  | CMysteryBox |  |
@@ -187,18 +187,18 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_ON_TRAP_IDLE` |  | CTrapSwitch |  |
 | `SUBJECT_ON_TURRET_ACTIVATE` | CTurret | CTurret |  |
 | `SUBJECT_OPEN_LINK` |  |  |  |
-| `SUBJECT_OPTIONS_AUTO_AIM` |  |  |  |
+| `SUBJECT_OPTIONS_AUTO_AIM` |  | CFrontendStateOptions |  |
 | `SUBJECT_OPTIONS_BRIGHTNESS` |  |  |  |
-| `SUBJECT_OPTIONS_CONTROL_METHOD` |  |  |  |
-| `SUBJECT_OPTIONS_DEFAULT_SETTINGS` |  |  |  |
-| `SUBJECT_OPTIONS_DETAIL_LEVEL` |  |  |  |
-| `SUBJECT_OPTIONS_INVERT_Y_AXIS` |  |  |  |
-| `SUBJECT_OPTIONS_LEFTY_CONTROLS` |  |  |  |
-| `SUBJECT_OPTIONS_SENSITIVITY_X_AXIS` |  |  |  |
-| `SUBJECT_OPTIONS_SENSITIVITY_Y_AXIS` |  |  |  |
-| `SUBJECT_OPTIONS_SFX` |  |  |  |
-| `SUBJECT_OPTIONS_USER_RADIO` |  |  |  |
-| `SUBJECT_OPTIONS_VOLUME` |  |  |  |
+| `SUBJECT_OPTIONS_CONTROL_METHOD` |  | CFrontendStateOptions |  |
+| `SUBJECT_OPTIONS_DEFAULT_SETTINGS` |  | CFrontendStateOptions |  |
+| `SUBJECT_OPTIONS_DETAIL_LEVEL` |  | CFrontendStateOptions |  |
+| `SUBJECT_OPTIONS_INVERT_Y_AXIS` |  | CFrontendStateOptions |  |
+| `SUBJECT_OPTIONS_LEFTY_CONTROLS` |  | CFrontendStateOptions |  |
+| `SUBJECT_OPTIONS_SENSITIVITY_X_AXIS` |  | CFrontendStateOptions |  |
+| `SUBJECT_OPTIONS_SENSITIVITY_Y_AXIS` |  | CFrontendStateOptions |  |
+| `SUBJECT_OPTIONS_SFX` |  | CFrontendStateOptions |  |
+| `SUBJECT_OPTIONS_USER_RADIO` |  | CFrontendStateOptions |  |
+| `SUBJECT_OPTIONS_VOLUME` |  | CFrontendStateOptions |  |
 | `SUBJECT_PACKAPUNCH_DEACTIVATING` |  |  |  |
 | `SUBJECT_PACKAPUNCH_DESPAWN` |  | CPackAPunch |  |
 | `SUBJECT_PACKAPUNCH_DO_SYNC` |  | CPackAPunch |  |
@@ -229,9 +229,9 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_POI_INTERACT` |  |  |  |
 | `SUBJECT_POI_TRIGGER` |  | CIngameStatePlaying | A point of interest came into reach (the use prompt: CIngameStatePlaying::UpdatePoiPrompt). |
 | `SUBJECT_POPUP_CODPOINTS_HELP` |  | CFlashMenuState |  |
-| `SUBJECT_POPUP_MODAL` |  |  |  |
+| `SUBJECT_POPUP_MODAL` |  | CFrontendStateOptions |  |
 | `SUBJECT_POWERSWITCH_SYNCH` | CPowerSwitch | CPowerSwitch |  |
-| `SUBJECT_PRIVACY_POLICY` |  |  |  |
+| `SUBJECT_PRIVACY_POLICY` |  | CFrontendStateOptions |  |
 | `SUBJECT_PROCESS_CAMERA_VIEW_MATRIX` |  |  |  |
 | `SUBJECT_PROFILE_GC_LOGIN` |  |  |  |
 | `SUBJECT_PROJECTER_START_SEQUENCE` |  | CProjectorScreen, CRocketLauncher, CTVScreen |  |
@@ -250,7 +250,7 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_REQUEST_LOCK` |  | CLock |  |
 | `SUBJECT_REQUEST_SYNC` |  |  |  |
 | `SUBJECT_REQUEST_TARGET_CHANGE` | CDOAIController | CDOAIController |  |
-| `SUBJECT_RESPAWN` |  | CDOPlayerController |  |
+| `SUBJECT_RESPAWN` | CDOPlayerController | CDOPlayerController |  |
 | `SUBJECT_RESPAWN_DO_ZOMBIE` |  | CDOSpawnPointZombie |  |
 | `SUBJECT_RESPAWN_ENTITY` |  | CDOSpawnPointBase |  |
 | `SUBJECT_RESTART_LEVEL` |  | CPickupManager, CProjectileManager, CScoreManager, CSpawnManager, CTeleportManager | The level restarts: managers reset (rounds to 0, power off). |
@@ -274,7 +274,7 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_ROMERO_TRIGGER_ANIM` |  | CAIControllerRomero |  |
 | `SUBJECT_ROMERO_TRIGGER_GROUND_ATTACK` |  | CAIControllerRomero |  |
 | `SUBJECT_ROMERO_TRIGGER_SWIPE_ATTACK` |  | CAIControllerRomero |  |
-| `SUBJECT_SAVE` |  | CAnimatedScenery, CBarricade, CCentrifuge, CDOAIController, CDOAIControllerSilverback | Every system writes its state into the save (CSaveManager). |
+| `SUBJECT_SAVE` | CSaveManager | CAnimatedScenery, CBarricade, CCentrifuge, CDOAIController, CDOAIControllerSilverback | Every system writes its state into the save (CSaveManager). |
 | `SUBJECT_SENTRY_GUN_EXPIRED` | CDOSentryGunController |  |  |
 | `SUBJECT_SET_IN_MONKEY_BOMB_EFFECT_AREA` | CDOAIController | CDOAIController |  |
 | `SUBJECT_SET_IN_RAINBOW_RING` |  | CDOAIController |  |
@@ -338,7 +338,7 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_TELEPORT_PLAYER` |  | CTeleportManager |  |
 | `SUBJECT_TEMP_MOVEMENT_SLOW_DOWN` |  | CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CPlayerController, CRemotePlayer |  |
 | `SUBJECT_TERMINATE` | CProjectileEntity | CProjectileEntity | A projectile ends (a black hole closes: gersch_shuts). |
-| `SUBJECT_TERMS_OF_USE` |  |  |  |
+| `SUBJECT_TERMS_OF_USE` |  | CFrontendStateOptions |  |
 | `SUBJECT_TRANSFORM_UPDATED` |  |  | Engine: a transform moved (every frame for moving things; not in SubjectId_Register). |
 | `SUBJECT_TRANSITION_MENU` |  | CFlashMenuState |  |
 | `SUBJECT_TRANSITION_MENU_POPSTACK` |  | CFlashMenuState |  |
@@ -363,9 +363,9 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_WEAPON_EQUIPPED` |  | CMysteryBox, CWeaponChalkOutline |  |
 | `SUBJECT_WEAPON_HIT` |  | CAIControllerHellhound, CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CBodyDamageController | A bullet or knife hit an entity (Weapon_FireBullets, CWeaponManager::MeleeAttack: to the entity's CIsBroadcaster) with the body part. |
 | `SUBJECT_WEAPON_MELEE` |  | CRemotePlayer, CRemotePlayerWeapon |  |
-| `SUBJECT_WEAPON_RELOAD` |  | CRemotePlayer, CRemotePlayerWeapon |  |
-| `SUBJECT_WEAPON_SET` |  | CRemotePlayer, CRemotePlayerWeapon |  |
-| `SUBJECT_WEAPON_SHOOT` |  | CAITutor, CRemotePlayer, CRemotePlayerWeapon |  |
+| `SUBJECT_WEAPON_RELOAD` | CWeaponManager | CRemotePlayer, CRemotePlayerWeapon |  |
+| `SUBJECT_WEAPON_SET` | CWeaponManager | CRemotePlayer, CRemotePlayerWeapon |  |
+| `SUBJECT_WEAPON_SHOOT` | CPlayerController | CAITutor, CRemotePlayer, CRemotePlayerWeapon |  |
 | `SUBJECT_WEAPON_SHOOT_STOP` |  | CRemotePlayerWeapon |  |
 | `SUBJECT_WEAPON_SPAWN_PROJECTILE` |  | CRemotePlayerWeapon, CWeaponManager |  |
 | `SUBJECT_WEAPON_UNEQUIPPED` |  | CMysteryBox, CWeaponChalkOutline |  |
@@ -373,7 +373,7 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_ZOMBIE_CHANGE_TARGET` |  | CAIControllerHellhound, CAIControllerMonkey, CAIControllerZombie |  |
 | `SUBJECT_ZOMBIE_CHANGE_TARGET_ACK` |  | CAIControllerZombie |  |
 | `SUBJECT_ZOMBIE_CHANGE_TARGET_SYNACK` |  | CAIControllerZombie |  |
-| `SUBJECT_ZOMBIE_DEATH` |  | CAIControllerHellhound, CAIControllerMonkey, CAIControllerZombie, CPickupManager, CPlayerController | A zombie died (from the level manager). b: the zombie's name hash (CIsEntityDB::FindEntity finds it while it lingers). Several subjects pass it on: once per subject. |
+| `SUBJECT_ZOMBIE_DEATH` | CAIControllerZombie | CAIControllerHellhound, CAIControllerMonkey, CAIControllerZombie, CPickupManager, CPlayerController | A zombie died (from the level manager). b: the zombie's name hash (CIsEntityDB::FindEntity finds it while it lingers). Several subjects pass it on: once per subject. |
 | `SUBJECT_ZOMBIE_GASSY_DEATH` |  | CAIControllerZombie |  |
 | `SUBJECT_ZOMBIE_GERSCH_DEATH` | CAIControllerZombie | CAIControllerZombie |  |
 | `SUBJECT_ZOMBIE_ICE_SHATTER` | CAIControllerZombie | CAIControllerZombie |  |

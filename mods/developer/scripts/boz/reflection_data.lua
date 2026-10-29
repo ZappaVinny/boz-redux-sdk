@@ -182,7 +182,7 @@ return {
     ["CIsSceneGroupParams"] = {bases = {}, fields = {["m_nearPlane"] = {4, 4, "int"}, ["m_farPlane"] = {8, 4, "int"}, ["m_zdepthOfs"] = {12, 4, "int"}, ["m_groupId"] = {16, 2, "short"}, ["m_fog"] = {18, 1, "char"}, ["m_flush"] = {19, 1, "char"}, ["m_clearCBuffer"] = {20, 1, "char"}, ["m_clearZBuffer"] = {21, 1, "char"}}},
     ["CIsSceneGroupParamsRes"] = {bases = {{"CIsReflectedResource", 0}}, fields = {["m_params"] = {84, 24, "CIsSceneGroupParams"}}},
     ["CIsTimer"] = {bases = {}, fields = {}},
-    ["CIsTransform"] = {bases = {{"CIsComponent", 0}}, fields = {["m_worldTM"] = {56, 48, "CIwFMat"}, ["m_localRotation"] = {152, 16, "CIwFQuat"}, ["m_localPosition"] = {168, 12, "CIwFVec3"}, ["m_localTM"] = {192, 48, "CIwFMat"}, ["m_pivotTM"] = {240, 48, "CIwFMat"}}},
+    ["CIsTransform"] = {bases = {{"CIsComponent", 0}}, fields = {["m_worldTM"] = {56, 48, "CIwFMat"}, ["m_localRotation"] = {152, 16, "CIwFQuat"}, ["m_localTM"] = {192, 48, "CIwFMat"}, ["m_pivotTM"] = {240, 48, "CIwFMat"}}},
     ["CIwColour"] = {bases = {}, fields = {}},
     ["CIwFMat"] = {bases = {}, fields = {}},
     ["CIwFQuat"] = {bases = {}, fields = {}},
