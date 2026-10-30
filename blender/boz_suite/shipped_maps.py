@@ -70,7 +70,7 @@ def _launch_level(context, root: Path, level: str) -> str:
     runner = settings.run_mod or "developer"
     sdkhome.set_mod_setting(root, runner, "autostart_level", level)
     sdkhome.load_last(root, settings.mod_id)
-    sdkhome.start_detached(sdkhome.game_command(root), root, root / "boz-log.txt")
+    sdkhome.start_game(root)
     return f"{runner} starts {level}"
 
 

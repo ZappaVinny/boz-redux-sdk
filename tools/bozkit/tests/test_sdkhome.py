@@ -165,6 +165,23 @@ class SdkHomeTests(unittest.TestCase):
 
 
 
+class StartGameTests(unittest.TestCase):
+    def test_the_game_keeps_its_saves_in_the_client(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'codboz_s3e_loader').write_text('', encoding='utf-8')
+            (root / 'codboz_s3e_loader.exe').write_text('', encoding='utf-8')
+            calls = []
+            with mock.patch.object(sdkhome, 'start_detached',
+                                   lambda command, cwd, log=None, env=None: calls.append(env)), \
+                    mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop('BOZ_SAVES', None)
+                sdkhome.start_game(root)
+            self.assertEqual(calls[0]['HOME'], str(root / 'saves'))
+            self.assertTrue((root / 'saves').is_dir())
+
+
 class OpenPathTests(unittest.TestCase):
     def test_opening_never_waits(self):
         from unittest import mock

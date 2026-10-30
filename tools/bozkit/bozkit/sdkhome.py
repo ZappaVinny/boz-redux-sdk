@@ -389,6 +389,21 @@ def game_command(root: Path) -> list[str] | None:
     return None
 
 
+def start_game(root: Path) -> subprocess.Popen:
+    """Start the game the way the client's launcher does: HOME is <client>/saves, where the game
+    keeps saves and mod settings (Build & Run's level request among them); log in boz-log.txt."""
+    root = Path(root)
+    command = game_command(root)
+    if command is None:
+        raise FileNotFoundError(f'no game executable found in {root}')
+    saves = saves_dir(root)
+    saves.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env.setdefault('XDG_CACHE_HOME', str(Path.home() / '.cache'))
+    env['HOME'] = str(saves)
+    return start_detached(command, root, root / 'boz-log.txt', env)
+
+
 def start_detached(command: list[str], cwd: Path, log: Path | None = None,
                    env: dict | None = None) -> subprocess.Popen:
     output = open(log, 'w', encoding='utf-8', newline='\n') if log else subprocess.DEVNULL
@@ -438,9 +453,15 @@ def ensure_developer_mod(root: Path) -> Path | None:
     return target
 
 
+def saves_dir(root: Path) -> Path:
+    """Where the game keeps saves and mod settings: BOZ_SAVES, else <client>/saves (the game
+    finds it through HOME, which start_game sets as the client's launcher does)."""
+    return Path(os.environ.get('BOZ_SAVES') or Path(root) / 'saves')
+
+
 def set_mod_setting(root: Path, mod_id: str, key: str, value: str) -> None:
     """Set one string value in a mod's saved settings (saves/mods/<id>.cfg), keeping the rest."""
-    saves = Path(os.environ.get('BOZ_SAVES') or Path(root) / 'saves')
+    saves = saves_dir(root)
     path = saves / 'mods' / f'{mod_id}.cfg'
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = []
@@ -496,7 +517,7 @@ def run_in_game(project: sdk_project.Project, root: str | Path,
         set_mod_setting(root, project.mod.id, 'autostart_level', project.map_name)
         set_mod_setting(root, project.mod.id, 'autostart_vars', start_vars_text(start_vars))
         message = f'built {project.map_name}; the game starts it after the main menu'
-    start_detached(command, root, root / 'boz-log.txt')
+    start_game(root)
     return message
 
 
