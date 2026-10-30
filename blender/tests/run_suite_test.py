@@ -39,7 +39,8 @@ def main() -> int:
                        BOZ_CLIENT='', BOZ_TEST_LIBRARY='1' if home else '')
             result = subprocess.run([blender, '-b', '--app-template', 'boz_suite', '--python',
                                      str(Path(__file__).with_name('suite_headless.py'))],
-                                    env=env, capture_output=True, text=True, timeout=600)
+                                    env=env, capture_output=True, text=True, timeout=600,
+                                    encoding='utf-8', errors='replace')
         output = result.stdout + result.stderr
         if 'BOZ_SUITE_OK' not in output:
             print(f'{template}:\n{output}')

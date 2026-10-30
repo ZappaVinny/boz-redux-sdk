@@ -124,9 +124,10 @@ class Bundles(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             scripts = Path(temp)
             (scripts / 'main.lua').write_text('effects.projectile("device", p)\n'
-                                              f'effects.spawn("0x{iw_hash("moon_prop"):08x}", p)\nlog("hello")\n')
+                                              f'effects.spawn("0x{iw_hash("moon_prop"):08x}", p)\n'
+                                              'log("hello")\n', encoding='utf-8')
             (scripts / 'boz').mkdir()
-            (scripts / 'boz' / 'x.lua').write_text('"device_never"')
+            (scripts / 'boz' / 'x.lua').write_text('"device_never"', encoding='utf-8')
             self.assertEqual(bundle.script_names(scripts, reg), [iw_hash('device'), iw_hash('moon_prop')])
 
     def test_library_calls(self):
@@ -135,7 +136,7 @@ class Bundles(unittest.TestCase):
         reg = registry(Game())
         with tempfile.TemporaryDirectory() as temp, mock.patch.dict(bundle.LIBRARY_CALLS, {'spawn_prop': ['moon_prop']}):
             scripts = Path(temp)
-            (scripts / 'main.lua').write_text('zombies.spawn_prop(p)\n')
+            (scripts / 'main.lua').write_text('zombies.spawn_prop(p)\n', encoding='utf-8')
             self.assertEqual(bundle.script_names(scripts, reg), [iw_hash('moon_prop')])
 
 

@@ -30,7 +30,7 @@ def palette_dir() -> Path:
 
 def _stamp() -> dict | None:
     try:
-        source = json.loads((library.library_dir() / "stamp.json").read_text())
+        source = json.loads((library.library_dir() / "stamp.json").read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
     return {"palette": PALETTE_VERSION, "library": source}
@@ -41,7 +41,7 @@ def needs_build() -> bool:
     if stamp is None:
         return False      # no asset library yet: nothing to build from
     try:
-        return json.loads((palette_dir() / "stamp.json").read_text()) != stamp
+        return json.loads((palette_dir() / "stamp.json").read_text(encoding='utf-8')) != stamp
     except (OSError, ValueError):
         return True
 
@@ -83,7 +83,7 @@ def start_build() -> bool:
                str(here / "palette_build.py"), "--", str(bozkit_dir), str(library.library_dir()),
                str(palette_dir())]
     _build["process"] = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                         text=True)
+                                         text=True, encoding='utf-8', errors='replace')
     return True
 
 
@@ -103,7 +103,8 @@ def poll_build():
     output = process.stdout.read() if process.stdout else ""
     _build["process"] = None
     if "BOZ_PALETTE_OK" in output:
-        (palette_dir() / "stamp.json").write_text(json.dumps(_stamp(), indent=2) + "\n")
+        (palette_dir() / "stamp.json").write_text(json.dumps(_stamp(), indent=2) + "\n",
+                                                  encoding='utf-8', newline='\n')
         register_library()
         from . import link, prefab_library
         prefab_library.rebuild(link.project_root())

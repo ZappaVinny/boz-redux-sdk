@@ -22,5 +22,6 @@ cp "$here/tools/navmesh/build/boz-navmesh" "$here/tools/navmesh/build/boz-navmes
    "$stage/tools/navmesh/build/"
 mkdir -p "$stage/build"
 cp -a "$here/build/suite" "$stage/build/suite"
-(cd "$out" && zip -qr "$name.zip" "$name")
+python3 -c 'import shutil, sys; shutil.make_archive(sys.argv[1], "zip", sys.argv[2], sys.argv[3])' \
+  "$out/$name" "$out" "$name"
 echo "$out/$name.zip"

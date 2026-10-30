@@ -196,7 +196,7 @@ def main():
     with open(sys.argv[2], "wb") as f:
         f.write(elf)
     pointers = thumb_code_pointers(image)
-    with open(sys.argv[2] + ".code-pointers.txt", "w") as f:
+    with open(sys.argv[2] + ".code-pointers.txt", "w", encoding='utf-8', newline='\n') as f:
         f.write("".join("%08x\n" % address for address in pointers))
     print("%s: code 0x%08x-0x%08x, data to 0x%08x, %d imports at 0x%08x, %d import slots, "
           "%d internal pointers, %d Thumb functions behind pointers" % (

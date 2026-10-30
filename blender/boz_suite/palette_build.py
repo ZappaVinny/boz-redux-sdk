@@ -153,7 +153,8 @@ def main() -> None:
     lines = ["# Blender asset catalogs, written by the BOZ Redux editor", "VERSION 1", ""]
     for path, identifier in sorted(catalogs.items()):
         lines.append(f"{identifier}:{path}:{path.replace('/', '-')}")
-    (out_dir / "blender_assets.cats.txt").write_text("\n".join(lines) + "\n")
+    (out_dir / "blender_assets.cats.txt").write_text("\n".join(lines) + "\n", encoding='utf-8',
+                                                     newline='\n')
     bpy.ops.wm.save_as_mainfile(filepath=str(out_dir / "boz_game_assets.blend"), compress=True)
     print(f"BOZ_PALETTE_OK {count}")
 

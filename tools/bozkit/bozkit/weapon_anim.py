@@ -107,7 +107,7 @@ def save_state(source: Path, weapon: str, state: int, label: str, clips: dict, e
         if clip is not None:
             data[part] = _clip_json(clip)
     folder.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, separators=(',', ':')) + '\n', encoding='utf-8')
+    path.write_text(json.dumps(data, separators=(',', ':')) + '\n', encoding='utf-8', newline='\n')
 
 
 # Each part (arms, gun) of an animation has its own list of changes, sorted by frame:

@@ -27,48 +27,36 @@ wrong). The SDK asks for this folder the first time it starts.
 
 ### 2. The SDK
 
-The SDK needs Python 3.11 or newer and Git.
+Download the SDK from the [SDK releases](https://github.com/ZappaVinny/boz-redux-sdk/releases)
+and unzip it anywhere.
 
-```bash
-git clone --recurse-submodules https://github.com/ZappaVinny/boz-redux-sdk.git
-cd boz-redux-sdk
-python3 -m pip install -e '.[desktop]'
-```
+- **Windows:** run `boz-sdk.exe`.
+- **Linux:** the SDK needs Python 3.11 or newer. In the unzipped folder run
+  `python3 -m pip install -e '.[desktop]'` once, then start it with `./boz-sdk` (or `boz-sdk`).
+  `boz-sdk --add-to-menu` adds it, with its icon, to your desktop's application menu.
 
-This installs two commands:
+The release already contains the map editor and the navmesh helper (which rebuilds where
+players and zombies can walk after you change a map's walls or floors).
 
-- `boz-sdk` starts [the SDK app](#the-sdk-app): your projects, the asset library and the editor.
-- `bozkit` is the [command line](sdk-reference.md#bozkit-command-line): build, install and package projects,
-  and read or edit game files.
+The `bozkit` [command line](sdk-reference.md#bozkit-command-line) comes with a Python install
+(`pip install -e .` in the SDK folder): build, install and package projects, and read or edit
+game files.
 
-You can also run the app without installing, from the checkout: `./boz-sdk`. On Linux,
-`boz-sdk --add-to-menu` adds it, with its icon, to your desktop's application menu. Leave out
-`[desktop]` if you only want the command line.
+### 3. Blender (maps only)
 
-### 3. The map editor (maps only)
+The map editor runs in Blender 5.2 LTS: install it from
+[blender.org](https://www.blender.org/download/lts/). The SDK app finds it on your system;
+**Settings** in the app can point at another Blender.
 
-The map editor is Blender 5.2 LTS with the SDK's editor add-on. Install Blender 5.2 LTS from
-[blender.org](https://www.blender.org/download/lts/), or put it in the SDK's `blender/` folder.
-The SDK app finds it there or on your `PATH`; **Settings** in the app can point at another
-Blender. The app prepares the editor itself the first time you open a map.
+### From source
 
-#### The navmesh helper
-
-When you change a map's walls or floors, the SDK rebuilds where players and zombies can walk
-with a small native helper. Build it once (needs CMake and a C++ compiler):
-
-```bash
-git submodule update --init tools/navmesh/third_party/recast
-cmake -S tools/navmesh -B tools/navmesh/build -DCMAKE_BUILD_TYPE=Release
-cmake --build tools/navmesh/build -j
-```
-
-Without it everything still works, but edits that change collision keep the old walkable area
-(the editor tells you so when you save). See [Navigation meshes](map-editor.md#navigation-meshes).
+To work on the SDK itself, clone it with its submodules, install it with
+`python3 -m pip install -e '.[desktop]'` and build the navmesh helper with CMake
+(`tools/navmesh`); see [Contributing](contributing.md#working-on-the-sdk).
 
 ### Check that it works
 
-1. Run `boz-sdk`, and choose your client folder when it asks.
+1. Run `boz-sdk.exe` (Linux: `./boz-sdk`), and choose your client folder when it asks.
 2. The **Client** page should say the game data is installed.
 3. The **Library** page builds the asset library from your game files the first time (about
    half a minute). When it shows previews of the game's models, you are ready.

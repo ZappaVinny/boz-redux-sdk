@@ -41,12 +41,12 @@ class SdkHomeTests(unittest.TestCase):
     def make_client(self, game_files: bool = True) -> Path:
         client = self.root / 'client'
         (client / 'mods').mkdir(parents=True)
-        (client / 'boz-redux').write_text('launcher')
-        (client / 'client.ini').write_text(INI)
+        (client / 'boz-redux').write_text('launcher', encoding='utf-8')
+        (client / 'client.ini').write_text(INI, encoding='utf-8')
         for mod_id in ('developer', 'other'):
             (client / 'mods' / mod_id).mkdir()
             (client / 'mods' / mod_id / 'mod.toml').write_text(
-                f'id = "{mod_id}"\nname = "{mod_id.title()}"\nversion = "1.0"\n')
+                f'id = "{mod_id}"\nname = "{mod_id.title()}"\nversion = "1.0"\n', encoding='utf-8')
         if game_files:
             assets = client / 'assets'
             assets.mkdir()
@@ -88,7 +88,7 @@ class SdkHomeTests(unittest.TestCase):
         client = self.make_client()
         sdkhome.set_mod_enabled(client, 'other', True)
         sdkhome.set_mod_enabled(client, 'developer', False)
-        text = (client / 'client.ini').read_text()
+        text = (client / 'client.ini').read_text(encoding='utf-8')
         self.assertIn('disabled = developer\n', text)
         self.assertIn('# Borderless fullscreen.', text)
         self.assertIn('[debug]\nstatus = false', text)
@@ -101,7 +101,8 @@ class SdkHomeTests(unittest.TestCase):
     def test_script_and_map_projects(self) -> None:
         script = project.create_project(self.root / 's', 'my_mod', 'My Mod', 'Me', template='round')
         self.assertEqual(script.kind, 'script')
-        self.assertIn('CWaveManager::StartWave', (script.scripts / 'main.lua').read_text())
+        self.assertIn('CWaveManager::StartWave',
+                      (script.scripts / 'main.lua').read_text(encoding='utf-8'))
         self.assertTrue((script.scripts / 'boz' / 'player.lua').is_file())
         self.assertTrue((script.scripts / '.luarc.json').is_file())
         self.assertFalse(script.include_standard_library)  # it carries its own copy
@@ -126,7 +127,7 @@ class SdkHomeTests(unittest.TestCase):
         root.mkdir()
         (root / project.PROJECT_FILE).write_text(
             'schema = 1\n\n[mod]\nid = "old"\nname = "Old"\nversion = "1"\nauthor = "Me"\n'
-            'game = "1.0.11"\n')
+            'game = "1.0.11"\n', encoding='utf-8')
         loaded = project.load_project(root)
         self.assertEqual((loaded.schema, loaded.kind), (1, 'script'))
         renamed = sdkhome.update_metadata(loaded, name='Older')
@@ -148,7 +149,7 @@ class SdkHomeTests(unittest.TestCase):
         client = self.make_client()
         sdk = self.root / 'sdk'
         (sdk / 'mods' / 'developer' / 'scripts').mkdir(parents=True)
-        (sdk / 'mods' / 'developer' / 'mod.toml').write_text('id = "developer"\n')
+        (sdk / 'mods' / 'developer' / 'mod.toml').write_text('id = "developer"\n', encoding='utf-8')
         (sdk / 'mods' / 'developer' / 'assets').mkdir()
         import shutil
         shutil.rmtree(client / 'mods' / 'developer')
@@ -173,7 +174,8 @@ class OpenPathTests(unittest.TestCase):
                 mock.patch('shutil.which', lambda name: '/usr/bin/code' if name == 'code' else None):
             sdkhome.open_path('/tmp/x/Vault.lua', editor=True)
             sdkhome.open_path('/tmp/x')
-        self.assertEqual(started, [['/usr/bin/code', '--goto', '/tmp/x/Vault.lua'], ['xdg-open', '/tmp/x']])
+        self.assertEqual(started, [['/usr/bin/code', '--goto', str(Path('/tmp/x/Vault.lua'))],
+                                   ['xdg-open', str(Path('/tmp/x'))]])
 
 
 if __name__ == '__main__':

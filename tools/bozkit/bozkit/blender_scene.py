@@ -117,7 +117,7 @@ def _names() -> dict[int, str]:
         _NAMES = {}
         try:
             for line in (Path.home() / '.cache' / 'bozkit' / 'names.txt').read_text(
-                    errors='ignore').split():
+                    errors='ignore', encoding='utf-8').split():
                 _NAMES.setdefault(iw_hash(line), line)
         except OSError:
             pass
@@ -1882,7 +1882,8 @@ def mod_assets_folder(client_root: str | Path, mod_id: str, create: bool = False
         (mod / 'assets').mkdir(parents=True, exist_ok=True)
         manifest = mod / 'mod.toml'
         if not manifest.exists():
-            manifest.write_text(MOD_MANIFEST.format(id=mod_id, name=mod_id.replace('_', ' ')))
+            manifest.write_text(MOD_MANIFEST.format(id=mod_id, name=mod_id.replace('_', ' ')),
+                                encoding='utf-8', newline='\n')
     return mod / 'assets'
 
 

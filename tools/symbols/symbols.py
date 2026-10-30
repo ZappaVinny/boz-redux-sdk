@@ -564,13 +564,13 @@ def main(argv):
         problems = check(db)
         for problem in problems:
             print("warning:", problem, file=sys.stderr)
-        with open(argv[3], "w") as f:
+        with open(argv[3], "w", encoding='utf-8', newline='\n') as f:
             json.dump(to_json(db), f, indent=1)
         print("%s: %d functions, %d globals, %d structs" %
               (argv[3], len(db["functions"]), len(db["globals"]), len(db["structs"])))
         return 0
     if command == "from-json" and len(argv) == 4:
-        with open(argv[2]) as f:
+        with open(argv[2], encoding='utf-8') as f:
             exported = json.load(f)
         try:
             existing = load_toml(argv[3])
@@ -586,17 +586,17 @@ def main(argv):
         }
         for problem in check(db):
             print("warning:", problem, file=sys.stderr)
-        with open(argv[3], "w") as f:
+        with open(argv[3], "w", encoding='utf-8', newline='\n') as f:
             f.write(dump_toml(db))
         print("%s: %d functions, %d globals, %d structs" %
               (argv[3], len(db["functions"]), len(db["globals"]), len(db["structs"])))
         return 0
     if command == "reflection" and len(argv) == 4:
-        with open(argv[2]) as f:
+        with open(argv[2], encoding='utf-8') as f:
             report = json.load(f)
         import os
         os.makedirs(os.path.dirname(argv[3]) or ".", exist_ok=True)
-        with open(argv[3], "w") as f:
+        with open(argv[3], "w", encoding='utf-8', newline='\n') as f:
             f.write(dump_reflection(report))
         with open(argv[3], "rb") as f:
             check_db = tomllib.load(f)
@@ -604,41 +604,41 @@ def main(argv):
                                              sum(len(c.get("fields", [])) for c in check_db["class"])))
         return 0
     if command == "events" and len(argv) == 5:
-        with open(argv[2]) as f:
+        with open(argv[2], encoding='utf-8') as f:
             report = json.load(f)
-        with open(argv[3]) as f:
+        with open(argv[3], encoding='utf-8') as f:
             users = json.load(f)
         import os
         os.makedirs(os.path.dirname(argv[4]) or ".", exist_ok=True)
-        with open(argv[4], "w") as f:
+        with open(argv[4], "w", encoding='utf-8', newline='\n') as f:
             f.write(dump_events(report, users))
         with open(argv[4], "rb") as f:
             n = len(tomllib.load(f)["event"])
         print("%s: %d events" % (argv[4], n))
         return 0
     if command == "console" and len(argv) in (5, 7):
-        with open(argv[2]) as f:
+        with open(argv[2], encoding='utf-8') as f:
             cv = json.load(f)
-        with open(argv[3]) as f:
+        with open(argv[3], encoding='utf-8') as f:
             cm = json.load(f)
         cvars = cv["cvars"] if isinstance(cv, dict) else cv
         if len(argv) == 7 and argv[5] == "--direct":
-            with open(argv[6]) as f:
+            with open(argv[6], encoding='utf-8') as f:
                 cvars = merge_direct_cvars(cvars, json.load(f))
         import os
         os.makedirs(os.path.dirname(argv[4]) or ".", exist_ok=True)
-        with open(argv[4], "w") as f:
+        with open(argv[4], "w", encoding='utf-8', newline='\n') as f:
             f.write(dump_console(cvars, cm["commands"]))
         with open(argv[4], "rb") as f:
             db = tomllib.load(f)
         print("%s: %d cvars, %d commands" % (argv[4], len(db["cvar"]), len(db["command"])))
         return 0
     if command == "runtime" and len(argv) == 4:
-        with open(argv[2]) as f:
+        with open(argv[2], encoding='utf-8') as f:
             report = json.load(f)
         import os
         os.makedirs(os.path.dirname(argv[3]) or ".", exist_ok=True)
-        with open(argv[3], "w") as f:
+        with open(argv[3], "w", encoding='utf-8', newline='\n') as f:
             f.write(dump_runtime(report))
         with open(argv[3], "rb") as f:
             n = len(tomllib.load(f)["class"])
@@ -649,7 +649,7 @@ def main(argv):
             db = tomllib.load(f)
         with open(argv[3], "rb") as f:
             notes = tomllib.load(f)
-        with open(argv[4], "w") as f:
+        with open(argv[4], "w", encoding='utf-8', newline='\n') as f:
             f.write(dump_console_doc(db, notes))
         print("%s: %d variables, %d commands" % (argv[4], len(db.get("cvar", [])), len(db.get("command", []))))
         return 0

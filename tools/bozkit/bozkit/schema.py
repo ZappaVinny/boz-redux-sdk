@@ -7,12 +7,24 @@ and falls back to ``0x<hash>`` otherwise.
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from pathlib import Path
 
 from .hashing import iw_hash
 
-GAMEDEF = Path(__file__).resolve().parents[3] / 'gamedef'
+
+def sdk_root() -> Path:
+    """The SDK folder: BOZ_SDK_ROOT (set for the editor), the folder of the bundled launcher in a
+    release (boz-sdk.exe), else the repository checkout."""
+    if os.environ.get('BOZ_SDK_ROOT'):
+        return Path(os.environ['BOZ_SDK_ROOT'])
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[3]
+
+
+GAMEDEF = sdk_root() / 'gamedef'
 GAME_VERSION = '1.0.11'
 
 

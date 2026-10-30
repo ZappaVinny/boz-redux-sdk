@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import navigation
+from .schema import sdk_root
 
 _STOCK_POLY = struct.Struct('<I6H6HHBB')
 _STOCK_OFF_MESH = struct.Struct('<6ffHBBI')
@@ -39,7 +40,7 @@ def helper_path() -> Path:
         candidates.append(Path(os.environ['BOZ_NAVMESH']))
     here = Path(__file__).resolve().parent
     name = 'boz-navmesh.exe' if os.name == 'nt' else 'boz-navmesh'
-    candidates += [here / name, here.parents[1] / 'navmesh' / 'build' / name]
+    candidates += [here / name, sdk_root() / 'tools' / 'navmesh' / 'build' / name]
     for candidate in candidates:
         if candidate.is_file():
             if os.name != 'nt' and not os.access(candidate, os.X_OK):

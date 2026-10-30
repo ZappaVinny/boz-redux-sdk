@@ -37,7 +37,7 @@ ONE_LINER = re.compile(r"^function .*\bend$")
 
 
 def parse(path):
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding='utf-8').splitlines()
     header = []
     for line in lines:
         if line.startswith("--") and not line.startswith("---"):
@@ -166,7 +166,7 @@ def render(lib):
 def main(argv):
     lib = Path(argv[1]) if len(argv) > 1 else SDK / "lib" / "boz"
     target = Path(argv[2]) if len(argv) > 2 else SDK / "docs" / "standard-library.md"
-    target.write_text(render(lib))
+    target.write_text(render(lib), encoding='utf-8', newline='\n')
     print("%s: %d modules" % (target, len([p for p in lib.glob("*.lua") if p.stem not in HIDDEN])))
     return 0
 

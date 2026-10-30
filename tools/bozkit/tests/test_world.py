@@ -51,7 +51,7 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(mesh.vertices, original.meshes[0].vertices)
         self.assertEqual(mesh.textures, original.meshes[0].textures)  # PNG keeps the texels
         self.assertEqual(loaded.models[0].collision, 'floor')
-        data = json.loads((self.source / 'world.json').read_text())
+        data = json.loads((self.source / 'world.json').read_text(encoding='utf-8'))
         self.assertEqual(data['format'], 3)
         self.assertEqual(data['meshes'][0]['textures'], ['textures/floor.png'])
         spawns = [p for p in loaded.prefabs if p.source.startswith('spawn_player_')]
@@ -118,9 +118,9 @@ class WorldTests(unittest.TestCase):
 
     def test_files_must_stay_inside_the_source(self):
         world.save(world.empty_world(), self.source)
-        data = json.loads((self.source / 'world.json').read_text())
+        data = json.loads((self.source / 'world.json').read_text(encoding='utf-8'))
         data['meshes'][0]['file'] = '../../etc/passwd'
-        (self.source / 'world.json').write_text(json.dumps(data))
+        (self.source / 'world.json').write_text(json.dumps(data), encoding='utf-8')
         with self.assertRaises(world.WorldError):
             world.load(self.source)
 
@@ -150,9 +150,9 @@ class WorldTests(unittest.TestCase):
 
     def test_old_formats_are_refused(self):
         world.save(world.empty_world(), self.source)
-        data = json.loads((self.source / 'world.json').read_text())
+        data = json.loads((self.source / 'world.json').read_text(encoding='utf-8'))
         data['format'] = 2
-        (self.source / 'world.json').write_text(json.dumps(data))
+        (self.source / 'world.json').write_text(json.dumps(data), encoding='utf-8')
         with self.assertRaises(world.WorldError):
             world.load(self.source)
 

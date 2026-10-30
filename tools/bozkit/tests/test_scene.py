@@ -478,7 +478,7 @@ class SceneTests(unittest.TestCase):
         crate.location = (7.0, 7.0, 7.0)
         report = blender_scene.export_to_mod(edits, client, 'blender_edits')
         mod = client / 'mods' / 'blender_edits'
-        self.assertIn('id = "blender_edits"', (mod / 'mod.toml').read_text())
+        self.assertIn('id = "blender_edits"', (mod / 'mod.toml').read_text(encoding='utf-8'))
         self.assertEqual([Path(path).name for path in report.written], ['test_statics.group.bin'])
         # Reloading with the mod shows the edit; editing again replaces the mod's own copy.
         editable, references = blender_scene.level_groups(self.statics.parent, mod / 'assets')

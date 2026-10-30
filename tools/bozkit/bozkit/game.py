@@ -661,7 +661,8 @@ def load(source: Path) -> dict:
 def save(source: Path, data: dict) -> None:
     file = path(source)
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    file.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n', encoding='utf-8',
+                    newline='\n')
 
 
 def check(data: dict) -> list[str]:

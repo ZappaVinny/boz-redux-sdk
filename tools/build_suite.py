@@ -74,11 +74,11 @@ def build(blender: str | Path, output: Path = OUTPUT) -> Path:
         shutil.copy2(path, template / path.name)
     _vendor(template)
     script = output / 'generate.py'
-    script.write_text(GENERATE)
+    script.write_text(GENERATE, encoding='utf-8', newline='\n')
     startup = template / 'startup.blend'
     result = subprocess.run([str(blender), '-b', '--factory-startup', '--python', str(script),
                              '--', str(template / 'tabs.py'), str(startup)],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding='utf-8', errors='replace')
     script.unlink()
     if result.returncode != 0 or not startup.is_file():
         raise RuntimeError(f'startup.blend was not generated:\n{result.stdout}\n{result.stderr}')

@@ -1,0 +1,9 @@
+# Keep LF line endings in a Windows checkout too (scripts, data and generated files compare
+# byte for byte across systems).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.ttf binary
+*.blend binary
+*.zip binary
+*.bat text eol=crlf

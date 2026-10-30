@@ -11,6 +11,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+tools/navmesh/build-windows/
 
 # Private notes (design history, RE notebooks, assistant workflow)
 docs/internal/

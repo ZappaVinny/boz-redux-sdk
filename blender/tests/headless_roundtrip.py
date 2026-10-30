@@ -332,7 +332,7 @@ with tempfile.TemporaryDirectory() as directory:
     fake = client / 'scripts'
     fake.mkdir(parents=True)
     started = directory / 'started.txt'
-    (fake / 'run-desktop.sh').write_text(f'echo "$@" > {started}\n')
+    (fake / 'run-desktop.sh').write_text(f'echo "$@" > {started}\n', encoding='utf-8')
     crate = next(obj for obj in boz_objects() if obj['boz_kind'] == 'placed_model')
     crate.location.z += 1.0
     try:
@@ -342,18 +342,20 @@ with tempfile.TemporaryDirectory() as directory:
         assert 'test mod' in str(exc), exc
     developer = client / 'mods' / 'developer'
     (developer / 'scripts' / 'boz').mkdir(parents=True)
-    (developer / 'mod.toml').write_text('id = "developer"\nname = "Developer"\n')
-    (developer / 'scripts' / 'boz' / 'levels.lua').write_text('return {}\n')
+    (developer / 'mod.toml').write_text('id = "developer"\nname = "Developer"\n', encoding='utf-8')
+    (developer / 'scripts' / 'boz' / 'levels.lua').write_text('return {}\n', encoding='utf-8')
     (client / 'saves' / 'mods').mkdir(parents=True)
-    (client / 'saves' / 'mods' / 'developer.cfg').write_text('open=b:true\nautostart_level=s:old\n')
+    (client / 'saves' / 'mods' / 'developer.cfg').write_text(
+        'open=b:true\nautostart_level=s:old\n', encoding='utf-8')
     # An older edit mod that loads later and replaces the same group would hide the new save.
     stale = client / 'mods' / 'zz_old_edits'
     (stale / 'assets').mkdir(parents=True)
-    (stale / 'mod.toml').write_text('id = "zz_old_edits"\n')
+    (stale / 'mod.toml').write_text('id = "zz_old_edits"\n', encoding='utf-8')
     (stale / 'assets' / 'test_statics.group.bin').write_bytes(b'old')
-    (client / 'client.ini').write_text('[display]\nfullscreen = false\n[mods]\norder = developer\n')
+    (client / 'client.ini').write_text(
+        '[display]\nfullscreen = false\n[mods]\norder = developer\n', encoding='utf-8')
     assert bpy.ops.boz.build_and_run() == {'FINISHED'}
-    ini = (client / 'client.ini').read_text()
+    ini = (client / 'client.ini').read_text(encoding='utf-8')
     assert 'order = zz_old_edits, developer' in ini, ini
     assert 'fullscreen = false' in ini
     import time
@@ -361,8 +363,9 @@ with tempfile.TemporaryDirectory() as directory:
         if started.exists():
             break
         time.sleep(0.1)
-    assert started.read_text().strip() == str(client), started.read_text()
-    assert (client / 'saves' / 'mods' / 'developer.cfg').read_text() == \
+    launched = started.read_text(encoding='utf-8')
+    assert launched.strip() == str(client), launched
+    assert (client / 'saves' / 'mods' / 'developer.cfg').read_text(encoding='utf-8') == \
         'open=b:true\nautostart_level=s:test\n'
     assert 'Saved' in bpy.context.scene['boz_last_report']
 

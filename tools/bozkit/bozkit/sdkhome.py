@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import project as sdk_project
+from . import schema
 
 SETTINGS_FILE = 'settings.json'
 # The data packs the client needs, with their sizes (the client's src/launcher/game_files.cpp).
@@ -36,13 +37,7 @@ def data_dir() -> Path:
 
 
 def sdk_root() -> Path:
-    """The SDK folder: BOZ_SDK_ROOT (set for the editor), the release folder next to the
-    launcher, or the repository checkout."""
-    if os.environ.get('BOZ_SDK_ROOT'):
-        return Path(os.environ['BOZ_SDK_ROOT'])
-    if getattr(sys, 'frozen', False):
-        return Path(sys.executable).parent
-    return sdk_project.SDK_ROOT
+    return schema.sdk_root()
 
 
 def default_projects_dir() -> Path:
@@ -85,7 +80,7 @@ class Settings:
                 'projects': [{'path': str(entry.path), 'last_opened': entry.last_opened}
                              for entry in self.projects]}
         temporary = folder / (SETTINGS_FILE + '.tmp')
-        temporary.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+        temporary.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8', newline='\n')
         temporary.replace(folder / SETTINGS_FILE)
 
     @property
@@ -315,7 +310,7 @@ def ini_set(root: Path, section: str, key: str, value: str) -> None:
         while section_end > 0 and not lines[section_end - 1].strip():
             section_end -= 1
         lines.insert(section_end, f'{key} = {value}')
-    (Path(root) / 'client.ini').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    (Path(root) / 'client.ini').write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
 
 
 def _id_list(text: str) -> list[str]:
@@ -372,7 +367,7 @@ def launcher_command(root: Path) -> list[str] | None:
     """The command that opens the client's own launcher."""
     root = Path(root)
     script = root / 'scripts' / 'run-launcher.sh'
-    if script.is_file():
+    if script.is_file() and sys.platform != 'win32':
         return ['bash', str(script)]
     for name in _launcher_names():
         if (root / name).is_file():
@@ -384,7 +379,7 @@ def game_command(root: Path) -> list[str] | None:
     """The command that starts the game itself (no launcher)."""
     root = Path(root)
     script = root / 'scripts' / 'run-desktop.sh'
-    if script.is_file():
+    if script.is_file() and sys.platform != 'win32':   # a checkout; Windows runs the .exe files
         return ['bash', str(script), str(root)]
     for name in ('codboz_s3e_loader.exe', 'codboz_s3e_loader'):
         loader = root / name
@@ -396,7 +391,7 @@ def game_command(root: Path) -> list[str] | None:
 
 def start_detached(command: list[str], cwd: Path, log: Path | None = None,
                    env: dict | None = None) -> subprocess.Popen:
-    output = open(log, 'w') if log else subprocess.DEVNULL
+    output = open(log, 'w', encoding='utf-8', newline='\n') if log else subprocess.DEVNULL
     options = {'creationflags': 0x00000008} if sys.platform == 'win32' else {'start_new_session': True}
     return subprocess.Popen(command, cwd=cwd, stdout=output, stderr=subprocess.STDOUT,
                             stdin=subprocess.DEVNULL, env=env, **options)
@@ -424,7 +419,7 @@ def open_path(path: str | Path, editor: bool = False) -> None:
 def game_running() -> bool:
     if sys.platform == 'win32':
         result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq codboz_s3e_loader.exe'],
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, encoding='utf-8', errors='replace')
         return 'codboz_s3e_loader' in result.stdout
     if not shutil.which('pgrep'):
         return False
@@ -450,10 +445,10 @@ def set_mod_setting(root: Path, mod_id: str, key: str, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = []
     if path.is_file():
-        lines = [line for line in path.read_text(errors='ignore').splitlines()
+        lines = [line for line in path.read_text(errors='ignore', encoding='utf-8').splitlines()
                  if line and not line.startswith(f'{key}=')]
     lines.append(f'{key}=s:{value}')
-    path.write_text('\n'.join(lines) + '\n')
+    path.write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
 
 
 def load_last(root: Path, mod_id: str) -> None:

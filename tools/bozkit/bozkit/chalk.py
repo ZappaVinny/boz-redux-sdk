@@ -68,7 +68,7 @@ def find_decals(pack, cache_path=None) -> dict[int, Decal]:
     """Each weapon's chalk decal in the game's levels: weapon name hash -> Decal."""
     if cache_path is not None:
         try:
-            data = json.loads(cache_path.read_text())
+            data = json.loads(cache_path.read_text(encoding='utf-8'))
             if data.get('version') == CACHE_VERSION:
                 return {int(k): Decal(v['group'], v['model'], tuple(v['position']),
                                       tuple(v['rotation']), tuple(v['scale']))
@@ -130,7 +130,7 @@ def find_decals(pack, cache_path=None) -> dict[int, Decal]:
     if cache_path is not None:
         try:
             cache_path.write_text(json.dumps({'version': CACHE_VERSION, 'decals': {
-                str(k): v.as_json() for k, v in found.items()}}))
+                str(k): v.as_json() for k, v in found.items()}}), encoding='utf-8', newline='\n')
         except OSError:
             pass
     return found

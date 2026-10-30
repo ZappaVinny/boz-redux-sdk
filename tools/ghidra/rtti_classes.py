@@ -351,7 +351,7 @@ def main():
                                                                  key=lambda kv: -len(kv[1]))},
         "classes": classes,
     }
-    with open(sys.argv[2], "w") as f:
+    with open(sys.argv[2], "w", encoding='utf-8', newline='\n') as f:
         json.dump(out, f, indent=1)
     with_vtables = sum(1 for c in classes if c["vtables"])
     functions = {f for c in classes for v in c["vtables"] for f in v["functions"]}

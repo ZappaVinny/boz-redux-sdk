@@ -39,14 +39,14 @@ def _ensure_catalog() -> None:
     """The palette's catalog file lists My prefabs (palettes built before it existed)."""
     path = palette_dir() / "blender_assets.cats.txt"
     try:
-        text = path.read_text()
+        text = path.read_text(encoding='utf-8')
     except OSError:
         text = "# Blender asset catalogs, written by the BOZ Redux editor\nVERSION 1\n\n"
     for name in (CATALOG, ASSET_CATALOG):
         if catalog_id(name) not in text:
             text = text.rstrip("\n") + f"\n{catalog_id(name)}:{name}:{name}\n"
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
+            path.write_text(text, encoding='utf-8', newline='\n')
 
 
 def _set_preview(datablock, width: int, height: int, rgba: bytes) -> None:

@@ -23,7 +23,7 @@ jobs:
       - name: Install SDK
         run: python3 -m pip install -e .
       - name: Test bozkit and project compiler
-        run: python3 -m unittest discover tools/bozkit/tests -v
+        run: python3 -X warn_default_encoding -W error::EncodingWarning -m unittest discover tools/bozkit/tests -v
       - name: Check installed CLI
         run: bozkit --help
       - name: Lint (pyflakes rules)
@@ -40,3 +40,31 @@ jobs:
           python3 tools/docgen/weapons_doc.py
           python3 tools/stdlib/sync.py --check
           git diff --exit-code -- lib docs mods
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build the navmesh helper
+        run: |
+          cmake -S tools/navmesh -B tools/navmesh/build
+          cmake --build tools/navmesh/build --config Release
+          cp tools/navmesh/build/Release/boz-navmesh.exe tools/navmesh/build/
+      - name: Install SDK
+        run: python -m pip install -e '.[desktop]'
+      - name: Test bozkit and project compiler
+        run: python -X warn_default_encoding -W error::EncodingWarning -m unittest discover tools/bozkit/tests -v
+      - name: Build and package a project
+        run: |
+          bozkit --help > /dev/null
+          bozkit new "$RUNNER_TEMP/winmod" --id winmod --name "Windows mod" --author CI
+          bozkit build "$RUNNER_TEMP/winmod"
+          bozkit package "$RUNNER_TEMP/winmod"

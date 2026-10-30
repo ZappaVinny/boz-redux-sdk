@@ -62,7 +62,8 @@ def export_model(model: Model, output: str | Path, name: str = 'model') -> None:
                 'meshes': [{'name': name, 'primitives': [{'attributes': attributes,
                                                           'indices': cursor, 'mode': 4}]}],
                 'nodes': [{'name': name, 'mesh': 0}], 'scenes': [{'nodes': [0]}], 'scene': 0}
-    Path(output).write_text(json.dumps(document, indent=2, sort_keys=True) + '\n')
+    Path(output).write_text(json.dumps(document, indent=2, sort_keys=True) + '\n',
+                            encoding='utf-8', newline='\n')
 
 
 def _buffer(document: dict, index: int, root: Path) -> bytes:
@@ -96,7 +97,7 @@ def _accessor(document: dict, index: int, root: Path) -> list[tuple | int | floa
 def import_model(source: str | Path, *, round_positions: bool = True) -> Model:
     """Read the first triangle primitive from a glTF 2.0 JSON document."""
     path = Path(source).resolve()
-    document = json.loads(path.read_text())
+    document = json.loads(path.read_text(encoding='utf-8'))
     if document.get('asset', {}).get('version') != '2.0' or not document.get('meshes'):
         raise ValueError('file is not a supported glTF 2.0 mesh')
     primitive = document['meshes'][0]['primitives'][0]

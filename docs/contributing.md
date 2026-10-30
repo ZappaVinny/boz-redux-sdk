@@ -72,6 +72,15 @@ CI fails when one is out of date.
 `boz_suite/tabs.py`. The SDK app rebuilds it in a checkout when the sources change.
 `blender/README.md` describes the editor's modules.
 
+### Releases
+
+`.github/workflows/release.yml` builds the SDK packages on every push to `main` (kept as workflow
+artifacts) and publishes them for a `v*` tag: `tools/package_release.sh` makes the Linux ZIP
+(source with the gamedef, the editor built by Blender, the navmesh helpers for Linux and
+Windows), and `tools/build_exe.py` builds `boz-sdk.exe` with PyInstaller for the Windows ZIP.
+The bundled launcher treats its own folder as the SDK (`bozkit.schema.sdk_root`). Bump
+`version` in `pyproject.toml` before tagging.
+
 ### Documentation
 
 The documentation is a few large pages, one per big subject; each file's `#` title is a main

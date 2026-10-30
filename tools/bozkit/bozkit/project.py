@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from . import maps
+from .schema import sdk_root
 
 PROJECT_FILE = 'boz-project.toml'
 PROJECT_SCHEMA = 2
@@ -23,7 +24,7 @@ MAP_TEMPLATES = ('empty', 'debug') + maps.SHIPPED
 GAME_VERSION = '1.0.11'
 BUILD_REPORT = 'boz-build.json'
 ID_RE = re.compile(r'^[a-z][a-z0-9_-]*$')
-SDK_ROOT = Path(__file__).resolve().parents[3]
+SDK_ROOT = sdk_root()
 
 
 class ProjectError(ValueError):
@@ -321,7 +322,7 @@ def create_project(path: str | Path, mod_id: str, name: str, author: str,
     (root / 'scripts' / 'main.lua').write_text(
         _script_template(template if kind == 'script' else 'blank', mod_id), encoding='utf-8',
         newline='\n')
-    (root / '.gitignore').write_text('/build/\n', encoding='utf-8')
+    (root / '.gitignore').write_text('/build/\n', encoding='utf-8', newline='\n')
     if starting_world is not None:
         from . import world
         world.save(starting_world, root / 'source')
@@ -430,7 +431,6 @@ def standard_library_path() -> Path:
         *((Path(os.environ['BOZ_SDK_ROOT']) / 'lib' / 'boz',) if os.environ.get('BOZ_SDK_ROOT')
           else ()),
         SDK_ROOT / 'lib' / 'boz',
-        Path(sys.executable).parent / 'lib' / 'boz',  # the SDK release (frozen launcher)
         Path(sys.prefix) / 'share' / 'boz-redux-sdk' / 'lib' / 'boz',
     )
     for candidate in candidates:

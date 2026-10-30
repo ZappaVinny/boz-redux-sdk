@@ -149,7 +149,7 @@ def save_def(source: Path, asset: AssetDef) -> Path:
     path = def_path(source, asset.name)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({'format': FORMAT, **asdict(asset)}, indent=1) + '\n',
-                    encoding='utf-8')
+                    encoding='utf-8', newline='\n')
     return path
 
 
@@ -200,11 +200,11 @@ def write_game(source: Path, name: str, model: GameModel, textures: list[world.T
                                             for vertex in level.weights]}
                           for key, level in model.levels.items()}
     (folder / 'model.json').write_text(json.dumps(data, separators=(',', ':')) + '\n',
-                                       encoding='utf-8')
+                                       encoding='utf-8', newline='\n')
     for index, texture in enumerate(textures):
         world.write_texture(texture, folder / 'textures' / f'{index}.png')
     (folder / 'stats.json').write_text(json.dumps(stats or describe(model, textures), indent=1)
-                                       + '\n', encoding='utf-8')
+                                       + '\n', encoding='utf-8', newline='\n')
     return folder
 
 

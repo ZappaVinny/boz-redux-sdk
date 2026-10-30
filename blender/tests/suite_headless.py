@@ -56,7 +56,7 @@ def build_and_compile(label):
         sdk_project = link.sdk_project
         built = sdk_project.load_project(project)
         output, _report = sdk_project.build_project(built, game=suite.palette.library.LibraryPack())
-        data = (output / "scripts" / "boz" / "world_data.lua").read_text()
+        data = (output / "scripts" / "boz" / "world_data.lua").read_text(encoding='utf-8')
         check((output / "scripts" / "boz" / "prefabs.lua").is_file(),
               f"{label}: the map runtime is installed")
         return saved, data
@@ -835,7 +835,7 @@ def prefab_checks(anchor):
     relative = objects_ui.scripts.new_script(project / "scripts", "Vault")
     (project / "scripts" / relative).write_text(
         '---@property delay number 2 "Seconds"\n---@property armed bool true\n'
-        'function on_hit(volume, info)\n    self:part("Door"):hide()\nend\n')
+        'function on_hit(volume, info)\n    self:part("Door"):hide()\nend\n', encoding='utf-8')
     prefab.boz.script = relative
     objects_ui.sync_properties(prefab)
     check(prefab.get("boz_p:delay") == 2.0 and prefab.get("boz_p:armed") is True,
@@ -846,7 +846,8 @@ def prefab_checks(anchor):
     check(objects_ui.watch_browser() == 0.25, "the Scripts file browser watcher runs")
     text.write("\n-- edited in the Scripts tab\n")
     check(objects_ui.save_scripts() == 1 and "edited in the Scripts tab"
-          in (project / "scripts" / relative).read_text(), "an edited script is saved to its file")
+          in (project / "scripts" / relative).read_text(encoding='utf-8'),
+          "an edited script is saved to its file")
     problems = []
     back = link.scene_to_world(scene, problems)
     vault = next((p for p in back.prefabs if p.name == "Vault"), None)

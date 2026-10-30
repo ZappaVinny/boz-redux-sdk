@@ -322,7 +322,8 @@ def build(client_root: str | Path, folder: Path | None = None,
     if image.is_file():
         sources.append(image.read_bytes())
     found = _strings(sources)
-    (work / 'names.txt').write_text('\n'.join(sorted(found)) + '\n', encoding='latin-1')
+    (work / 'names.txt').write_text('\n'.join(sorted(found)) + '\n', encoding='latin-1',
+                                    newline='\n')
     names = Names()
     for text in found:
         names.add(text)
@@ -580,7 +581,7 @@ def build(client_root: str | Path, folder: Path | None = None,
     database.commit()
     database.close()
     (work / 'stamp.json').write_text(json.dumps(_source_stamp(client_root), indent=2) + '\n',
-                                     encoding='utf-8')
+                                     encoding='utf-8', newline='\n')
     if folder.exists():
         shutil.rmtree(folder)
     work.rename(folder)

@@ -192,7 +192,7 @@ def _write_mesh(source: Path, folder: str, mesh: Mesh) -> dict:
     if any(mesh.face_textures):
         data['materials'] = list(mesh.face_textures)
     (source / folder / f'{mesh.name}.json').write_text(json.dumps(data, separators=(',', ':'))
-                                                       + '\n', encoding='utf-8')
+                                                       + '\n', encoding='utf-8', newline='\n')
     files = texture_files(mesh.name, len(mesh.textures))
     for texture, relative in zip(mesh.textures, files):
         write_texture(texture, source / relative)
@@ -706,7 +706,7 @@ def save(world: World, source: str | Path) -> None:
     lines += _lines('meshes', meshes) + _lines('models', [object_json(m) for m in world.models])
     lines += _lines('volumes', [object_json(v) for v in world.volumes])
     lines += _lines('prefabs', [object_json(p) for p in world.prefabs], last=True) + ['}']
-    (source / 'world.json').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    (source / 'world.json').write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
 
 
 def load(source: str | Path) -> World:
@@ -768,7 +768,7 @@ def save_prefab(source: str | Path, prefab: Prefab, meshes: list[Mesh]) -> Path:
     stored.library = ''
     path = folder / f'{prefab.name}.json'
     path.write_text(json.dumps({'format': FORMAT, 'meshes': items, 'prefab': object_json(stored)},
-                               indent=1) + '\n', encoding='utf-8')
+                               indent=1) + '\n', encoding='utf-8', newline='\n')
     return path
 
 

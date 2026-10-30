@@ -90,7 +90,7 @@ def cmd_dump(args) -> int:
             out['resources'].append(item)
     text = json.dumps(out, indent=1)
     if args.output:
-        Path(args.output).write_text(text + '\n')
+        Path(args.output).write_text(text + '\n', encoding='utf-8', newline='\n')
     else:
         sys.stdout.write(text + '\n')
     return 0
@@ -150,7 +150,7 @@ def cmd_names(args) -> int:
             found.add(leaf)
             found.add(leaf.split('.', 1)[0])
     NAMES_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    NAMES_CACHE.write_text('\n'.join(sorted(found)) + '\n', encoding='latin-1')
+    NAMES_CACHE.write_text('\n'.join(sorted(found)) + '\n', encoding='latin-1', newline='\n')
     print(f'{len(found)} names -> {NAMES_CACHE}')
     return 0
 
@@ -177,7 +177,7 @@ def cmd_save(args) -> int:
         out['sections'].append(item)
     text = json.dumps(out, indent=1)
     if args.output:
-        Path(args.output).write_text(text + '\n')
+        Path(args.output).write_text(text + '\n', encoding='utf-8', newline='\n')
     else:
         sys.stdout.write(text + '\n')
     return 0
@@ -361,7 +361,7 @@ def cmd_corpus(args) -> int:
     report = corpus.audit(args.paths, tuple(args.exclude))
     text = json.dumps(report, indent=2, sort_keys=True) + '\n'
     if args.output:
-        Path(args.output).write_text(text)
+        Path(args.output).write_text(text, encoding='utf-8', newline='\n')
     else:
         sys.stdout.write(text)
     return 0 if report['summary']['all_byte_identical'] else 1
@@ -389,7 +389,7 @@ def cmd_material_dump(args) -> int:
            'trailer': value.trailer.hex()}
     text = json.dumps(out, indent=2) + '\n'
     if args.output:
-        Path(args.output).write_text(text)
+        Path(args.output).write_text(text, encoding='utf-8', newline='\n')
     else:
         sys.stdout.write(text)
     return 0

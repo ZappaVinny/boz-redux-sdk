@@ -49,13 +49,14 @@ class ProjectTests(unittest.TestCase):
         luac = shutil.which('luac')
         if luac:
             path = Path(self.temp.name) / 'world_data.lua'
-            path.write_text(text)
+            path.write_text(text, encoding='utf-8')
             self.assertEqual(subprocess.run([luac, '-p', str(path)]).returncode, 0)
 
     def test_invalid_id_is_reported(self) -> None:
         loaded = self.make_project()
         manifest = loaded.root / project.PROJECT_FILE
-        manifest.write_text(manifest.read_text().replace('id = "example"', 'id = "Bad ID"'))
+        text = manifest.read_text(encoding='utf-8')
+        manifest.write_text(text.replace('id = "example"', 'id = "Bad ID"'), encoding='utf-8')
         loaded = project.load_project(loaded.root)
         result = project.validate_project(loaded)
         self.assertFalse(result.ok)
@@ -68,20 +69,23 @@ class ProjectTests(unittest.TestCase):
     def test_other_game_versions_are_rejected(self) -> None:
         loaded = self.make_project()
         manifest = loaded.root / project.PROJECT_FILE
-        manifest.write_text(manifest.read_text().replace('game = "1.0.11"', 'game = "1.0.10"'))
+        text = manifest.read_text(encoding='utf-8')
+        manifest.write_text(text.replace('game = "1.0.11"', 'game = "1.0.10"'), encoding='utf-8')
         result = project.validate_project(project.load_project(loaded.root))
         self.assertFalse(result.ok)
         self.assertIn('no other game version is supported', result.errors[0])
 
     def test_build_contains_sources_standard_library_and_report(self) -> None:
         loaded = self.make_project()
-        (loaded.assets / 'made-by-test.txt').write_text('asset\n')
+        (loaded.assets / 'made-by-test.txt').write_text('asset\n', encoding='utf-8')
         output, report = project.build_project(loaded)
         self.assertTrue((output / 'scripts' / 'main.lua').is_file())
         self.assertTrue((output / 'scripts' / 'boz' / 'player.lua').is_file())
-        self.assertEqual((output / 'assets' / 'made-by-test.txt').read_text(), 'asset\n')
-        self.assertEqual(json.loads((output / project.BUILD_REPORT).read_text())['files'], report['files'])
-        self.assertIn('id = "example"', (output / 'mod.toml').read_text())
+        self.assertEqual((output / 'assets' / 'made-by-test.txt').read_text(encoding='utf-8'),
+                         'asset\n')
+        built = json.loads((output / project.BUILD_REPORT).read_text(encoding='utf-8'))
+        self.assertEqual(built['files'], report['files'])
+        self.assertIn('id = "example"', (output / 'mod.toml').read_text(encoding='utf-8'))
 
     def test_map_mods_list_their_map(self) -> None:
         loaded = self.make_project()
@@ -94,13 +98,13 @@ class ProjectTests(unittest.TestCase):
         asset = loaded.assets / 'edited.group.bin'
         asset.write_bytes(b'synthetic')
         manifest = loaded.root / project.PROJECT_FILE
-        manifest.write_text(manifest.read_text() + '''
+        manifest.write_text(manifest.read_text(encoding='utf-8') + '''
 
 [[provenance]]
 path = "assets/edited.group.bin"
 kind = "game-derived"
 note = "Private test asset"
-''')
+''', encoding='utf-8')
         loaded = project.load_project(loaded.root)
         result = project.validate_project(loaded, 'distribution')
         self.assertTrue(result.ok)
@@ -131,15 +135,17 @@ note = "Private test asset"
         loaded = self.make_project()
         output = self.root / 'not-a-build'
         output.mkdir()
-        (output / 'keep.txt').write_text('keep')
+        (output / 'keep.txt').write_text('keep', encoding='utf-8')
         with self.assertRaises(project.ProjectError):
             project.build_project(loaded, output)
-        self.assertEqual((output / 'keep.txt').read_text(), 'keep')
+        self.assertEqual((output / 'keep.txt').read_text(encoding='utf-8'), 'keep')
 
     def test_project_paths_cannot_escape(self) -> None:
         loaded = self.make_project()
         manifest = loaded.root / project.PROJECT_FILE
-        manifest.write_text(manifest.read_text().replace('scripts = "scripts"', 'scripts = "../scripts"'))
+        text = manifest.read_text(encoding='utf-8')
+        manifest.write_text(text.replace('scripts = "scripts"', 'scripts = "../scripts"'),
+                            encoding='utf-8')
         with self.assertRaises(project.ProjectError):
             project.load_project(loaded.root)
 

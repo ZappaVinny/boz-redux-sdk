@@ -192,11 +192,13 @@ def make(name: str, wait: bool = False) -> bool:
     link.append_log(f"asset {name}: making the game version")
     _state["building"] = name
     if wait or bpy.app.background:
-        result = subprocess.run(_command(name), capture_output=True, text=True, timeout=1800)
+        result = subprocess.run(_command(name), capture_output=True, text=True, timeout=1800,
+                                encoding='utf-8', errors='replace')
         _finish(name, result.stdout + result.stderr)
         return True
     _state["process"] = subprocess.Popen(_command(name), stdout=subprocess.PIPE,
-                                         stderr=subprocess.STDOUT, text=True)
+                                         stderr=subprocess.STDOUT, text=True,
+                                         encoding='utf-8', errors='replace')
     refresh_list()
     bpy.app.timers.register(_poll, first_interval=0.5)
     return True

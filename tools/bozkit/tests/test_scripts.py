@@ -42,7 +42,7 @@ class ScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             relative = scripts.new_script(temp, 'vault')
             self.assertEqual(relative, 'prefabs/vault.lua')
-            text = (Path(temp) / relative).read_text()
+            text = (Path(temp) / relative).read_text(encoding='utf-8')
             self.assertIn('function on_hit(volume, info)', text)
             self.assertNotIn('boz.prefab()', text)
             self.assertEqual([p.name for p in scripts.parse_properties(text)], ['message'])

@@ -19,21 +19,17 @@ Start at the [introduction](docs/README.md), or go straight to
 [The map editor](docs/map-editor.md) or the [standard library](docs/standard-library.md).
 Maintainers: [Contributing](docs/contributing.md).
 
-## Quick start
+## Getting started
 
-```bash
-git clone --recurse-submodules https://github.com/ZappaVinny/boz-redux-sdk.git
-cd boz-redux-sdk
-python3 -m pip install -e '.[desktop]'
-boz-sdk                                   # the SDK app: projects, the asset library, the editor
-```
+1. **Client:** download it from the [client releases](https://github.com/ZappaVinny/boz-redux/releases),
+   unzip, run `boz-redux.exe` (Linux: `boz-redux`). On **Game files**, choose your 1.0.11 APK and
+   download the data packs, then press **PLAY**.
+2. **SDK:** download it from the [SDK releases](https://github.com/ZappaVinny/boz-redux-sdk/releases),
+   unzip, run `boz-sdk.exe` (Linux: `./boz-sdk`, needs Python 3.11 and `pip install -e '.[desktop]'`
+   in that folder). Choose your client folder when it asks.
+3. **Maps:** install [Blender 5.2 LTS](https://www.blender.org/download/lts/). The SDK finds it.
 
-Or from the command line:
-
-```bash
-bozkit new hello --id hello --name Hello --author you
-bozkit install hello --client path/to/boz-redux
-```
+Then follow [Getting started](docs/getting-started.md).
 
 ## Contents
 
