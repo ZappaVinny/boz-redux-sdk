@@ -170,7 +170,7 @@ def load(context) -> bool:
             asset, _textures = assets.load_game(link.source_dir(), weapon.model["asset"])
             if not asset.bones:
                 asset, error = None, f"{weapon.model['asset']} has no bones: make it as a Weapon"
-        except (assets.AssetError, KeyError, ValueError) as exc:
+        except (assets.AssetError, KeyError, ValueError, ImportError) as exc:
             error = str(exc)
     fit = weapon.model.get("fit") or {}
     editor_state.update(key=key, rig=rig, asset=asset, error=error, cache={}, items=None,

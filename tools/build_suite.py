@@ -13,6 +13,8 @@ import argparse
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +66,35 @@ def _vendor(target: Path) -> None:
         shutil.copy2(runtime, target / '_vendor' / 'bozkit' / 'runtime_names.toml')
 
 
+PILLOW = 'pillow==11.3.0'
+PILLOW_PLATFORMS = {'pillow-linux': 'manylinux_2_28_x86_64', 'pillow-windows': 'win_amd64'}
+
+
+def _vendor_pillow(blender: str | Path, vendor: Path) -> None:
+    """Blender's own Python has no Pillow, which bozkit uses for images: download the wheels for
+    that Python version (Linux and Windows) and unpack them next to the bozkit copy."""
+    result = subprocess.run([str(blender), '-b', '--factory-startup', '--python-expr',
+                             'import sys; print("BOZPY", *sys.version_info[:2])'],
+                            capture_output=True, text=True, encoding='utf-8', errors='replace')
+    found = [line.split()[1:] for line in result.stdout.splitlines() if line.startswith('BOZPY')]
+    if not found:
+        raise RuntimeError(f'cannot read the Python version of {blender}:\n{result.stderr}')
+    version = ''.join(found[0])
+    for folder, platform in PILLOW_PLATFORMS.items():
+        with tempfile.TemporaryDirectory() as temp:
+            download = subprocess.run(
+                [sys.executable, '-m', 'pip', 'download', PILLOW, '--quiet', '--no-deps',
+                 '--only-binary=:all:', '--implementation', 'cp', '--python-version', version,
+                 '--platform', platform, '--dest', temp],
+                capture_output=True, text=True, encoding='utf-8', errors='replace')
+            wheels = list(Path(temp).glob('*.whl'))
+            if download.returncode != 0 or not wheels:
+                raise RuntimeError(f'cannot download Pillow for Python {version} ({platform}):\n'
+                                   f'{download.stderr}')
+            with zipfile.ZipFile(wheels[0]) as wheel:
+                wheel.extractall(vendor / folder)
+
+
 def build(blender: str | Path, output: Path = OUTPUT) -> Path:
     scripts = output / 'scripts'
     if output.exists():
@@ -76,6 +107,7 @@ def build(blender: str | Path, output: Path = OUTPUT) -> Path:
     script = output / 'generate.py'
     script.write_text(GENERATE, encoding='utf-8', newline='\n')
     startup = template / 'startup.blend'
+    _vendor_pillow(blender, template / '_vendor')
     result = subprocess.run([str(blender), '-b', '--factory-startup', '--python', str(script),
                              '--', str(template / 'tabs.py'), str(startup)],
                             capture_output=True, text=True, encoding='utf-8', errors='replace')

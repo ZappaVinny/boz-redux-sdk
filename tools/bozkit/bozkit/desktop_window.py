@@ -1066,8 +1066,12 @@ class Window(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
-        self.resize(1180, 760)
-        self.setMinimumSize(980, 640)
+        # 1180x760, or 90% of the screen's free area when that is smaller (display scaling).
+        free = self.screen().availableGeometry()
+        width, height = min(1180, free.width() * 9 // 10), min(760, free.height() * 9 // 10)
+        self.resize(width, height)
+        self.setMinimumSize(min(980, width), min(640, height))
+        self.move(free.center() - self.rect().center())
         self.settings = sdkhome.Settings.load()
         self.client_status: sdkhome.ClientStatus | None = None
         self.library_worker = None
