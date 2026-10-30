@@ -41,7 +41,7 @@ def add_to_menu() -> int:
 
 
 def check() -> int:
-    from . import navbuild, project, schema, sdkhome
+    from . import navbuild, schema, sdkhome
     root = sdk_root()
     items = {
         'SDK folder': root,
