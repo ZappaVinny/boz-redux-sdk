@@ -500,15 +500,29 @@ def run_in_game(project: sdk_project.Project, root: str | Path,
     return message
 
 
+def _real_blender(path: Path) -> Path:
+    """blender.exe for Windows' blender-launcher.exe (what the Start menu runs), which starts
+    Blender without a console and passes no output or exit code back."""
+    if path.name.lower() == 'blender-launcher.exe' and path.with_name('blender.exe').is_file():
+        return path.with_name('blender.exe')
+    return path
+
+
 def find_blender(settings: Settings) -> Path | None:
-    """The Blender the editor runs in: the settings' choice, the SDK's own, or one on PATH."""
+    """The Blender the editor runs in: the settings' choice, the SDK's own, one on PATH, or (on
+    Windows) the newest 5.x in Program Files."""
     candidates = [Path(settings.blender)] if settings.blender else []
     names = ('blender.exe',) if sys.platform == 'win32' else ('blender',)
     candidates += [sdk_root() / 'blender' / name for name in names]
     found = shutil.which('blender')
     if found:
         candidates.append(Path(found))
-    return next((path for path in candidates if path.is_file()), None)
+    if sys.platform == 'win32':
+        program_files = Path(os.environ.get('ProgramFiles', r'C:\Program Files'))
+        candidates += sorted(program_files.glob('Blender Foundation/Blender 5.*/blender.exe'),
+                             reverse=True)
+    found = next((path for path in candidates if path.is_file()), None)
+    return _real_blender(found) if found else None
 
 
 def suite_dir() -> Path:

@@ -64,7 +64,7 @@ jobs:
               | tar -xJ --strip-components=1 -C .blender-ci
           fi
       - name: Build the editor
-        run: python3 tools/build_suite.py --blender .blender-ci/blender
+        run: python3 tools/build_suite.py --blender .blender-ci/blender --all-platforms
       - name: Package
         run: tools/package_release.sh "${{ steps.version.outputs.version }}"
       - uses: actions/upload-artifact@v4
