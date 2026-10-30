@@ -553,6 +553,19 @@ def suite_dir() -> Path:
     return release if release.is_dir() else sdk_root() / 'build' / 'suite'
 
 
+def _without_venv(env: dict) -> dict:
+    """*env* without the virtual environment the SDK runs in. A Blender built on the system's
+    Python (Linux distribution packages) finds the venv's python first on PATH, takes the venv as
+    its home and loses the system packages it needs (numpy, cattrs)."""
+    venv = env.pop('VIRTUAL_ENV', None) or (sys.prefix if sys.prefix != sys.base_prefix else None)
+    if venv:
+        scripts = os.path.normcase(os.path.join(venv, 'Scripts' if sys.platform == 'win32' else 'bin'))
+        env['PATH'] = os.pathsep.join(part for part in env.get('PATH', '').split(os.pathsep)
+                                      if os.path.normcase(part.rstrip('/\\')) != scripts)
+    env.pop('PYTHONHOME', None)
+    return env
+
+
 def editor_command(project: sdk_project.Project, settings: Settings) -> tuple[list[str], dict]:
     """The command and environment that open *project* in the editor."""
     blender = find_blender(settings)
@@ -561,7 +574,7 @@ def editor_command(project: sdk_project.Project, settings: Settings) -> tuple[li
     suite = suite_dir()
     if not (suite / 'scripts' / 'startup' / 'bl_app_templates_user' / 'boz_suite').is_dir():
         raise sdk_project.ProjectError(f'the editor is missing from {suite}')
-    env = dict(os.environ)
+    env = _without_venv(dict(os.environ))
     env.update({'BLENDER_USER_SCRIPTS': str(suite / 'scripts'),
                 'BLENDER_USER_CONFIG': str(data_dir() / 'blender' / 'config'),
                 'BOZ_PROJECT': str(project.root), 'BOZ_SDK_ROOT': str(sdk_root()),
