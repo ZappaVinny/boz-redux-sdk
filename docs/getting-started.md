@@ -277,10 +277,11 @@ areas.
 ### 5. Play it from the client
 
 Your map is now a mod in the client, and the client knows it is a map. In the client's launcher,
-the list next to **PLAY** offers **Main menu** and every map from your enabled mods. Pick
-**my_arena** (it shows your mod's name) and press **PLAY**: the game starts straight into it.
-Pick **Main menu** to start the game normally. No scripting is needed for this; every map built
-by the SDK can be started this way.
+press **PLAY**: it lists every map from your enabled mods (yours shows your mod's name). **PLAY
+SOLO** starts the game straight into it. **CO-OP ROOM** takes you straight into the game's Wi-Fi
+co-op room for that map: it joins a friend's room on the same map when it finds one, or hosts one
+(everyone needs the map's mod). **MAIN MENU** starts the game normally. No scripting is needed
+for this; every map built by the SDK can be started this way.
 
 Next, [The map editor](map-editor.md) explains every tab and tool, and
 [Weapons, models, effects and sounds](weapons-and-assets.md) covers your own guns, models and

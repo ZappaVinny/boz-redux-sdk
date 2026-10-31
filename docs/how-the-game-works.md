@@ -174,6 +174,15 @@ are separate connection objects. Per-round speeds come from the round definition
 The game has local Wi-Fi co-op (discovery plus TCP), with the host running the match and the
 other players following it. Online play used Activision's servers, which BOZ Redux does not use.
 
+The Wi-Fi lobby has a level (`g_lobbyLevel`, set by `FrontEnd_SetLobbyLevel`). It first searches
+for `MultiplayerLobbyTimeWifiMs` (20 s) and joins a room whose name starts with that level
+(`CFrontendStateConnectWifi::MatchesRoom`); if none answers it publishes its own room as
+`<level>_<n>`. Joining runs a handshake in which the room refuses a full room or a second player
+with a name already in it (`CIwNetworkRoom::vf15`). With the map vote off
+(`FrontEnd_SetMapVote(0)`), the host's start sends `Event_Start_Game` with
+`CLevelManager+0x55` to every player, and like `StartLevel` it is not checked against a list, so
+co-op works on mod maps when every player has the mod (`boz.levels.coop`).
+
 ## How levels load
 
 How the game finds and loads a level, and what a level the game does not ship needs to load. The

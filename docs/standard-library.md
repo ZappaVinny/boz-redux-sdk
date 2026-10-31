@@ -823,19 +823,20 @@ Console variables (points at start, power-up drops and times, the score table, .
 Start levels (Zombies maps) without going through the menus.
 
 ```lua
-levels.start("kino")      levels.autostart_from_settings()
+levels.start("kino")      levels.coop("kino")      levels.autostart_from_settings()
 ```
 
 <details><summary>How it works</summary>
 
-the front end's StartLevel console command starts a single-player match on a level by name (it sends the game's own start-game event). The command only works once the front end is running, so levels.start waits for the Flash menu's first ActionScript call and a short settling time. levels.autostart_from_settings reads a one-shot request from the mod's settings: the editor's Build & Run writes it to start the level just saved.
+the front end's StartLevel console command starts a single-player match on a level by name (it sends the game's own start-game event). The command only works once the front end is running, so levels.start waits for the Flash menu's first ActionScript call and a short settling time. levels.autostart_from_settings reads a one-shot request from the mod's settings: the editor's Build & Run and the launcher write it. levels.coop does what the multiplayer screen does on its Wi-Fi button with one map chosen: map vote off, the map as the lobby's level (CLevelManager+0x55 and FrontEnd_SetLobbyLevel), then the Flash page change to the Wi-Fi lobby. The lobby searches for a room whose name starts with the level, joins it, or else publishes its own; the host's start event carries the level to every player (each needs the map's mod).
 
 </details>
 
 | Function | Description |
 | --- | --- |
 | `levels.start(name)` | Starts a single-player match on the level (e.g. "kino") once the front end is up. Call it while the mod's script starts; the match starts after the main menu appears. |
-| `levels.autostart_from_settings()` | Starts the level a tool asked for, once: reads and clears the mod's "autostart_level" setting (the SDK's Build & Run writes it), and its "autostart_vars" ("Name=value;..."), console variables set just before the level starts (e.g. UnlimitedHealth=true). Returns the level name or nil. |
+| `levels.coop(name)` | Opens the Wi-Fi co-op room for the level once the front end is up, as the multiplayer screen does with one map chosen: it joins a room on the same level when it finds one, else hosts. Every player needs the level (the map's mod). Call it while the mod's script starts. |
+| `levels.autostart_from_settings()` | Starts the level a tool asked for, once: reads and clears the mod's "autostart_level" setting (the SDK's Build & Run and the launcher write it), its "autostart_mode" ("coop": the co-op room instead of a single-player match) and its "autostart_vars" ("Name=value;..."), console variables set just before the level starts (e.g. UnlimitedHealth=true). Returns the level name or nil. |
 
 ## Engine access
 

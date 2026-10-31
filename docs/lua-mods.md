@@ -47,7 +47,7 @@ mods/<folder>/
 | `id` | Unique, lower-case, no spaces. Used for settings and the load order. Defaults to the folder name. |
 | `name`, `version`, `author`, `description` | Shown in the launcher. |
 | `game` | The game version the mod is made for (`1.0.11`). The launcher warns about others. |
-| `maps` | The levels the mod adds (`["my_arena"]`). The client's launcher offers each of them next to **PLAY**. The SDK writes it for map projects. |
+| `maps` | The levels the mod adds (`["my_arena"]`). The client's launcher offers each of them when you press **PLAY**, alone or as a co-op room. The SDK writes it for map projects. |
 
 A mod that uses the standard library carries its own copy in `scripts/boz`. SDK projects add it
 for you; for a hand-made mod, copy the SDK's `lib/boz` folder there.
@@ -396,7 +396,7 @@ bozkit package my-mod
 
 This writes `build/<mod id>-<version>.zip`. Identical projects always give identical ZIPs: file
 order, times and paths are normalised. Players unzip it into their client's `mods/` folder and
-tick it in the launcher's **Mods** tab. A map mod then appears in the list next to **PLAY**.
+tick it in the launcher's **Mods** tab. A map mod then appears in the list **PLAY** opens.
 
 Before you share:
 
