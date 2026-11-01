@@ -69,13 +69,29 @@ function objects.level()
     return level_key()
 end
 
+local aliases = nil   -- lower world name -> the entity's name in the game
+
+-- The name an object's entity has in the game: its world name, except where the map renamed it
+-- (world_data aliases: a new map's power switch is always PowerSwitch, the level listens to it).
+local function entity_name(name)
+    if aliases == nil then
+        aliases = {}
+        local ok, data = pcall(require, "boz.world_data")
+        for world_name, game_name in pairs(ok and type(data) == "table" and data.aliases or {}) do
+            aliases[string.lower(world_name)] = game_name
+        end
+    end
+    return aliases[string.lower(name)] or name
+end
+
 --- The object called `name` (a handle: it finds the entity when used, so it can be made before
 --- the level loads). Names are not case-sensitive.
 function objects.get(name)
     local key = string.lower(name)
     local object = by_name[key]
     if not object then
-        object = setmetatable({name = name, hash = hash.name(name), entity = 0, level = nil}, Object)
+        object = setmetatable({name = name, hash = hash.name(entity_name(name)), entity = 0,
+                               level = nil}, Object)
         by_name[key] = object
     end
     return object

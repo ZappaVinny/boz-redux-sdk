@@ -581,9 +581,26 @@ def editor_command(project: sdk_project.Project, settings: Settings) -> tuple[li
                 'BOZ_SDK_HOME': str(data_dir()), 'BOZ_CLIENT': settings.client})
     command = [str(blender), '--offline-mode', '--app-template', 'boz_suite']
     blend = project.root / 'map.blend'
+    if blend.is_file() and not _readable_blend(blend):
+        # Cut short (a crash while saving): kept aside, and the editor rebuilds map.blend from
+        # the world source, as on a project's first open.
+        blend.replace(blend.with_name('map.blend.broken'))
     if blend.is_file():
         command.append(str(blend))
     return command, env
+
+
+BLEND_MAGIC = (b'BLENDER', b'\x28\xb5\x2f\xfd', b'\x1f\x8b')   # plain, zstd, gzip
+
+
+def _readable_blend(path: Path) -> bool:
+    """Whether *path* starts like a .blend Blender can open (an empty one does not)."""
+    try:
+        with open(path, 'rb') as handle:
+            head = handle.read(7)
+    except OSError:
+        return False
+    return any(head.startswith(magic) for magic in BLEND_MAGIC)
 
 
 def prepare_editor(settings: Settings) -> None:

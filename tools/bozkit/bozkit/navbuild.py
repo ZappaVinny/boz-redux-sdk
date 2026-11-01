@@ -408,13 +408,15 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
 
 
 def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None,
-          blocking=None, doors=()) -> bytes:
+          blocking=None, doors=(), links=()) -> bytes:
     """A new navmesh for new geometry, on *body*'s settings and tile grid (a shipped navmesh as
     template). Every tile the geometry touches is built; all floor is plain walkable (flags 1, no
-    name) and there are no off-mesh links. Input as for :func:`rebuild`; *blocking* flags
-    obstacle triangles that are never walkable on top. *doors*: (name hash, XZ polygon, min y,
-    max y): floor under each is cut out as its own polygons, tagged as the game tags doors
-    (flags | 2, the door's name), so it opens only when the door is bought."""
+    name). Input as for :func:`rebuild`; *blocking* flags obstacle triangles that are never
+    walkable on top. *doors*: (name hash, XZ polygon, min y, max y): floor under each is cut out
+    as its own polygons, tagged as the game tags doors (flags | 2, the door's name), so it opens
+    only when the door is bought. *links*: off-mesh links (start, end in metres, radius,
+    bidirectional, user), as shipped levels have for window crossings (user: the barricade's
+    name)."""
     triangles = _facing_up(vertices_m, triangles)
     mesh = navigation.decode(body)
     settings = Settings.from_raw(mesh.config.raw)
@@ -433,7 +435,12 @@ def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None,
     last_y = min(rows - 1, math.floor((max(zs) - mesh.origin[2]) / mesh.tile_width) + 1)
     grid = [(x, y) for y in range(first_y, last_y + 1) for x in range(first_x, last_x + 1)]
     doors = list(doors)[:62]
-    request = _request(settings, mesh, vertices_m, triangles, grid, [], blocking,
+    # Recast puts floor up to a cell above the geometry and Detour drops a link whose end lies
+    # below the tile's floor: links start half a cell up (Detour still finds the floor under).
+    lift = settings.cell_height / 2
+    links = [((start[0], start[1] + lift, start[2]), (end[0], end[1] + lift, end[2]), radius,
+              both, user) for start, end, radius, both, user in links]
+    request = _request(settings, mesh, vertices_m, triangles, grid, links, blocking,
                        [(polygon, low - 0.5, high) for _name, polygon, low, high in doors])
     with tempfile.TemporaryDirectory(prefix='boz-navmesh-') as directory:
         request_path = Path(directory) / 'request.bin'

@@ -1052,7 +1052,7 @@ if LIBRARY:
     fourth = next((o for o in scene.objects if o.boz.source == "spawn_player_4"), None)
     if fourth is not None:
         bpy.data.objects.remove(fourth)
-    for key in ("juggernog", "pack_a_punch", "player_spawn", "wall_buy"):
+    for key in ("juggernog", "pack_a_punch", "mystery_box", "player_spawn", "wall_buy"):
         stand_in = bpy.data.objects.new(f"piece {key}", None)
         stand_in["boz_asset_kind"] = "piece"
         stand_in["boz_piece"] = key
@@ -1074,7 +1074,7 @@ if LIBRARY:
         check(abs(spot[0] - 100.0) < 0.5 and abs(spot[1] - 200.0) < 0.5 and abs(spot[2]) < 0.5,
               f"{obj.name} landed at the drop point ({tuple(round(c, 1) for c in spot)})")
     pieces = {o.get("boz_piece"): o for o in scene.objects if o.get("boz_piece")}
-    check(set(pieces) >= {"juggernog", "pack_a_punch", "player_spawn", "wall_buy"},
+    check(set(pieces) >= {"juggernog", "pack_a_punch", "mystery_box", "player_spawn", "wall_buy"},
           f"game prefabs are placed ({sorted(pieces)})")
     check(pieces["wall_buy"].type == "MESH" and pieces["wall_buy"].get("boz_f:boz.weapon"),
           "a wall buy shows its weapon")

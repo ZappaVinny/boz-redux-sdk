@@ -64,6 +64,32 @@ local function find_field(class_name, field, base_offset, seen)
     return nil
 end
 
+-- Where CIsComponent sits in a class (0 for most; 0x20 in CTrap, CTrapSwitch, CCentrifuge, ...).
+local function component_base(class_name, seen)
+    local info = classes[class_name]
+    seen = seen or {}
+    if not info or seen[class_name] then
+        return nil
+    end
+    seen[class_name] = true
+    for _, base in ipairs(info.bases) do
+        if base[1] == "CIsComponent" then
+            return base[2] or 0
+        end
+        local inner = component_base(base[1], seen)
+        if inner then
+            return (base[2] or 0) + inner
+        end
+    end
+    return nil
+end
+
+--- The object a component table entry belongs to: tables (T::s_table, boz.components) hold the
+--- CIsComponent part, which is not at the start of every class, while field offsets are.
+function reflect.object(component, class_name)
+    return component - (component_base(class_name) or 0)
+end
+
 --- Every field of a class with its bases' fields: {[name] = {offset, size, type, class}}.
 function reflect.fields(class_name)
     local out = {}

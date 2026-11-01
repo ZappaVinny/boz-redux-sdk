@@ -30,7 +30,8 @@ def compile_world(pack, name: str, world: World,
     layout.weapons = list(weapons)
     files = _compile_layout(pack, name, layout, fixed)
     files.runtime['objects'] = describe(world)
-    files.runtime['names'] = object_names(world)
+    files.runtime['names'] = sorted(set(object_names(world)) |
+                                    set(files.runtime.get('aliases', {}).values()))
     return files
 
 
@@ -117,6 +118,109 @@ HIT_TEMPLATE = 'levels/kino/kino_statics.group.bin'                         # CE
 USE_TEMPLATE = 'levels/kino/kino_statics.group.bin'                         # barricade CPOI
 HIT_SONG_FIELD = 0xc0c5b1df   # CEasterEgg's song path (unnamed in the reflection)
 HIT_SONG = 'boz/hit_volume'   # no such song: the group never completes
+
+# Entities find each other by name (how-the-game-works, Entity links and areas). Placed game
+# prefabs are renamed (scripts find them by their world names), so the compiler points these
+# links at the names the entities have in the map.
+POWER_SWITCH = 'PowerSwitch'   # DefaultPowerSwitchName: the level listens to the switch so named
+POWER_LINK = 'powerSwitch'     # perks, Pack-a-Punch, doors, trap switches, teleporters, screens
+LIST_LINKS = (('CTrapSwitch', 'traps'), ('CDoor', 'm_Siblings'))
+
+
+def rewire_links(spec, home: str, renames: dict, present: set, power: int) -> bool:
+    """Point a placed entity's links at this map's entities. A link to an entity the map has
+    stays; one to an entity placed from the same group (*home*) under a new name (*renames*:
+    (group, old name hash) -> name hash) follows it; otherwise a power link goes to the map's
+    power switch (*power*, 0: none) and a list entry is dropped. Returns whether it changed."""
+    from . import toolkit
+
+    no_power = iw_hash(toolkit.NO_POWER)
+
+    def resolve(value):
+        return value if value in present else renames.get((home, value))
+
+    changed = False
+    for component in spec.components:
+        prop = spec_fields.prop(component.blob, POWER_LINK) if component.blob else None
+        if prop is None or len(prop.raw) != 4:
+            continue
+        (value,) = struct.unpack('<I', prop.raw)
+        if not value or value == no_power:
+            continue    # works without power (boz.world powers perks marked boz_no_power)
+        new = resolve(value) or power
+        if new and new != value:
+            prop.raw = struct.pack('<I', new)
+            prop.nested = prop.elements = None
+            changed = True
+    for component_name, field_name in LIST_LINKS:
+        blob = spec_fields.component_blob(spec, component_name)
+        prop = spec_fields.prop(blob, field_name)
+        if prop is None:
+            continue
+        values = toolkit.hash_list(prop.raw)
+        new_values = [new for new in map(resolve, values) if new]
+        if new_values != values:
+            prop.raw = toolkit.encode_hash_list(new_values)
+            prop.nested = prop.elements = None
+            changed = True
+    return changed
+
+
+def set_level_boxes(level_blob, boxes: list[int]) -> None:
+    """The level's mystery box fields for the map's own boxes (name hashes, in placing order):
+    the box starts at the first, and no box is avoided. Left as they were, they name the base
+    level's boxes, and a map with a box or Pack-a-Punch crashes as it loads."""
+    from . import reflect
+
+    avoid = spec_fields.prop(level_blob, 'MysteryBoxAvoid')
+    start = spec_fields.prop(level_blob, 'MysteryBoxStart')
+    if avoid is not None:
+        avoid.raw = struct.pack('<I', 0)
+    if boxes:
+        if start is None:
+            start = reflect.Property(level_blob.class_hash, iw_hash('unsigned int'),
+                                     iw_hash('MysteryBoxStart'), b'')
+            level_blob.properties.append(start)
+        start.raw = struct.pack('<I', boxes[0])
+    elif start is not None:
+        start.raw = struct.pack('<I', 0)
+
+
+def window_links(navmesh_body: bytes, barricade: int, home, placed) -> list[tuple]:
+    """The off-mesh links zombies climb through a barricade by: shipped levels have one per
+    barricade, its user id the barricade's name hash, from 1 m outside to 1 m inside. *home* and
+    *placed* are (position cm, rotation xyzw) of the barricade in its level and in the map; the
+    links come back moved with it, in metres, as navbuild.build takes them (user still the
+    barricade's home name). None found: one generated through it along its local Z."""
+    from . import navigation
+
+    found = []
+    mesh = navigation.decode(navmesh_body)
+    for tile in mesh.tiles:
+        for start, end, radius, _extra, _poly, flags, _side, user in \
+                navigation.decode_tile(tile.data).off_mesh:
+            if user == barricade:
+                found.append((start, end, radius, bool(flags & 1)))
+    home_position, home_rotation = home
+    position, rotation = placed
+    undo = (-home_rotation[0], -home_rotation[1], -home_rotation[2], home_rotation[3])
+
+    def move(point_m):
+        local = spec_fields.rotate(undo, tuple(point_m[i] * 100 - home_position[i]
+                                               for i in range(3)))
+        turned = spec_fields.rotate(tuple(rotation), local)
+        return tuple((position[i] + turned[i]) / 100 for i in range(3))
+
+    if not found:
+        outside, inside = (tuple((home_position[i] + offset[i]) / 100 for i in range(3))
+                           for offset in (spec_fields.rotate(tuple(home_rotation), (0.0, 0.0, side))
+                                          for side in (-WINDOW_REACH, WINDOW_REACH)))
+        found = [(outside, inside, WINDOW_RADIUS, False)]
+    return [(move(start), move(end), radius, both, barricade) for start, end, radius, both in found]
+
+
+WINDOW_REACH = 100.0   # cm: a shipped window link starts and ends this far either side
+WINDOW_RADIUS = 0.4    # metres: every shipped window link's radius
 
 
 def library_map(path: str) -> str:
@@ -256,6 +360,14 @@ class _Level:
         self.player_radius = _player_radius(statics)
         self.runtime = {'hidden': [], 'no_collision': [], 'blocked': []}
         self.scripted: set[int] = set()            # id() of scripted entity resources
+        # Placed entities' links (rewire_links): their groups and their names in the map.
+        self.homes: dict[int, str] = {}            # id() of an added resource -> its group
+        self.renames: dict[tuple[str, int], int] = {}   # (group, name hash) -> name in the map
+        self.power = 0                             # the map's power switch (new maps)
+        self.boxes: list[int] = []                 # placed mystery boxes, in order
+        self.pack_a_punch = False                  # a Pack-a-Punch was placed
+        self.window_spawns: list = []              # (name, position) of window zombie spawns
+        self.barricades: list = []   # (placement, home name, group, home position and rotation)
 
     def add(self, cls: int, key: int, body: bytes) -> None:
         if key in self.present[cls]:
@@ -346,7 +458,20 @@ class _Level:
         key = entity.hash
         copy_name = None
         script = script_of(entity).get('name', '')
-        if script and script.lower() != entity.source.lower():
+        spec = resources.decode_entity_spec(body)
+        power = spec_fields.component(spec, 'CPowerSwitch') is not None and not self.inherited
+        if power and self.power:
+            self.runtime.setdefault('warnings', []).append(
+                f'{script or entity.source}: only the first power switch turns the power on')
+        if power and not self.power:
+            # The level listens to the switch called PowerSwitch, and powered things link to it
+            # by that name: a new map's switch is called that, and scripts still reach it by
+            # its world name (boz.objects aliases).
+            copy_name = POWER_SWITCH
+            key = self.power = iw_hash(POWER_SWITCH)
+            if script and script.lower() != POWER_SWITCH.lower():
+                self.runtime.setdefault('aliases', {})[script] = POWER_SWITCH
+        elif script and script.lower() != entity.source.lower():
             # Placed with a script name: the copy is called that (scripts find it by it).
             copy_name = script
             key = iw_hash(script)
@@ -357,7 +482,14 @@ class _Level:
             copy_name = f'{self.name}_copy_{self.copies}'
             key = iw_hash(copy_name)
         self.used.add(key)
-        spec = resources.decode_entity_spec(body)
+        home = entity.group or self.base_statics
+        self.renames[(home, entity.hash)] = key
+        if spec_fields.component(spec, 'CBarricade') is not None:
+            self.barricades.append((entity, entity.hash, home, spec_fields.local_transform(spec)[:2]))
+        if spec_fields.component(spec, 'CMysteryBox') is not None:
+            self.boxes.append(key)
+        if spec_fields.component(spec, 'CPackAPunch') is not None:
+            self.pack_a_punch = True
         if copy_name is not None:
             named = spec_fields.component(spec, 'CIsNamed')
             prop = spec_fields.prop(named.blob, 'name') if named and named.blob else None
@@ -381,6 +513,9 @@ class _Level:
             self.repack(spec_hashes(spec), entity.group)
         if spec_fields.component(spec, 'CSpawnPoint'):
             self.zombie_spawns.append(key)
+            if entity.piece == 'zombie_window':
+                self.window_spawns.append((script_of(entity).get('name') or entity.source,
+                                           tuple(entity.position)))
         if spec_fields.component(spec, 'CWeaponChalkOutline') is not None:
             self.wall_buys.append((entity, spec))
             poi = spec_fields.component(spec, 'CPOI')
@@ -396,6 +531,7 @@ class _Level:
                 resource.body = resources.encode_entity_spec(spec)
         self.kept.append(resource)
         self.added.append(resource)
+        self.homes[id(resource)] = home
         self._mark([entity.position])
         if entity.script and script_of(entity)['dynamic']:
             self._script_entity(entity, resource, spec)
@@ -675,7 +811,7 @@ class _Level:
                 return skel, pair[0], pair[1]
         return None
 
-    def build(self, mesh: Mesh, model_name: str) -> None:
+    def build(self, mesh: Mesh, model_name: str, scale: float = 1.0) -> None:
         from . import native
 
         materials = []
@@ -692,7 +828,8 @@ class _Level:
             materials.append(iw_hash(material_name))
         triangles, faces = mesh.model_triangles()
         self.add(levels.MODEL, iw_hash(model_name),
-                 native.build_model(mesh.vertices, mesh.uvs, triangles, materials, faces))
+                 native.build_model(mesh.vertices, mesh.uvs, triangles, materials, faces,
+                                    scale=scale))
 
     def place(self, entity_name: str, model_hash: int, position, rotation=(0.0, 0.0, 0.0, 1.0),
               scale=UNIT, named: bool = False) -> None:
@@ -882,8 +1019,13 @@ class _Level:
         return True
 
     def build_props(self, world: Layout) -> None:
+        largest = {}
+        for instance in world.instances:
+            if instance.prop:
+                largest[instance.prop] = max(largest.get(instance.prop, 1.0),
+                                             *(abs(s) for s in instance.scale))
         for prop in world.props:
-            self.build(prop, f'{self.name}_prop_{prop.name}')
+            self.build(prop, f'{self.name}_prop_{prop.name}', largest.get(prop.name, 1.0))
 
     def contents(self, world: Layout) -> None:
         """The world's own meshes and instances (props are built first: build_props)."""
@@ -1029,7 +1171,71 @@ class _Level:
     def finish_entities(self) -> None:
         self.by_class[levels.ENTITY_SPEC].resources = self.kept
 
+    def rewire_links(self) -> None:
+        """Point the placed entities' links at the names entities have in the map (after every
+        entity is placed; see rewire_links)."""
+        from . import resources
 
+        present = {r.in_group_hash for r in self.kept}
+        for resource in self.added:
+            home = self.homes.get(id(resource))
+            if home is None:
+                continue
+            spec = resources.decode_entity_spec(resource.body)
+            if rewire_links(spec, home, self.renames, present, self.power):
+                resource.body = resources.encode_entity_spec(spec)
+        self.link_trap_switches()
+
+    def link_trap_switches(self) -> None:
+        """A placed trap switch whose own traps are not in the map (another trap was placed,
+        say Kino's electro switch with the Firepit) runs the trap nearest to it."""
+        from . import resources, toolkit
+
+        traps, switches = [], []
+        for resource in self.added:
+            spec = resources.decode_entity_spec(resource.body)
+            if spec_fields.component(spec, 'CTrapSwitch') is not None:
+                switches.append((resource, spec))
+            elif spec_fields.component(spec, 'CTrap') is not None:
+                traps.append((resource.in_group_hash, spec_fields.local_transform(spec)[0]))
+        if not traps:
+            return
+        for resource, spec in switches:
+            prop = spec_fields.prop(spec_fields.component_blob(spec, 'CTrapSwitch'), 'traps')
+            if prop is None or toolkit.hash_list(prop.raw):
+                continue
+            where = spec_fields.local_transform(spec)[0]
+            nearest = min(traps, key=lambda trap: sum((a - b) ** 2 for a, b in zip(trap[1], where)))
+            prop.raw = toolkit.encode_hash_list([nearest[0]])
+            prop.nested = prop.elements = None
+            resource.body = resources.encode_entity_spec(spec)
+
+    def window_links(self) -> list[tuple]:
+        """The off-mesh links zombies climb through the placed barricades by, taken from their
+        own levels' navmeshes (window_links), for navbuild.build."""
+        links = []
+        for entity, value, home, home_transform in self.barricades:
+            navmesh = next((r.body for t in self.game.group(home).types()
+                            if t.class_hash == levels.NAVMESH for r in t.resources), None)
+            if navmesh is None:
+                continue
+            placed = (tuple(entity.position), entity.quaternion())
+            for start, end, radius, both, _user in window_links(navmesh, value, home_transform,
+                                                                 placed):
+                links.append((start, end, radius, both, self.renames[(home, value)]))
+        # Window zombies climb in through a barricade's window crossing: a window spawn with no
+        # barricade near it is never used.
+        for name, where in self.window_spawns:
+            if not any(sum((a - b) ** 2 for a, b in zip(where, entity.position))
+                       <= SPAWN_TO_BARRICADE ** 2
+                       for entity, _value, _home, _transform in self.barricades):
+                self.runtime.setdefault('warnings', []).append(
+                    f'window zombie spawn {name} has no window barricade within '
+                    f'{SPAWN_TO_BARRICADE / 100:g} m: zombies cannot climb in there')
+        return links
+
+
+SPAWN_TO_BARRICADE = 600.0   # centimetres from a window zombie spawn to its barricade, at most
 TAG_GROW = 0.1   # metres a door's tagged area reaches past its collision on every side
 
 
@@ -1104,6 +1310,7 @@ def _compile_layout(pack, name: str, world: Layout,
     level.build_props(world)
     for entity in world.entities:
         level.entity(entity, move_existing=False)
+    level.rewire_links()
 
     # The starting area lists the zombie spawns that are in the world.
     level_blob = resources.decode_reflected(by_class[levels.LEVEL].resources[0].body)
@@ -1117,6 +1324,12 @@ def _compile_layout(pack, name: str, world: Layout,
         f'<I{len(spawns)}I', len(spawns), *spawns)
     areas[0].body = resources.encode_reflected(area_blob)
     by_class[levels.AREA].resources = areas
+    if level.pack_a_punch and not level.boxes:
+        # The game's box and Pack-a-Punch manager looks up the boxes unchecked once anything is
+        # registered with it (FUN_4a12d080): with no box the level crashes as it loads.
+        raise WorldError('Pack-a-Punch needs a mystery box in the map')
+    set_level_boxes(level_blob, level.boxes)
+    by_class[levels.LEVEL].resources[0].body = resources.encode_reflected(level_blob)
 
     level.contents(world)
     level.add_chalks()
@@ -1132,7 +1345,8 @@ def _compile_layout(pack, name: str, world: Layout,
     template = navmesh.body
     navmesh.body = level.build_navmesh(lambda: navbuild.build(
         template, [(x / 100, y / 100, z / 100) for x, y, z in level.solid], level.single,
-        blocking=level.blocking, doors=level.door_footprints(level.kept)))
+        blocking=level.blocking, doors=level.door_footprints(level.kept),
+        links=level.window_links()))
 
     files.groups[f'{name}.group.bin'] = levels.renamed(
         levels.read_group_at(pack, f'levels/{base}/{base}'), name,
@@ -1187,6 +1401,7 @@ def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFil
     level.build_props(world)
     for entity in world.entities:
         level.entity(entity, move_existing=True)
+    level.rewire_links()
     level.contents(world)
     level.add_chalks()
     level.entity_boxes(level.added)

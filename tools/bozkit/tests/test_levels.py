@@ -173,6 +173,14 @@ class GeneratedAssetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             native.build_model([(40000, 0, 0)], [(0.0, 0.0)], [], [1])
 
+    def test_scaled_model_sphere_covers_the_scale(self):
+        corners = [(-300, 0, -300), (300, 0, -300), (300, 0, 300)]
+        uvs = [(0.0, 0.0)] * 3
+        plain = native.build_model(corners, uvs, [(0, 1, 2)], [1])
+        scaled = native.build_model(corners, uvs, [(0, 1, 2)], [1], scale=3.0)
+        self.assertEqual(struct.unpack_from('<I', plain, 20)[0], 425)
+        self.assertEqual(struct.unpack_from('<I', scaled, 20)[0], 1275)
+
     def test_new_texture_keeps_template_header(self):
         template = bytearray(17) + bytes(2 * 2 * 4) + b'\0'
         template[4] = 0x0E

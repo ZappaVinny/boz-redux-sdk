@@ -926,6 +926,7 @@ Types read: unsigned int, int, short, char, unsigned char, bool, float, CIwFVec3
 | --- | --- |
 | `reflect.class(name)` | The class description {bases = {{name, offset}}, fields = {[name] = {offset, size, type}}}, or nil. |
 | `reflect.classes()` | Every reflected class name, sorted. |
+| `reflect.object(component, class_name)` | The object a component table entry belongs to: tables (T::s_table, boz.components) hold the CIsComponent part, which is not at the start of every class, while field offsets are. |
 | `reflect.fields(class_name)` | Every field of a class with its bases' fields: {[name] = {offset, size, type, class}}. |
 | `reflect.get(object, class_name, field)` | A field's value on an object (a pointer to an instance of the class or a subclass), or nil and why. |
 | `reflect.set(object, class_name, field, value)` | Sets a field (numbers, booleans, {x, y, z} vectors, NetworkProperty values). Returns true, or false and why. |

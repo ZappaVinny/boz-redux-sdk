@@ -72,6 +72,8 @@ check(missing == nil and why:find("no field"), "an unknown field says so")
 check(reflect.component(0x5000, "CHealth") == 0x6000 and reflect.component({id = 7}, "CHealth") == 0x6000,
       "a component by entity or id")
 check(reflect.dump(0x6000, "CHealth").m_MaxHealth == 400, "dump")
+check(reflect.object(0x7020, "CTrap") == 0x7000 and reflect.object(0x6000, "CHealth") == 0x6000,
+      "a table entry's object: CIsComponent at 0x20 in CTrap, at the start in CHealth")
 -- a NetworkProperty field: value at +4, changed flag at +8
 local pm = reflect.fields("CPickupManager")
 local carpenter = pm.m_CanUseCarpenter[1]

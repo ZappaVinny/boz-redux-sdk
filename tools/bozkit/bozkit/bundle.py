@@ -19,7 +19,17 @@ weapons_<map> (the game reads those groups' own resources), the rest into the st
 
 Names are not unique across groups (every weapon has models named Base and LOD1): a resource
 whose name the map already holds with a different body gets a name of its own
-(boz_<group>_<name>), and the copied resources that use it are changed to that name.
+(boz_<group>_<name>), and the copied resources that use it are changed to that name. Names are
+not unique across classes either (Ascension's PackAPunch is a model, a skin and a spec), so a
+use is only renamed for the class it means.
+
+What a resource can find while it loads (a model its materials, a skin its skeleton and model)
+is not every loaded group: CIwResGroup lookups (FUN_4a234434) search the group, its children and
+the shared groups (members flag 1: ingame, snd_player_*, the sectors and their rooms), and
+CIwResManager_GetResHashed only the groups loaded with the current one. The map loads ingame,
+then weapons_<map> (its child weapon_projectiles_<map> first), arms_<map> and <map> (its children
+in order: the base dynamics, then <map>_statics); see Bundle.visible. A resource another of the
+map's groups holds is copied again into each group that cannot see it.
 """
 from __future__ import annotations
 
@@ -45,8 +55,9 @@ ALWAYS_LOADED = ('ingame/ingame.group.bin', 'shared/shared.group.bin',
                  'ingame/effects/visualeffects.group.bin')
 # Resources load in group order and some find others by name while loading (a skin its skeleton
 # and model), so new types go in the shipped order.
-LOAD_ORDER = [TEXTURE, MATERIAL, MODEL, iw_hash('CIwAnimSkel'), iw_hash('CIwAnimSkin'),
-              iw_hash('CIwAnim'), iw_hash('CIsAnimStateMachine')]
+SKELETON, SKIN = iw_hash('CIwAnimSkel'), iw_hash('CIwAnimSkin')
+LOAD_ORDER = [TEXTURE, MATERIAL, MODEL, SKELETON, SKIN, iw_hash('CIwAnim'),
+              iw_hash('CIsAnimStateMachine')]
 
 
 class BundleError(ValueError):
@@ -118,6 +129,15 @@ class Registry:
 
     def references(self, entry: Entry, body: bytes | None = None) -> list[int]:
         """The names *entry* uses (its data, and its classes' runtime names)."""
+        return [value for value, _classes in self.typed_references(entry, body)]
+
+    def typed_references(self, entry: Entry, body: bytes | None = None) -> list[tuple[int, frozenset | None]]:
+        """(name, the classes it can be) of each name *entry* uses; None: any class."""
+        found = self._references(entry, body)
+        classes = USES.get(entry.cls)
+        return [(value, classes) for value in found if value]     # 0: no name (an empty link)
+
+    def _references(self, entry: Entry, body: bytes | None = None) -> list[int]:
         from . import native, reflect, resources
         body = entry.resource.body if body is None else body
         out: list[int] = []
@@ -178,6 +198,50 @@ class Registry:
         return out
 
 
+# The classes a resource's names can be, where its format says (anything else: any class).
+USES = {MODEL: frozenset({MATERIAL}), MATERIAL: frozenset({TEXTURE}),
+        SKIN: frozenset({MODEL, SKELETON})}
+
+
+# Fields that name entities of the map (resolved by their CIsNamed names when it runs), not
+# resources: never followed or renamed.
+LINK_FIELDS = {iw_hash(n) for n in ('powerSwitch', 'traps', 'm_Siblings', 'm_AreasUnlock')}
+
+
+def _kept_words(cls: int, body: bytes) -> tuple[set[int], set[int]]:
+    """(words that are a spec's own structure: class, type and field name hashes, which a
+    rename must not touch (powerSwitch hashes as PowerSwitch); names in link fields)."""
+    from . import resources
+    structure: set[int] = set()
+    links: set[int] = set()
+    if cls != ENTITY_SPEC:
+        return structure, links
+    try:
+        spec = resources.decode_entity_spec(body)
+    except Exception:   # noqa: BLE001 - unreadable spec: nothing kept
+        return structure, links
+
+    def blob(item) -> None:
+        structure.add(item.class_hash)
+        for prop in item.properties:
+            structure.update((prop.owner_hash, prop.type_hash, prop.name_hash))
+            if prop.name_hash in LINK_FIELDS and prop.raw:
+                count = len(prop.raw) // 4
+                values = struct.unpack(f'<{count}I', prop.raw[:count * 4])
+                links.update(values[1:] if count > 1 and values[0] == count - 1 else values)
+            if prop.nested is not None:
+                blob(prop.nested)
+            for element in prop.elements or ():
+                blob(element)
+
+    for component in _components(spec):
+        structure.update((component.class_hash, component.type_hash))
+        for item in component.blobs:
+            blob(item)
+    links.discard(0)
+    return structure, links
+
+
 def _components(spec):
     yield from spec.components
     for _cls, _reserved, child in spec.children:
@@ -212,7 +276,10 @@ class Bundle:
         self.copied: list[tuple[int, int, str, str]] = []     # (class, hash, from path, into file)
         self.renamed: dict[tuple[str, int], int] = {}         # (source path, hash) -> new hash
         self._present: dict[tuple[int, int], bytes] | None = None
+        self._where: dict[tuple[int, int], list[tuple[str, bytes]]] = {}   # what holds each
+        self._order: dict[str, tuple[int, str, bool]] | None = None
         self._done: dict[tuple[str, int, int], int] = {}
+        self._busy: set[tuple[str, int, int]] = set()
         self._own: set | None = None
 
     # What the map already has --------------------------------------------------------------
@@ -249,19 +316,84 @@ class Bundle:
 
     def present(self) -> dict[tuple[int, int], bytes]:
         if self._present is None:
-            self._present = {}
-            own_files = set()
-            for parsed in self.groups.values():
-                own_files.add(id(parsed))
+            self._present, self._where = {}, {}
+            places = [(file_name, parsed) for file_name, parsed in self.groups.items()]
+            places += [(path, self.registry.group(path)) for path in sorted(self.loaded_paths())]
+            for place, parsed in places:
                 for resource_type in parsed.types():
                     for resource in resource_type.resources:
-                        self._present.setdefault((resource_type.class_hash, resource.in_group_hash), resource.body)
-            for path in self.loaded_paths():
-                parsed = self.registry.group(path)
-                for resource_type in parsed.types():
-                    for resource in resource_type.resources:
-                        self._present.setdefault((resource_type.class_hash, resource.in_group_hash), resource.body)
+                        key = (resource_type.class_hash, resource.in_group_hash)
+                        self._present.setdefault(key, resource.body)
+                        self._where.setdefault(key, []).append((place, resource.body))
         return self._present
+
+    # What a group can see while it loads ------------------------------------------------------
+
+    def _child_place(self, path: str) -> str:
+        """A child entry's group: one of the map's own files, or a game group's pack path."""
+        relative = path.replace('//', '/').removeprefix('./')
+        relative = relative if relative.endswith('.bin') else relative + '.bin'
+        own = Path(relative).name
+        return own if own in self.groups else relative
+
+    def load_order(self) -> dict[str, tuple[int, str, bool]]:
+        """{group: (when it loads, the top-level group it loads with, shared)} for the groups a
+        map loads: ingame, the map's weapons, arms and level groups, children before their
+        parent (a group loads its children first)."""
+        if self._order is None:
+            from . import levels
+            order: dict[str, tuple[int, str, bool]] = {}
+
+            def visit(place: str, top: str, shared: bool) -> None:
+                if place in order:
+                    return
+                parsed = self.groups.get(place) if place in self.groups else self.registry.group(place)
+                if parsed is None:
+                    return
+                order[place] = (-1, top, False)              # cycles stop here
+                shared = shared or place in ALWAYS_LOADED or bool(levels.members_flags(parsed) & 1)
+                for path, _name_hash, _flags in levels.children(parsed):
+                    visit(self._child_place(path), top, shared)
+                order[place] = (len([v for v in order.values() if v[0] >= 0]), top, shared)
+
+            name = self.map_name
+            # fixed (shared) is loaded when the game starts; the map may carry its own copy.
+            tops = ['fixed.group.bin', *ALWAYS_LOADED, f'weapons_{name}.group.bin',
+                    f'arms_{name}.group.bin', f'{name}.group.bin']
+            for top in tops:
+                visit(top, top, False)
+            # The map's own groups as the game lists them, also when a caller's set lacks the
+            # parent (projectiles load with the weapons, the statics with the level).
+            for own, top in ((f'weapon_projectiles_{name}.group.bin', f'weapons_{name}.group.bin'),
+                             (f'{name}_statics.group.bin', f'{name}.group.bin')):
+                if own in self.groups and own not in order:
+                    visit(own, top, False)
+            self._order = {k: v for k, v in order.items() if v[0] >= 0}
+        return self._order
+
+    def visible(self, place: str, target: str) -> bool:
+        """Whether resources of *target* (one of the map's files) find those of *place* while
+        they load: the same group, a shared group loaded before it, or a game group loaded
+        before it with the same top-level group (the base dynamics for the statics). The map's
+        other own groups of the same top-level group never count: which of a parent and its
+        child reads its resources first does not matter then."""
+        if place == target:
+            return True
+        order = self.load_order()
+        if target not in order:
+            return True               # not a group the game loads by itself: as before
+        if place not in order:
+            return False
+        when, top, shared = order[place]
+        target_when, target_top, _ = order[target]
+        if top == target_top:
+            return when < target_when and place not in self.groups
+        return when < target_when and shared
+
+    def _seen_from(self, cls: int, name: int, target: str, body: bytes | None = None) -> bool:
+        self.present()
+        return any(self.visible(place, target) and (body is None or held == body)
+                   for place, held in self._where.get((cls, name), []))
 
     # Copying ---------------------------------------------------------------------------------
 
@@ -309,42 +441,69 @@ class Bundle:
         return self.renamed.get((path, value), value)
 
     def _copy(self, entry: Entry, parent_target: str | None, top: bool = False) -> int:
-        """Copy one resource (after what it uses); returns the name it has in the map."""
+        """Copy one resource (after what it uses) where *parent_target* can see it; returns the
+        name it has in the map."""
         key = (entry.path, entry.cls, entry.hash)
-        if key in self._done:
-            return self._done[key]
-        present = self.present()
-        existing = present.get((entry.cls, entry.hash))
         body = entry.resource.body
-        if existing is not None and existing == body:
-            self._done[key] = entry.hash
-            if (entry.cls, entry.hash) in self.own():
-                # Already in the map (put there by another step): what it uses may not be.
-                target = self.target_for(entry, body, parent_target)
-                for value in dict.fromkeys(self.registry.references(entry)):
-                    for child in self.resolve(value, entry.path):
-                        self._copy(child, target)
-            return entry.hash
-        name = entry.hash
-        if existing is not None:
-            # Same name, different resource: this one gets a name of its own.
-            stem = Path(entry.path).name.removesuffix('.group.bin')
-            name = iw_hash(f'boz_{stem}_{entry.hash:08x}')
-            self.renamed[(entry.path, entry.hash)] = name
-            if (entry.cls, name) in present:
-                self._done[key] = name
-                return name
-        self._done[key] = name            # cycles resolve to this name
         target = self.target_for(entry, body, parent_target)
+        if key in self._done:
+            name = self._done[key]
+            if key in self._busy or self._seen_from(entry.cls, name, target):
+                return name
+            # Copied for a group this one cannot see: copied again below.
+        else:
+            present = self.present()
+            existing = present.get((entry.cls, entry.hash))
+            name = entry.hash
+            if existing is not None and existing != body:
+                # Same name, different resource: this one gets a name of its own.
+                stem = Path(entry.path).name.removesuffix('.group.bin')
+                name = iw_hash(f'boz_{stem}_{entry.hash:08x}')
+                self.renamed[(entry.path, entry.hash)] = name
+            self._done[key] = name
+            if self._seen_from(entry.cls, name, target, body):
+                if (entry.cls, name) in self.own():
+                    # Already in the map (put there by another step): what it uses may not be.
+                    self._busy.add(key)
+                    for value, classes in self._uses(entry):
+                        for child in self._children(value, classes, entry.path):
+                            self._copy(child, target)
+                    self._busy.discard(key)
+                return name
+        self._busy.add(key)               # cycles resolve to this name
         # What it uses first, so a renamed one can be pointed at.
         patched = bytearray(body)
-        for value in dict.fromkeys(self.registry.references(entry)):
-            for child in self.resolve(value, entry.path):
-                new = self._copy(child, target)
-                if new != value:
-                    _replace_word(patched, value, new)
+        kept = _kept_words(entry.cls, body)
+        for value, classes in self._uses(entry):
+            if value in kept[1]:
+                continue                  # a link names an entity of the map, not a resource
+            copies = [(child, self._copy(child, target)) for child in self._children(value, classes, entry.path)]
+            new = next((n for _child, n in copies if n != value), None)
+            if new is None or value in kept[0]:
+                continue
+            # Renamed for one class: every class the name can mean here gets that name, so the
+            # use finds the right one whichever class it means.
+            for child, have in copies:
+                if have != new:
+                    self._copy_as(child, have, new, target)
+            _replace_word(patched, value, new)
+        self._busy.discard(key)
         self._write(target, entry, name, bytes(patched))
         return name
+
+    def _copy_as(self, entry: Entry, have: int, new: int, target: str) -> None:
+        """A copy of *entry* (in the map as *have*) under the name *new* where *target* sees it."""
+        if self._seen_from(entry.cls, new, target):
+            return
+        body = next((held for place, held in self._where.get((entry.cls, have), [])
+                     if self.visible(place, target)), entry.resource.body)
+        self._write(target, entry, new, body)
+
+    def _uses(self, entry: Entry):
+        return dict.fromkeys(self.registry.typed_references(entry)).keys()
+
+    def _children(self, value: int, classes, prefer: str) -> list[Entry]:
+        return [child for child in self.resolve(value, prefer) if classes is None or child.cls in classes]
 
     def _write(self, target_file: str, entry: Entry, name: int, body: bytes) -> None:
         target = self.groups.get(target_file) or self.statics
@@ -355,7 +514,8 @@ class Bundle:
             None if resource_type.names_omitted else (entry.resource.name_hash if entry.resource.name_hash is not None
                                                       and entry.resource.name_hash != entry.hash else name),
             name, body))
-        self.present()[(entry.cls, name)] = body
+        self.present().setdefault((entry.cls, name), body)
+        self._where.setdefault((entry.cls, name), []).append((target_file, body))
         self.own().add((entry.cls, name))
         self.copied.append((entry.cls, name, entry.path, target_file))
 

@@ -282,6 +282,11 @@ def weapons_group_path(level: str) -> str:
 _KNOWN: dict[int, str] | None = None
 
 
+# Weapon names the game's strings do not hold (found by hashing): the Sickle (Call of the Dead,
+# Ascension) is knife_sickle.
+EXTRA_NAMES = ('knife_sickle',)
+
+
 def known_names() -> dict[int, str]:
     """Names by hash: bozkit's dictionary (the game definition and the names cache) first, then
     the asset library's strings."""
@@ -289,6 +294,8 @@ def known_names() -> dict[int, str]:
     if _KNOWN is None:
         from .schema import Names
         _KNOWN = dict(Names().names)
+        for name in EXTRA_NAMES:
+            _KNOWN.setdefault(iw_hash(name), name)
         try:
             from . import library
             for line in (library.library_dir() / 'names.txt').read_text(
@@ -344,10 +351,10 @@ def read_group(parsed, level: str = '', extra_names=()) -> list[GameWeapon]:
 
 
 # The game's weapon specs that are not weapons a player buys: the perk drink (perkcola_*) and the
-# last-stand pistols (*_laststand*). Of the melee weapons (behaviour 0) only the Bowie knife is
-# bought (from the wall).
+# last-stand pistols (*_laststand*). Of the melee weapons (behaviour 0) only the Bowie knife and
+# the Sickle are bought (from the wall).
 NOT_BOUGHT_PREFIX, NOT_BOUGHT_PART = 'perkcola', 'laststand'
-BOUGHT_MELEE = {'knife_bowie'}
+BOUGHT_MELEE = {'knife_bowie', 'knife_sickle'}
 
 
 def is_gun(weapon: GameWeapon) -> bool:
@@ -911,6 +918,69 @@ def apply_model(groups: dict, weapon: WeaponDef, resource) -> None:
             ValueError) as exc:
         raise WeaponError(f'weapon {weapon.name}: {exc}') from None
     resource.body = resources.encode_entity_spec(spec)
+
+
+def limit_box_pools(groups: dict, index: list[str], start: str = DEFAULT_START,
+                    stock=()) -> int:
+    """Keep every mystery box (CMysteryBox.m_Weapons) to the map's weapons (the Weapons tab's
+    list). A box with a pool of the game's own (*stock*: shipped boxes' pools, which the editor
+    shows until changed) rolls every weapon of the list but the starting one; a pool of the
+    map's own keeps those of its weapons that are in the list (all of the list's when none
+    are). Without a list the boxes keep their pools. Returns the boxes changed."""
+    from . import resources, toolkit
+
+    if not index:
+        return 0
+    allowed = [hash_of(name) for name in index]
+    fallback = [value for value in allowed if value != hash_of(start)] or allowed
+    changed = 0
+    for target in groups.values():
+        for resource_type in target.types():
+            if resource_type.class_hash != resources.ENTITY_SPEC:
+                continue
+            for resource in resource_type.resources:
+                try:
+                    spec = resources.decode_entity_spec(resource.body)
+                except Exception:
+                    continue
+                box = spec_fields.component(spec, 'CMysteryBox')
+                pool = spec_fields.prop(box.blob, 'm_Weapons') if box and box.blob else None
+                if pool is None:
+                    continue
+                old = toolkit.hash_list(pool.raw)
+                if frozenset(old) in stock:
+                    new = fallback
+                else:
+                    new = [value for value in old if value in allowed] or fallback
+                if new == old:
+                    continue
+                pool.raw = toolkit.encode_hash_list(new)
+                pool.nested = pool.elements = None
+                resource.body = resources.encode_entity_spec(spec)
+                changed += 1
+    return changed
+
+
+def stock_box_pools(pack) -> set[frozenset]:
+    """The weapon pools of the game's own mystery boxes (every shipped level)."""
+    from . import group, resources, toolkit
+
+    pools = set()
+    for level in maps.SHIPPED:
+        try:
+            parsed = group.parse(pack.read(f'levels/{level}/{level}_statics.group.bin'))
+        except KeyError:
+            continue
+        for resource_type in parsed.types():
+            if resource_type.class_hash != resources.ENTITY_SPEC:
+                continue
+            for resource in resource_type.resources:
+                spec = resources.decode_entity_spec(resource.body)
+                box = spec_fields.component(spec, 'CMysteryBox')
+                pool = spec_fields.prop(box.blob, 'm_Weapons') if box and box.blob else None
+                if pool is not None:
+                    pools.add(frozenset(toolkit.hash_list(pool.raw)))
+    return pools
 
 
 def runtime(defs: list[WeaponDef], index: list[str]) -> list[dict]:

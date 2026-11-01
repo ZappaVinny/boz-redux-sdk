@@ -486,6 +486,8 @@ def compile_map(project: Project, game, fixed=None):
     if built is not None and weapons.hash_of(start) not in weapons.resource_hashes(built):
         # The game gives the starting weapon without checking it exists: it would crash.
         raise ProjectError(f'the starting weapon {start} is not one of the map\'s weapons')
+    # The boxes roll only the map's weapons (the Weapons tab's list).
+    weapons.limit_box_pools(files.groups, index, start, weapons.stock_box_pools(game))
     files.runtime['weapons'] = weapons.runtime(defs, index)
     files.runtime['start_weapon'] = {'name': start, 'reserve': reserve, 'level': project.map_name}
     return files
@@ -532,6 +534,8 @@ def world_data_lua(runtime: dict) -> str:
     data = {key: list(runtime.get(key, [])) for key in ('hidden', 'no_collision', 'blocked')}
     data['objects'] = list(runtime.get('objects', []))
     data['names'] = list(runtime.get('names', []))
+    if runtime.get('aliases'):
+        data['aliases'] = dict(runtime['aliases'])
     data['weapons'] = list(runtime.get('weapons', []))
     data['effects'] = list(runtime.get('effects', []))
     if runtime.get('start_weapon'):

@@ -195,5 +195,20 @@ class OpenPathTests(unittest.TestCase):
                                    ['xdg-open', str(Path('/tmp/x'))]])
 
 
+class BrokenBlendTests(unittest.TestCase):
+    def test_empty_map_blend_is_set_aside(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'map.blend').write_bytes(b'')
+            fake = mock.Mock(root=root)
+            with mock.patch.object(sdkhome, 'find_blender', lambda settings: Path('/usr/bin/blender')), \
+                    mock.patch.object(sdkhome, 'suite_dir', lambda: root / 'suite'):
+                (root / 'suite' / 'scripts' / 'startup' / 'bl_app_templates_user' / 'boz_suite').mkdir(parents=True)
+                command, _env = sdkhome.editor_command(fake, mock.Mock(client=''))
+            self.assertFalse((root / 'map.blend').exists())
+            self.assertTrue((root / 'map.blend.broken').exists())
+            self.assertNotIn(str(root / 'map.blend'), command)
+
+
 if __name__ == '__main__':
     unittest.main()

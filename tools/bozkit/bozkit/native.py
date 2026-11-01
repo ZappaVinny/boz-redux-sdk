@@ -612,7 +612,8 @@ def encode_model(model: Model, source: bytes | None = None) -> bytes:
 
 
 def build_model(vertices, uvs, triangles, materials: Sequence[int],
-                face_materials: Sequence[int] | None = None, flags: int = 0x20000) -> bytes:
+                face_materials: Sequence[int] | None = None, flags: int = 0x20000,
+                scale: float = 1.0) -> bytes:
     """A complete ``CIwModel`` body from scratch (``CIwModel::Serialise`` layout)::
 
         u32 flags, u16 render vertex count, u16 position count,
@@ -624,6 +625,7 @@ def build_model(vertices, uvs, triangles, materials: Sequence[int],
     One ``CIwModelBlockVerts``, one ``CIwModelBlockGLUVs`` and one ``CIwModelBlockGLTriList``
     per material. Every vertex is its own position (no shared-position remap). Positions are
     signed 16-bit model units (centimetres); UVs follow GL (v = 0 is the texture's first row).
+    *scale*: the largest scale the model is placed at (its bounding sphere covers that).
     """
     count = len(vertices)
     if not 0 < count <= 65535 or len(uvs) != count:
@@ -643,6 +645,12 @@ def build_model(vertices, uvs, triangles, materials: Sequence[int],
     # The game rounds either way; rounding up never culls a visible model.
     radius = math.ceil(max(sum((v[axis] - centre[axis]) ** 2 for axis in range(3))
                            for v in vertices) ** 0.5)
+    if scale > 1.0:
+        # The game culls by this sphere without the entity's scale: one that covers the model at
+        # the largest scale it is placed at (a floor scaled up vanished once players walked off
+        # its unscaled sphere).
+        offset = sum(c * c for c in centre) ** 0.5
+        radius = math.ceil(radius * scale + offset * (scale - 1.0))
 
     def block(class_hash, element_count, block_flags, data, memory):
         inner = struct.pack('<IHHH', class_hash, 28 + memory, element_count, block_flags)

@@ -47,17 +47,17 @@ end
 
 --- A field of its component (by name).
 function Piece:get(field)
-    return reflect.get(self.component, self.class, field)
+    return reflect.get(reflect.object(self.component, self.class), self.class, field)
 end
 
 --- Sets a field of its component. Returns true, or false and why.
 function Piece:set(field, value)
-    return reflect.set(self.component, self.class, field, value)
+    return reflect.set(reflect.object(self.component, self.class), self.class, field, value)
 end
 
 --- Every field and its value.
 function Piece:fields()
-    return reflect.dump(self.component, self.class)
+    return reflect.dump(reflect.object(self.component, self.class), self.class)
 end
 
 --- Its position {x, y, z}.

@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bozkit import blender_scene, navbuild, navigation  # noqa: E402
+from bozkit import blender_scene, navbuild, navigation, world_compile  # noqa: E402
 
 try:
     HELPER = navbuild.helper_path()
@@ -123,6 +123,34 @@ class NavRebuildTests(unittest.TestCase):
         vertices, triangles = floor()
         rebuilt, report = navbuild.rebuild(self.shipped, vertices, triangles, dirty=[])
         self.assertEqual(rebuilt, self.shipped)
+
+    def test_fresh_build_keeps_window_links(self):
+        # A barricade's window link (user id: its name), moved with it from its level.
+        vertices, triangles = floor()
+        barricade = 0xc0ffee
+        link = ((2.0, 0.0, 3.2), (4.0, 0.0, 3.2), 0.4, False, barricade)
+        shipped = navbuild.build(empty_navmesh(), vertices, triangles, links=[link])
+        found = [entry for tile in navigation.decode(shipped).tiles
+                 for entry in navigation.decode_tile(tile.data).off_mesh]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][-1], barricade)
+        self.assertAlmostEqual(found[0][3], 0.9)    # the extra float every shipped link has
+        # In its level the barricade stood at x 3 m; placed at x 9.6 m, turned 90 degrees.
+        half = 0.5 ** 0.5
+        moved = world_compile.window_links(shipped, barricade, ((300.0, 0.0, 320.0),
+                                                                (0.0, 0.0, 0.0, 1.0)),
+                                           ((960.0, 0.0, 320.0), (0.0, half, 0.0, half)))
+        self.assertEqual(len(moved), 1)
+        start, end = moved[0][0], moved[0][1]
+        self.assertAlmostEqual(abs(start[2] - end[2]), 2.0, places=3)   # now across Z
+        self.assertAlmostEqual(start[0], 9.6, places=3)
+        self.assertAlmostEqual(end[0], 9.6, places=3)
+        # A barricade without a link of its own gets one generated through it.
+        generated = world_compile.window_links(shipped, 0xbad, ((300.0, 0.0, 320.0),
+                                                                (0.0, 0.0, 0.0, 1.0)),
+                                               ((300.0, 0.0, 320.0), (0.0, 0.0, 0.0, 1.0)))
+        self.assertEqual(len(generated), 1)
+        self.assertAlmostEqual(generated[0][1][2] - generated[0][0][2], 2.0, places=3)
 
 
 if __name__ == '__main__':

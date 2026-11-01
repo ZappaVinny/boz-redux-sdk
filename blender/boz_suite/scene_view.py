@@ -107,6 +107,7 @@ def _draw_links():
         return
     try:
         _draw_link_lines()
+        _draw_crossing_arrows()
     except Exception as exc:  # a draw callback must never break the viewport
         # Blend data cannot be changed while drawing, so Links stays on and the error is shown.
         draw_error = f"{type(exc).__name__}: {exc}"
@@ -151,6 +152,87 @@ def _draw_link_lines():
         shader.uniform_float("color", LINK_COLOURS.get(kind, (1.0, 1.0, 1.0, 1.0)))
         batch.draw(shader)
     gpu.state.blend_set("NONE")
+
+
+# One-way objects: a barricade's window crossing goes one way only (zombies climb in from outside),
+# kept as the barricade faces. A black arrow on each shows the way; turning it is up to the user.
+_crossings: dict = {}    # (source, group, base) -> (start, end) in the barricade's own space, or None
+ARROW_COLOUR = (0.0, 0.0, 0.0, 1.0)
+
+
+def _crossing(obj, base: str):
+    """The barricade's window crossing in its own space (Blender units), from its home level's
+    navmesh, or None when it has none or the game data is missing."""
+    from . import game
+    key = (obj.boz.source, obj.boz.group, base)
+    if key not in _crossings:
+        if game.game_pack() is None:
+            return None     # the asset library is not loaded yet: try again on the next draw
+        _crossings[key] = None
+        try:
+            from ._bozkit import blender_scene, group, hashing, levels, resources, spec_fields, \
+                world_compile
+            pack = game.game_pack()
+            path = obj.boz.group or f"levels/{base}/{base}_statics.group.bin"
+            parsed = group.parse(pack.read(path))
+            value = int(obj.boz.source, 16) if obj.boz.source.startswith("0x") else \
+                hashing.iw_hash(obj.boz.source)
+            spec = next(resources.decode_entity_spec(r.body) for t in parsed.types()
+                        if t.class_hash == levels.ENTITY_SPEC for r in t.resources
+                        if r.in_group_hash == value)
+            navmesh = next(r.body for t in parsed.types() if t.class_hash == levels.NAVMESH
+                           for r in t.resources)
+            home = spec_fields.local_transform(spec)[:2]
+            found = world_compile.window_links(navmesh, value, home, ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)))
+            if found:
+                start, end = found[0][0], found[0][1]
+                _crossings[key] = (blender_scene.to_blender(tuple(c * 100 for c in start)),
+                                   blender_scene.to_blender(tuple(c * 100 for c in end)))
+        except Exception:  # noqa: BLE001 - no game data, no navmesh: no arrow
+            pass
+    return _crossings[key]
+
+
+def _draw_crossing_arrows():
+    from mathutils import Vector
+    context = bpy.context
+    scene = context.scene
+    if gpu is None:
+        return
+    base = getattr(scene.boz, "base", "") or "kino"
+    lines = []
+    for obj in scene.objects:
+        if not str(obj.get("boz_piece", "")).startswith("barricade") or not obj.visible_get():
+            continue
+        crossing = _crossing(obj, base)
+        if crossing is None:
+            continue
+        matrix = obj.matrix_world.normalized()
+        start, end = (matrix @ Vector(c) for c in crossing)
+        start.z = end.z = obj.matrix_world.translation.z + 60.0
+        along = end - start
+        if along.length < 1e-3:
+            continue
+        side = along.cross(Vector((0.0, 0.0, 1.0))).normalized() * 25.0
+        tip = end
+        back = tip - along.normalized() * 40.0
+        lines += [start[:], tip[:], tip[:], (back + side)[:], tip[:], (back - side)[:]]
+    if not lines:
+        return
+    region = context.region
+    try:
+        shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
+        wide = True
+    except (ValueError, SystemError):
+        shader, wide = gpu.shader.from_builtin("UNIFORM_COLOR"), False
+    gpu.state.depth_test_set("NONE")
+    batch = batch_for_shader(shader, "LINES", {"pos": lines})
+    shader.bind()
+    if wide and region is not None:
+        shader.uniform_float("viewportSize", (region.width, region.height))
+        shader.uniform_float("lineWidth", 3.0)
+    shader.uniform_float("color", ARROW_COLOUR)
+    batch.draw(shader)
 
 
 class BOZ_OT_link_select(Operator):
