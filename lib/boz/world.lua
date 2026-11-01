@@ -70,6 +70,7 @@ local function start_state()
     local objects = require("boz.objects")
     local prefabs = require("boz.prefabs")
     map.on_level_start(function()
+        objects.forget_hidden()   -- a (re)started level shows everything; then its own hidden ones
         for _, name in ipairs(data.hidden or {}) do
             objects.get(name):hide()
         end

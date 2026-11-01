@@ -21,6 +21,7 @@ One Blender unit is one game centimetre; Blender's Z is the game's Y.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -233,6 +234,38 @@ def tidy_collections(scene) -> int:
             moved += 1
     if default is not None and not default.objects and not default.children:
         bpy.data.collections.remove(default)
+    # The boxes volumes show stay out of the scene (volume_box); Blender's collection commands
+    # (M, Make Instances Real, outliner drags) could link a box or its collection into it.
+    in_scene = [scene.collection, *scene.collection.children_recursive]
+    for parent in in_scene:
+        for child in list(parent.children):
+            if child.name.startswith("BOZ Volume: "):
+                parent.children.unlink(child)
+    for obj in [o for o in scene.objects if is_helper(o)]:
+        for collection in list(obj.users_collection):
+            if collection in in_scene:
+                collection.objects.unlink(obj)
+        if not obj.users_collection:
+            bpy.data.objects.remove(obj)   # a stray copy; each kind keeps its own box
+    for collection in [c for c in bpy.data.collections if c.name.startswith("BOZ Volume: ")]:
+        for extra in list(collection.objects)[1:]:
+            bpy.data.objects.remove(extra)
+        for box in collection.objects:
+            _mark_helper(box)
+    for obj in scene.objects:
+        if obj.boz.role == "volume" and obj.type == "EMPTY" and obj.instance_collection is None:
+            colour_volume(obj)   # a volume that lost its box is drawn again
+    # Empty collections Blender's Create New Collection / Move to Collection left behind.
+    for collection in list(scene.collection.children_recursive):
+        if re.fullmatch(r"Collection( \d+|\.\d+)?", collection.name) and \
+                not collection.objects and not collection.children:
+            bpy.data.collections.remove(collection)
+    # Parts whose prefab was deleted on its own get their own names back.
+    for obj in scene.objects:
+        if obj.parent is None and obj.boz.part_name and not obj.boz.original and \
+                obj.boz.role in ("model", "volume", "prefab"):
+            strip_part_name(obj)
+            obj.boz.part_name = ""
     return moved
 
 
@@ -260,6 +293,29 @@ def unwrap_single_prefabs(scene) -> int:
     return removed
 
 
+def set_rotation(obj, quaternion) -> None:
+    """Give a map object *quaternion* (Blender's axes) as X/Y/Z angles, which the sidebar shows in
+    degrees. Its four quaternion fields (W first) were easy to break: all zero cannot be rotated
+    and saves wrong. Saving reads the object's matrix, so the mode does not change the game's."""
+    obj.rotation_mode = "XYZ"
+    obj.rotation_euler = quaternion.to_euler("XYZ")
+
+
+def use_angles(scene) -> int:
+    """Switch map objects still rotated by quaternion to X/Y/Z angles, keeping how they are turned
+    (a zero quaternion, which nothing can rotate, becomes no rotation). Returns how many changed."""
+    from mathutils import Quaternion
+
+    changed = 0
+    for obj in scene.objects:
+        if obj.rotation_mode != "QUATERNION" or obj.boz.role not in ("model", "volume", "prefab"):
+            continue
+        quaternion = obj.rotation_quaternion
+        set_rotation(obj, quaternion.normalized() if quaternion.magnitude > 1e-6 else Quaternion())
+        changed += 1
+    return changed
+
+
 def _place(obj, item, scene, parent=None) -> None:
     """Position, rotation and scale of a world object (in its prefab's space when *parent*),
     in Blender's axes; links it to the scene."""
@@ -268,8 +324,7 @@ def _place(obj, item, scene, parent=None) -> None:
     rotation = item.quaternion() if hasattr(item, "quaternion") else tuple(item.rotation)
     x, y, z, w = blender_scene.rotation_to_blender(rotation)
     obj.location = blender_scene.to_blender(item.position)
-    obj.rotation_mode = "QUATERNION"
-    obj.rotation_quaternion = Quaternion((w, x, y, z))
+    set_rotation(obj, Quaternion((w, x, y, z)))
     scale = getattr(item, "scale", None)
     if isinstance(item, world.Volume):
         scale = tuple(c / world.TRIGGER_SIZE for c in item.size)
@@ -489,12 +544,27 @@ def volume_mesh():
     return mesh
 
 
+def is_helper(obj) -> bool:
+    """An object the editor only draws with (a volume's box, also a copy of one Blender's own
+    commands made): never map content, wherever it ends up."""
+    return bool(obj.get("boz_helper")) or (
+        obj.type == "MESH" and obj.data is not None and obj.data.name.startswith(VOLUME_MESH))
+
+
+def _mark_helper(obj) -> None:
+    obj["boz_helper"] = True
+    obj.boz.role = "reference"
+
+
 def volume_box(kind: str):
     """The collection a volume of *kind* instances: one coloured, see-through box. It is not in
     the scene, so it is drawn only where volumes show it."""
     name = f"BOZ Volume: {kind}"
     collection = bpy.data.collections.get(name)
     if collection is not None and collection.objects:
+        for box in collection.objects:
+            if not box.get("boz_helper"):
+                _mark_helper(box)
         return collection
     collection = collection or bpy.data.collections.new(name)
     colour = VOLUME_COLOURS.get(kind, VOLUME_COLOURS["trigger"])
@@ -506,6 +576,7 @@ def volume_box(kind: str):
     box.show_transparent = True
     box.hide_render = True
     box.hide_select = True
+    _mark_helper(box)
     collection.objects.link(box)
     return collection
 
@@ -736,13 +807,15 @@ def base_changes(obj) -> tuple[dict, bool]:
     """(changed settings, whether the object moved) of a base entity."""
     origin = list(obj.get("boz_base_origin", []))
     position, rotation, scale = game_transform(obj)
-    now = [*position, *rotation, *scale]
-    moved = len(origin) != 10 or any(abs(a - b) > 1e-3 for a, b in zip(now, origin))
-    if not moved and len(origin) == 10:
-        # The same rotation can come back negated.
-        flipped = [*position, *(-c for c in rotation), *scale]
-        moved = any(abs(a - b) > 1e-3 for a, b in zip(flipped, origin)) and \
-            any(abs(a - b) > 1e-3 for a, b in zip(now, origin))
+
+    def differs(values) -> bool:
+        return any(abs(a - b) > 1e-3 for a, b in zip(values, origin))
+
+    # A quaternion and its negative are the same rotation, and either can come back (from X/Y/Z
+    # angles, for one): it moved only when neither matches. An unmoved base entity written as
+    # moved has the navmesh rebuilt around it, which loses the designers' floor (Kino's stairs).
+    moved = len(origin) != 10 or (differs([*position, *rotation, *scale]) and
+                                  differs([*position, *(-c for c in rotation), *scale]))
     original = base_values(obj)
     changed = {key: value for key, value in _panel_values(obj).items()
                if key != world.CHALK_FIELD and original.get(key) != value}
@@ -759,8 +832,7 @@ def reset_base(obj) -> None:
         obj.parent = None
         x, y, z, w = blender_scene.rotation_to_blender(tuple(origin[3:7]))
         obj.location = blender_scene.to_blender(tuple(origin[0:3]))
-        obj.rotation_mode = "QUATERNION"
-        obj.rotation_quaternion = Quaternion((w, x, y, z))
+        set_rotation(obj, Quaternion((w, x, y, z)))
         obj.scale = blender_scene.scale_to_blender(tuple(origin[7:10]))
     _field_props(obj, base_values(obj))
 
@@ -772,8 +844,7 @@ def _apply_base_edit(obj, entity: "world.Placement", custom=None) -> None:
     origin = list(obj.get("boz_base_origin", []))
     x, y, z, w = blender_scene.rotation_to_blender(entity.quaternion())
     obj.location = blender_scene.to_blender(entity.position)
-    obj.rotation_mode = "QUATERNION"
-    obj.rotation_quaternion = Quaternion((w, x, y, z))
+    set_rotation(obj, Quaternion((w, x, y, z)))
     own = origin[7:10] if len(origin) == 10 else (1.0, 1.0, 1.0)
     obj.scale = blender_scene.scale_to_blender(tuple(own[i] * entity.scale[i] for i in range(3)))
     _field_props(obj, entity.settings)
@@ -1021,6 +1092,8 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
                             library=obj.get("boz_library", ""), **common)
 
     for obj in scene.objects:
+        if is_helper(obj):
+            continue   # drawn by the editor only (a volume's box)
         if obj.boz.role == "prefab" and obj.boz.original and obj.boz.source:
             base_objects[obj.boz.source].append(obj)
             continue

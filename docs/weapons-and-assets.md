@@ -514,6 +514,12 @@ The **Audio** tab replaces the game's sounds with your own. It has two parts:
 Only saved sounds go in slots. Changing a saved sound's settings asks you to Save again; the
 slots using it play the new version from the next build.
 
+Every saved sound is also built into the map under its own name, so scripts play it with
+`audio.play("my_sound")` (`local audio = require("boz.audio")`). A name the game already uses
+for one of its sounds stays the game's: importing a recording called `fire` names it
+`imported_fire`, and a saved sound of yours with such a name plays as `imported_<name>`. Its
+details in **Your sounds** say so.
+
 ### Game sounds
 
 Pick **Show the sounds** the first time (it needs the asset library). The list shows each sound
@@ -532,8 +538,9 @@ with its length; **Show** filters it:
 Type in the list's search field to find a sound by name or by what plays it ("Reload",
 "ak74u").
 
-Slots are named after what plays them: a weapon's sound is "Thundergun: Fire"; sounds the game
-names are named after it ("Carpenter pickup", "Dog spawn"); voice lines start with the
+A sound the game names shows its spec name exactly as the game has it ("meteor_affirm",
+"buy_success"): the name scripts play it by, `audio.play("meteor_affirm")`. Other slots are
+named after what plays them: a weapon's sound is "Thundergun: Fire"; voice lines start with the
 character ("Takeo: …"); a sound many weapons share names the first and how many more ("colt45
 +10: Empty click"); the rest show where they live and their number ("Shared 0x…"). **Played
 by** lists everything that plays the selected sound.

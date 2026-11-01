@@ -112,9 +112,15 @@ function map.set_nearest_poi(entity)
     return before
 end
 
---- A number that changes when another level starts (0 outside a match).
+-- Level loads so far (Level_Load): a restarted level can get its player at the address the
+-- last run's had, so the key combines the two.
+local loads = 0
+hook.add(core.sym("Level_Load"), {before = function() loads = loads + 1 end})
+
+--- A number that changes when another level starts, restarts included (0 outside a match).
 function map.level_key()
-    return map.player() or 0
+    local player = map.player()
+    return player and loads * 0x100000000 + player or 0
 end
 
 local level_starts = {}

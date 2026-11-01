@@ -344,8 +344,8 @@ its own name. Any other function a script defines can be called by other scripts
 | On `self` | |
 | --- | --- |
 | `self.name`, `self.properties` | Its name, and the property values set in the editor |
-| `self:part(name)`, `self:parts()` | A part (a `boz.objects` handle), and all parts |
-| `self:hide()`, `self:show()`, `self:set_collision(on)`, `self:open_navmesh()`, `self:close_navmesh()` | The whole prefab (every part), or the model |
+| `self:part(name)`, `self:parts()` | A part (a `boz.objects` handle; a part that is a prefab itself acts on all its parts), and all parts |
+| `self:hide()`, `self:show()`, `self:set_collision(on)`, `self:open_navmesh()`, `self:close_navmesh()` | The whole prefab (every part), or the model. A hidden volume does nothing: no events, no use prompt |
 | `self:position()`, `self:near(target, cm)` | Where it is ({x, y, z} in centimetres; a prefab's middle), and whether any part is within `cm` of a position or another object |
 
 | Module | |

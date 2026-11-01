@@ -469,7 +469,7 @@ CLevelManager (singleton) keeps the level's name at +0x55, the local player's en
 | `map.resuming()` | True when the running level was started from a save (continuing a game). |
 | `map.nearest_poi()` | The point of interest in reach (an entity: the box, a perk, a door the player can use), or 0. |
 | `map.set_nearest_poi(entity)` | Makes an entity the point of interest in reach (what the use button acts on). Returns the previous one. |
-| `map.level_key()` | A number that changes when another level starts (0 outside a match). |
+| `map.level_key()` | A number that changes when another level starts, restarts included (0 outside a match). |
 | `map.on_level_start(fn)` | Calls fn() every time a level has started (its player exists), and at once when one is running. Returns fn. |
 | `map.restart()` | Restarts the level. |
 | `map.power_on()` | Turns the power on. |
@@ -588,7 +588,7 @@ the client's loadscript(name, env) loads a script with a fresh environment per o
 | Function | Description |
 | --- | --- |
 | `prefabs.globals` | Values every script of the map shares, saved with the game. |
-| `Instance:part(name)` | The boz.objects handle of a part of this prefab (by its name in the prefab). |
+| `Instance:part(name)` | A part of this prefab by its name in the prefab: its boz.objects handle, or, for a part that is a prefab itself, that prefab, whose show/hide, collision and walkable area act on all its parts. |
 | `Instance:parts()` | {name, object} of every part of this prefab. |
 | `Instance:set_visible(visible)` | Shows or hides the object (every part of a prefab). Returns self. |
 | `Instance:show() return self:set_visible(true)` | Shows the object. Returns self. |
@@ -681,7 +681,9 @@ transform moved.
 | `objects.find(name)` | The object called `name` if it exists in the running level, else nil. |
 | `Object:entity_pointer()` | The entity pointer, or 0 when the object is not in the running level. |
 | `Object:exists()` | True when the object is in the running level. |
-| `Object:set_visible(visible)` | Shows or hides the object's models (its collision and behaviour stay). Returns the object. |
+| `objects.is_hidden(name)` | True while the object called *name* is hidden (set_visible): a hidden volume sends nothing. |
+| `objects.forget_hidden()` | Forgets which objects were hidden: a level that starts (or restarts) shows every object, so the volumes of objects a script hid in the last run send their events again. |
+| `Object:set_visible(visible)` | Shows or hides the object's models (its collision stays; a hidden volume sends no events and shows no prompt). Returns the object. |
 | `Object:show()` | Shows the object. Returns the object. |
 | `Object:hide()` | Hides the object. Returns the object. |
 | `Object:set_collision(enabled)` | Switches the object's collision on or off (players and bullets pass through it when off). Returns the object. |
@@ -750,7 +752,7 @@ t:cancel()
 
 <details><summary>How it works</summary>
 
-game time advances by the frame's time in frames where CPlayerController::FixedStep ran (the game's simulation step, which stops while paused).
+game time advances by one simulation step (1/30 s) every time the physics world steps (CIsBulletWorld::FixedStep: the game simulates at a fixed 30 steps a second whatever the frame rate, and not at all while paused); timers run from the frame event. Counting a frame's time only in frames that stepped lost the frames the client draws between steps, so timers ran slower the higher the frame rate. The clock starts when the module loads, not with the first timer, which can be made inside a game callback (a volume's on_enter).
 
 </details>
 

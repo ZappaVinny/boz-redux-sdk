@@ -11,6 +11,8 @@ sounds go in slots; change the settings and Save again any time.
 """
 from __future__ import annotations
 
+import os
+import struct
 from pathlib import Path
 
 import bpy
@@ -20,7 +22,7 @@ from bpy.types import Operator, Panel, PropertyGroup, UIList
 
 from . import game, link
 
-from ._bozkit import sound
+from ._bozkit import sdkhome, sound
 from ._bozkit import hashing
 iw_hash = hashing.iw_hash
 
@@ -84,6 +86,18 @@ def catalog(context, refresh: bool = False) -> list:
     return _state["catalog"]
 
 
+def script_name(name: str) -> str:
+    """The name scripts play an own sound by (boz.audio.play): its own, or imported_<name> when
+    the game has a sound by that name (bozkit.sound.playable_name, as the build names it)."""
+    if _state.get("game_specs") is None:
+        pack = game.game_pack()
+        try:
+            _state["game_specs"] = sound.game_spec_hashes(pack.read) if pack is not None else set()
+        except (sound.SoundError, OSError, KeyError, ValueError):
+            _state["game_specs"] = set()
+    return sound.playable_name(name, _state["game_specs"])
+
+
 def slot(key: str):
     return next((s for s in catalog(bpy.context) if s.key == key), None)
 
@@ -95,25 +109,45 @@ def _device():
     return _state["device"]
 
 
-def play_samples(values: list, rate: int) -> bool:
-    """Play 16-bit samples (False when there is no sound device, as in background Blender)."""
+GAME_SFX_SCALE = 0.5   # measured in the game: channel volume = sound effects / 4096 x 0.5
+
+
+def game_level() -> tuple[float, int | None]:
+    """(volume, the setting 0..4096) the game plays sound effects at with the client's saved
+    settings (saves/data-etc/save_settings.i3d, bozkit.save); (GAME_SFX_SCALE, None) without one."""
+    from ._bozkit import save
+    client = os.environ.get("BOZ_CLIENT") or sdkhome.Settings.load().client
+    try:
+        data = (Path(client) / "saves" / "data-etc" / "save_settings.i3d").read_bytes()
+        sfx = int(save.parse_settings(data)[1]["sfx_volume"])
+    except (OSError, ValueError, KeyError, TypeError, struct.error):
+        return GAME_SFX_SCALE, None
+    return max(0, min(4096, sfx)) / 4096 * GAME_SFX_SCALE, sfx
+
+
+def play_samples(values: list, rate: int, game: bool = True) -> bool:
+    """Play 16-bit samples, at the game's sound effects level unless *game* is False (False when
+    there is no sound device, as in background Blender)."""
     try:
         import aud
         import numpy
         stop()
         data = (numpy.asarray(values, dtype=numpy.float32) / 32768.0).reshape(-1, 1)
-        _state["handle"] = _device().play(aud.Sound.buffer(data, float(rate)))
+        played = aud.Sound.buffer(data, float(rate))
+        _state["handle"] = _device().play(played.volume(game_level()[0]) if game else played)
         return True
     except Exception as exc:      # noqa: BLE001 - no device, no aud: nothing to hear
         print(f"boz_suite: cannot play sound: {exc}")
         return False
 
 
-def play_file(path: Path) -> bool:
+def play_file(path: Path, game: bool = True) -> bool:
+    """Play a file, at the game's sound effects level unless *game* is False."""
     try:
         import aud
         stop()
-        _state["handle"] = _device().play(aud.Sound(str(path)))
+        played = aud.Sound(str(path))
+        _state["handle"] = _device().play(played.volume(game_level()[0]) if game else played)
         return True
     except Exception as exc:      # noqa: BLE001
         print(f"boz_suite: cannot play sound: {exc}")
@@ -275,10 +309,8 @@ class BOZ_SoundSettings(PropertyGroup):
     trim_end: FloatProperty(name="Trim end", min=0.0, soft_max=10.0, unit="TIME_ABSOLUTE",
                             description="Seconds cut from the end", update=_settings_changed)
     normalize: BoolProperty(name="Normalize", default=True,
-                            description="Bring the loudest point to -1 dB before the gain",
-                            update=_settings_changed)
-    gain_db: FloatProperty(name="Gain", soft_min=-24.0, soft_max=12.0, subtype="NONE",
-                           description="Level change in dB", update=_settings_changed)
+                            description="Bring the loudest point to -1 dB, as loud as the sound "
+                            "can be without clipping", update=_settings_changed)
     fade_in: FloatProperty(name="Fade in", min=0.0, soft_max=2.0, unit="TIME_ABSOLUTE",
                            update=_settings_changed)
     fade_out: FloatProperty(name="Fade out", min=0.0, soft_max=2.0, unit="TIME_ABSOLUTE",
@@ -287,8 +319,7 @@ class BOZ_SoundSettings(PropertyGroup):
 
 def _from_settings(settings) -> sound.Settings:
     return sound.Settings(int(settings.rate), settings.trim_start, settings.trim_end,
-                          settings.gain_db, settings.normalize, settings.fade_in,
-                          settings.fade_out)
+                          0.0, settings.normalize, settings.fade_in, settings.fade_out)
 
 
 def _load_settings(settings, values: sound.Settings) -> None:
@@ -296,7 +327,7 @@ def _load_settings(settings, values: sound.Settings) -> None:
     try:
         settings.rate = str(values.rate) if values.rate in sound.RATES else "22050"
         settings.trim_start, settings.trim_end = values.trim_start, values.trim_end
-        settings.normalize, settings.gain_db = values.normalize, values.gain_db
+        settings.normalize = values.normalize
         settings.fade_in, settings.fade_out = values.fade_in, values.fade_out
     finally:
         _state["refreshing"] = False
@@ -420,6 +451,12 @@ class BOZ_OT_sound_import(Operator):
             self.report({"ERROR"}, "Pick an audio file")
             return {"CANCELLED"}
         name = _clean_name(self.name or path.stem)
+        pack = game.game_pack()
+        if pack is not None:
+            try:   # a game sound's name stays the game's: this one plays as imported_<name>
+                name = sound.playable_name(name, sound.game_spec_hashes(pack.read))
+            except (sound.SoundError, OSError, KeyError, ValueError) as exc:
+                print(f"boz_suite: sounds: {exc}")
         taken = {d.name for d in defs()}
         base, number = name, 1
         while name in taken:
@@ -437,6 +474,26 @@ class BOZ_OT_sound_import(Operator):
         return {"FINISHED"}
 
 
+class BOZ_OT_sound_level_info(Operator):
+    bl_idname = "boz.sound_level_info"
+    bl_label = "Preview level"
+
+    @classmethod
+    def description(cls, context, properties):
+        volume, sfx = game_level()
+        if sfx is None:
+            return ("Previews play at the game's level: no saved game settings found, so at the "
+                    f"sound effects slider's top ({volume * 100:.0f}%)")
+        return (f"Previews play as loud as the game will: your sound effects slider is at "
+                f"{sfx / 4096 * 100:.0f}%, and the game plays sound effects at half of that "
+                f"({volume * 100:.1f}% of full). Raise the slider in the game's Options to hear "
+                "everything louder; the recording itself is already as loud as it can be "
+                "(Normalize)")
+
+    def execute(self, context):
+        return {"FINISHED"}
+
+
 class BOZ_OT_sound_preview(Operator):
     bl_idname = "boz.sound_preview"
     bl_label = "Preview"
@@ -450,7 +507,7 @@ class BOZ_OT_sound_preview(Operator):
         if item is None or source is None:
             return {"CANCELLED"}
         if self.original:
-            play_file(sound.source_wav(source, item.name))
+            play_file(sound.source_wav(source, item.name), game=False)   # the recording as it is
             return {"FINISHED"}
         try:
             values, rate = sound.preview(source, item.name, _from_settings(scene.boz_sound_settings))
@@ -701,20 +758,23 @@ class BOZ_PT_sound_processor(_SoundsPanel, Panel):
         settings = scene.boz_sound_settings
         box = layout.box()
         box.label(text=item.name, icon="SOUND")
+        playable = script_name(item.name)
+        if playable != item.name:
+            box.label(text=f"Scripts play it as: {playable} (the game has a sound named {item.name})",
+                      icon="INFO")
         column = box.column(align=True)
         column.prop(settings, "rate")
         row = column.row(align=True)
         row.prop(settings, "trim_start")
         row.prop(settings, "trim_end")
-        row = column.row(align=True)
-        row.prop(settings, "normalize")
-        row.prop(settings, "gain_db")
+        column.prop(settings, "normalize")
         row = column.row(align=True)
         row.prop(settings, "fade_in")
         row.prop(settings, "fade_out")
         row = box.row(align=True)
         row.operator(BOZ_OT_sound_preview.bl_idname, text="Recording", icon="PLAY").original = True
         row.operator(BOZ_OT_sound_preview.bl_idname, text="Preview (game)", icon="PLAY").original = False
+        row.operator(BOZ_OT_sound_level_info.bl_idname, text="", icon="INFO", emboss=False)
         row.operator(BOZ_OT_sound_stop.bl_idname, text="", icon="PAUSE")
         changed = False
         source = link.source_dir()
@@ -867,7 +927,7 @@ class BOZ_PT_weapon_sounds(Panel):
 
 
 CLASSES = (BOZ_SoundSlot, BOZ_SoundItem, BOZ_SoundSettings, BOZ_OT_sound_import,
-           BOZ_OT_sound_preview, BOZ_OT_sound_save, BOZ_OT_sound_remove, BOZ_OT_sound_slot_play,
+           BOZ_OT_sound_preview, BOZ_OT_sound_level_info, BOZ_OT_sound_save, BOZ_OT_sound_remove, BOZ_OT_sound_slot_play,
            BOZ_OT_sound_stop, BOZ_OT_sound_slot_replace, BOZ_OT_sound_slot_reset,
            BOZ_OT_sounds_refresh, BOZ_UL_sound_slots, BOZ_UL_sounds, BOZ_PT_sound_slots,
            BOZ_PT_sound_processor, BOZ_OT_weapon_sound_set, BOZ_OT_weapon_sound_clear,

@@ -128,8 +128,23 @@ local function each_entity(entity, fn, depth)
     end
 end
 
---- Shows or hides the object's models (its collision and behaviour stay). Returns the object.
+local hidden = {}   -- lower name -> true while hidden
+
+--- True while the object called *name* is hidden (set_visible): a hidden volume sends nothing.
+function objects.is_hidden(name)
+    return hidden[string.lower(name)] == true
+end
+
+--- Forgets which objects were hidden: a level that starts (or restarts) shows every object, so
+--- the volumes of objects a script hid in the last run send their events again.
+function objects.forget_hidden()
+    hidden = {}
+end
+
+--- Shows or hides the object's models (its collision stays; a hidden volume sends no events and
+--- shows no prompt). Returns the object.
 function Object:set_visible(visible)
+    hidden[string.lower(self.name)] = not visible or nil
     each_entity(self:entity_pointer(), function(entity)
         local model = find_component("CIsRenderableModel", entity)
         if model then

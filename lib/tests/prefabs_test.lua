@@ -22,7 +22,8 @@ memory[PLAYER + 4] = 1
 local DOOR, SKULL, BUTTON, ROOM = entity("Vault_1.Door"), entity("Vault_1.Skull"),
     entity("Vault_1.Button"), entity("Room")
 local models = {}            -- entity id -> renderable component
-for _, e in ipairs({DOOR}) do models[memory[e + 4]] = e + 0x50 end
+local GUN, STAND = entity("Statue.Pickup.Gun"), entity("Statue.Pickup.Stand")
+for _, e in ipairs({DOOR, GUN, STAND}) do models[memory[e + 4]] = e + 0x50 end
 local SKULL_EGG = SKULL + 0x60   -- the hit volume's CEasterEgg component
 memory[SKULL_EGG + 0xc] = SKULL
 local score = 1000
@@ -121,6 +122,14 @@ prefabs.start({
     {name = "Gate_B", kind = "prefab", script = "prefabs.Plain", properties = {tag = "b"},
      parts = {{name = "Gate_B.Zone", part = "Zone"}}, members = {"Gate_B.Zone"}},
     {name = "Gate_B.Zone", kind = "volume", volume = "trigger", who = "anyone", owner = "Gate_B", script = ""},
+    -- Prefabs inside prefabs: one without a script of its own, one with one.
+    {name = "Statue", kind = "prefab", script = "prefabs.Plain", properties = {tag = "s"},
+     parts = {{name = "Statue.Pickup", part = "Pickup"}, {name = "Statue.Shrine", part = "Shrine"},
+              {name = "Statue.Rock", part = "Rock"}},
+     members = {"Statue.Pickup.Gun", "Statue.Pickup.Stand", "Statue.Shrine.Altar", "Statue.Rock"}},
+    {name = "Statue.Shrine", kind = "prefab", script = "prefabs.Plain", properties = {tag = "n"},
+     owner = "Statue", parts = {{name = "Statue.Shrine.Altar", part = "Altar"}},
+     members = {"Statue.Shrine.Altar"}},
 })
 check(stats.started == 1, "start() runs once per scripted object")
 local vault = prefabs.find("vault_1")
@@ -151,6 +160,19 @@ check(#used == 1 and used[1] == "Button" and score == 400, "use pays its cost ("
 run_hook("Poi_SendUse", {})
 check(#used == 1, "not enough points: nothing happens")
 
+-- A hidden Use volume shows no prompt and does nothing, even with points to pay; shown, it works.
+score = 5000
+vault:part("Button"):hide()
+check(not run_hook("CIngameStatePlaying::UpdatePoiPrompt", {0, 0, hash.name("SUBJECT_POI_TRIGGER"), BUTTON}),
+      "a hidden Use volume shows no prompt")
+run_hook("Poi_SendUse", {})
+check(#used == 1 and score == 5000, "a hidden Use volume does nothing")
+vault:part("Button"):show()
+check(run_hook("CIngameStatePlaying::UpdatePoiPrompt", {0, 0, hash.name("SUBJECT_POI_TRIGGER"), BUTTON}),
+      "shown again, its prompt is back")
+run_hook("Poi_SendUse", {})
+check(#used == 2 and score == 4400, "shown again, it works (" .. score .. ")")
+
 -- Events on the bus and from the game.
 prefabs.send("vault_open", {by = "test"})
 check(events_seen[#events_seen] == "vault_open", "on_event hears boz.send")
@@ -162,6 +184,20 @@ check(events_seen[#events_seen] == "round_started", "round_started from the game
 local before = #called("CIsRenderableModel::SetVisible")
 vault:hide()
 check(#called("CIsRenderableModel::SetVisible") == before + 1, "hide reaches the members that draw")
+-- Hidden survives only until the level starts again (a restart shows everything).
+local objects_module = require("boz.objects")
+objects_module.get("Vault_1.Skull"):hide()
+check(objects_module.is_hidden("Vault_1.Skull"), "hidden until the level starts again")
+
+-- A part that is a prefab is that prefab: hide() reaches all of its parts.
+local statue = prefabs.find("Statue")
+local pickup = statue:part("Pickup")
+check(pickup.name == "Statue.Pickup" and #pickup._members == 2, "a nested prefab part groups its parts")
+before = #called("CIsRenderableModel::SetVisible")
+pickup:hide():set_collision(false):open_navmesh()
+check(#called("CIsRenderableModel::SetVisible") == before + 2, "hiding a nested prefab hides both its parts")
+check(statue:part("Shrine") == prefabs.find("Statue.Shrine"), "a nested prefab with a script is its instance")
+check(statue:part("Rock").name == "Statue.Rock", "a plain part is still its object")
 -- Plain scripts: one run per object, each with its own self and its own top-level variables.
 local ZONE_A, ZONE_B = entity("Gate_A.Zone"), entity("Gate_B.Zone")
 memory[0xc000 + 0xc], memory[0xc100 + 0xc], memory[0xc200 + 0xc] = ZONE_A, ZONE_B, PLAYER
@@ -189,10 +225,16 @@ check(prefabs.find("Gate_B"):open() == "Gate_B opened", "other scripts call a pl
 local fired, ticks = {}, 0
 prefabs.after(1.0, function() table.insert(fired, "after") end)
 local every = prefabs.every(0.5, function() ticks = ticks + 1 end)
-local function play(seconds, paused)
+-- The game simulates 30 steps a second (the physics step), none while paused, and draws any
+-- number of frames: here three steps and `drawn` frames per tenth of a second.
+local function play(seconds, paused, drawn)
     for _ = 1, math.floor(seconds / 0.1 + 0.5) do
-        if not paused then run_hook("CPlayerController::FixedStep", {}) end
-        for _, fn in ipairs(frames) do fn(0.1) end
+        if not paused then
+            for _ = 1, 3 do run_hook("CIsBulletWorld::FixedStep", {}) end
+        end
+        for _ = 1, drawn or 1 do
+            for _, fn in ipairs(frames) do fn(0.1 / (drawn or 1)) end
+        end
     end
 end
 play(2.0, true)
@@ -202,6 +244,13 @@ check(#fired == 1 and ticks == 2, "after fires once, every repeats (" .. ticks .
 every:cancel()
 play(1.0)
 check(#fired == 1 and ticks == 2, "a cancelled timer stops")
+-- Game time follows the simulation, not the frame rate: 4 s pass in 4 s at any frame rate.
+local late = {}
+prefabs.after(4, function() table.insert(late, "fired") end)
+play(3.9, false, 6)   -- six frames drawn per tenth of a second (a fast PC drawing between steps)
+check(#late == 0, "not before its time")
+play(0.2, false, 6)
+check(#late == 1, "a 4 s timer fires after 4 s however many frames are drawn")
 
 -- Perks: a perk not yet owned.
 local PERKS = 0xa000
@@ -273,6 +322,8 @@ check(events_seen[#events_seen] == "player_revived", "player_revived")
 local counter_level = {
     {name = "Altar", kind = "prefab", script = "prefabs.Counter", properties = {}, parts = {}, members = {}},
 }
+require("boz.objects").forget_hidden()   -- what boz.world does when a level (re)starts
+check(not require("boz.objects").is_hidden("Vault_1.Skull"), "forgotten when a level starts again")
 prefabs.start(counter_level)
 local altar = prefabs.find("Altar")
 altar:bump(); altar:bump()

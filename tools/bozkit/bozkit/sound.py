@@ -261,8 +261,8 @@ class Settings:
     rate: int = 22050
     trim_start: float = 0.0       # seconds cut from the start
     trim_end: float = 0.0         # seconds cut from the end
-    gain_db: float = 0.0
-    normalize: bool = True        # peak to -1 dB before the gain
+    gain_db: float = 0.0          # no longer applied (normalize already peaks at -1 dB; more clipped)
+    normalize: bool = True        # peak to -1 dB
     fade_in: float = 0.0          # seconds
     fade_out: float = 0.0
 
@@ -338,13 +338,11 @@ def process(channels: list[list[float]], rate: int, settings: Settings) -> list[
         if peak > 0:
             target = 10 ** (-1 / 20)
             mono = [v * target / peak for v in mono]
-    gain = 10 ** (settings.gain_db / 20)
     fade_in = int(max(0.0, settings.fade_in) * settings.rate)
     fade_out = int(max(0.0, settings.fade_out) * settings.rate)
     n = len(mono)
     out = []
     for i, v in enumerate(mono):
-        v *= gain
         if fade_in and i < fade_in:
             v *= i / fade_in
         if fade_out and i >= n - fade_out:
@@ -494,6 +492,7 @@ class Slot:
     seconds: float = 0.0
     rate: int = 0
     users: list = field(default_factory=list)   # what plays it ("Thundergun: Fire", ...)
+    spec: str = ''            # the sound spec's name that plays it: what boz.audio.play takes
 
 
 def slot_key(group_path: str, data_hash: int) -> str:
@@ -517,10 +516,6 @@ def sound_groups(names, level: str) -> list[tuple[str, str]]:
 def _resources(parsed, class_hash: int) -> dict:
     return {r.in_group_hash: r.body for t in parsed.types() if t.class_hash == class_hash
             for r in t.resources}
-
-
-def _pretty(name: str) -> str:
-    return name.replace('_', ' ').strip().capitalize()
 
 
 def catalog(read, names, level: str, weapons=(), known_names: dict | None = None) -> list[Slot]:
@@ -583,7 +578,7 @@ def catalog(read, names, level: str, weapons=(), known_names: dict | None = None
                 continue
             plays = [datas_of(value) for kind, value in commands if kind == 'play']
             plays = [takes for takes in plays if takes]
-            for label in by_field.get(h, []) + ([_pretty(known[h])] if h in known else []):
+            for label in by_field.get(h, []) + ([known[h]] if h in known else []):
                 add(label, plays)
         for value, labels in by_field.items():      # fields naming a spec or variation directly
             for label in labels:
@@ -595,17 +590,18 @@ def catalog(read, names, level: str, weapons=(), known_names: dict | None = None
                 decoded = decode_data(body)
             except (SoundError, struct.error):
                 continue
-            spec_names = [known[s] for s, spec in specs.items() if spec.data == h and s in known]
-            if users[h]:
+            spec_names = sorted(known[s] for s, spec in specs.items() if spec.data == h and s in known)
+            spec_name = spec_names[0] if spec_names else known.get(h, '')
+            if spec_name:
+                label = spec_name     # the game's own name, as scripts play it (audio.play)
+            elif users[h]:
                 label = users[h][0] + part.get(h, '')
-            elif h in known or spec_names:
-                label = _pretty(known.get(h) or spec_names[0])
             else:
                 label = f'0x{h:08x}' if character else f'{GROUPS[category]} 0x{h:08x}'
-            if character:
+            if character and not spec_name:
                 label = f'{character.capitalize()}: {label}'
             slots.append(Slot(slot_key(path, h), path, h, category, label, decoded.seconds,
-                              decoded.rate, users[h]))
+                              decoded.rate, users[h], spec_name))
     order = list(GROUPS)
     slots.sort(key=lambda s: (order.index(s.category), s.label.lower(), s.key))
     seen = {}
@@ -702,6 +698,52 @@ def add_weapon_sound(parsed, shared, weapon: str, field_key: str, original: int,
         return sound_hash
     add_resource(parsed, SEQUENCE, sequence_hash, sequence_body(sound_hash))
     return sequence_hash
+
+
+IMPORTED = 'imported_'
+
+
+def game_spec_hashes(read) -> set[int]:
+    """The name hashes of the game's shared sound specs (what boz.audio.play finds on every map)."""
+    from . import group as group_module
+    return set(_resources(group_module.read_parsed(read, SHARED_GROUP), SPEC))
+
+
+def playable_name(name: str, game_specs: set[int]) -> str:
+    """*name*, or imported_<name> when the game already has a sound by that name."""
+    if iw_hash(name) not in game_specs:
+        return name
+    return (IMPORTED + name)[:32]
+
+
+def add_named(source: Path, read, groups: dict, map_name: str) -> list[str]:
+    """Put every saved project sound in the map's statics group as a sound spec under its own
+    name, so scripts play it with boz.audio.play("<name>") (slots and weapon fields use sounds
+    under the game's names instead). The spec copies a shared one-shot's volume, pitch and sound
+    group. A name the game's shared sounds already use stays the game's sound, and the own one
+    plays as imported_<name> (playable_name). Returns the names scripts play them by."""
+    from . import group as group_module
+    names = [d.name for d in list_defs(source) if is_saved(source, d.name)]
+    if not names:
+        return []
+    target = groups.get(f'{map_name}_statics.group.bin')
+    if target is None:
+        raise SoundError(f'the map has no {map_name}_statics group for its own sounds')
+    shared = group_module.read_parsed(read, SHARED_GROUP)
+    shared_specs = _resources(shared, SPEC)
+    template = shared_specs.get(iw_hash('meteor_affirm')) or next(iter(shared_specs.values()), None)
+    if template is None or len(template) < 48:
+        raise SoundError('the game has no sound spec to copy')
+    added = []
+    for name in names:
+        playable = playable_name(name, set(shared_specs))
+        value = iw_hash(playable)
+        if value in shared_specs:
+            continue   # even imported_<name> is the game's: nothing to play it by
+        add_resource(target, DATA, value, encoded(source, name), DATA_ADPCM)
+        add_resource(target, SPEC, value, template[:44] + struct.pack('<I', value), SPEC_SOUND)
+        added.append(playable)
+    return added
 
 
 def encoded(source: Path, name: str) -> bytes:

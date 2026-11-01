@@ -55,9 +55,26 @@ local hooked = {}        -- lower volume name .. event -> true
 --- Values every script of the map shares, saved with the game.
 prefabs.globals = {}
 
---- The boz.objects handle of a part of this prefab (by its name in the prefab).
+--- A part of this prefab by its name in the prefab: its boz.objects handle, or, for a part that
+--- is a prefab itself, that prefab, whose show/hide, collision and walkable area act on all its parts.
 function Instance:part(name)
-    return objects.get(self._parts[name] or (self.name .. "." .. name))
+    local full = self._parts[name] or (self.name .. "." .. name)
+    local nested = instances[lower(full)]
+    if nested then
+        return nested
+    end
+    -- A nested prefab without a script of its own has no instance and no game object: a group of
+    -- the members under its name.
+    local members, prefix = {}, lower(full) .. "."
+    for _, member in ipairs(self._members) do
+        if lower(member):sub(1, #prefix) == prefix then
+            table.insert(members, member)
+        end
+    end
+    if #members > 0 then
+        return setmetatable({name = full, properties = {}, _parts = {}, _members = members}, Instance)
+    end
+    return objects.get(full)
 end
 
 --- {name, object} of every part of this prefab.
@@ -241,8 +258,8 @@ end
 
 local function volume_event(event, object, info)
     local entry = volumes[lower(object.name)]
-    if not entry or not allowed(entry, info) then
-        return
+    if not entry or objects.is_hidden(entry.name) or not allowed(entry, info) then
+        return   -- a hidden volume (its prefab or itself hidden) does nothing
     end
     if entry.volume == "trigger" then
         local entity = info and info.entity or 0
@@ -309,6 +326,7 @@ local function show_prompt(entity)
     end
     for _, entry in pairs(volumes) do
         if entry.volume == "use" and not (entry.once and entry._fired)
+                and not objects.is_hidden(entry.name)
                 and objects.get(entry.name):entity_pointer() == entity then
             local element = core.call("Poi_FindPromptElement")
             if element ~= 0 then

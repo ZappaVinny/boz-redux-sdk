@@ -232,6 +232,7 @@ def on_load(_dummy):
         view.view_transform, view.look = "Standard", "None"   # the game's colours
         convert.unwrap_single_prefabs(scene)
         convert.tidy_collections(scene)
+        convert.use_angles(scene)
         convert.show_game_models(scene)
         if scene.boz.inherit and "boz_base_entities" not in scene:
             # Maps made before the base level's entities could be edited.

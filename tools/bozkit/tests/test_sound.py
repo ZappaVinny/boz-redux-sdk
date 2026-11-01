@@ -178,6 +178,30 @@ class Slots(unittest.TestCase):
             with self.assertRaises(sound.SoundError):
                 sound.apply(source, read, {}, 'kino', 'mymap')
 
+    def test_own_sounds_play_by_their_names(self):
+        groups, read = self.game()
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)
+            sound.save(source, sound.SoundDef('apothican_arrive'),
+                       [[0.3 * math.sin(i / 5) for i in range(2205)]], 22050)
+            sound.save_def(source, sound.SoundDef('not_saved'))   # no recording yet: left out
+            # A name the game already has stays the game's sound.
+            sound.add_resource(groups[sound.SHARED_GROUP], sound.SPEC, iw_hash('fire'), spec_body(0xb))
+            sound.save(source, sound.SoundDef('fire'), [[0.1] * 100], 22050)
+            level = {'mymap_statics.group.bin': make_group([rtype(sound.DATA, [(0xc, b'old')])])}
+            self.assertEqual(sound.add_named(source, read, level, 'mymap'),
+                             ['apothican_arrive', 'imported_fire'])
+            self.assertIn(iw_hash('imported_fire'), sound._resources(level['mymap_statics.group.bin'], sound.SPEC))
+            game_specs = sound.game_spec_hashes(read)
+            self.assertEqual(sound.playable_name('fire', game_specs), 'imported_fire')
+            self.assertEqual(sound.playable_name('apothican_arrive', game_specs), 'apothican_arrive')
+            value = iw_hash('apothican_arrive')   # what boz.audio.play("apothican_arrive") asks for
+            specs = sound._resources(level['mymap_statics.group.bin'], sound.SPEC)
+            self.assertEqual(sound.decode_spec(specs[value]).data, value)
+            data = sound._resources(level['mymap_statics.group.bin'], sound.DATA)[value]
+            self.assertEqual(sound.decode_data(data).count, 2205)
+            self.assertEqual(specs[value][:44], spec_body(0xa)[:44], "a shared spec's volume and pitch")
+
 
 class WeaponSounds(unittest.TestCase):
     def test_direct_weapon_fields_use_specs_not_sequences(self):

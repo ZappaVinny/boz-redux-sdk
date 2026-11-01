@@ -469,6 +469,8 @@ def compile_map(project: Project, game, fixed=None):
                                     weapons=defs)
         # The Sounds tab's replaced game sounds (the shared ones in a patched ingame group).
         sound.apply(source, game.read, files.groups, layout.base, project.map_name)
+        # The project's own sounds under their names, for boz.audio.play("<name>") in scripts.
+        sound.add_named(source, game.read, files.groups, project.map_name)
         # The Weapons tab's HUD icons (own pictures in a patched hud_icons sheet).
         hud_icons.apply(source, defs, game.read, files.groups, project.map_name, pack=game)
         # The Effects tab's effects (from any map) under the names scripts use.

@@ -5,14 +5,20 @@
 --   timers.every(1, function() log("tick") end)
 --   t:cancel()
 --
--- How it works: game time advances by the frame's time in frames where
--- CPlayerController::FixedStep ran (the game's simulation step, which stops while paused).
+-- How it works: game time advances by one simulation step (1/30 s) every time the physics world
+-- steps (CIsBulletWorld::FixedStep: the game simulates at a fixed 30 steps a second whatever the
+-- frame rate, and not at all while paused); timers run from the frame event. Counting a frame's
+-- time only in frames that stepped lost the frames the client draws between steps, so timers ran
+-- slower the higher the frame rate. The clock starts when the module loads, not with the first
+-- timer, which can be made inside a game callback (a volume's on_enter).
 
 local timers = {}
 
 local core = require("boz.core")
 
-local clock = {now = 0, stepped = false, list = {}, running = false}
+local STEP = 1 / 30   -- seconds of game time per simulation step (the physics step's timeStep)
+
+local clock = {now = 0, list = {}, running = false}
 
 local Timer = {}
 Timer.__index = Timer
@@ -22,11 +28,7 @@ function Timer:cancel()
     self.cancelled = true
 end
 
-local function run(dt)
-    if clock.stepped then
-        clock.now = clock.now + (dt or 0)
-    end
-    clock.stepped = false
+local function run()
     local due = {}
     for _, timer in ipairs(clock.list) do
         if not timer.cancelled and timer.due <= clock.now then
@@ -57,7 +59,9 @@ local function start()
         return
     end
     clock.running = true
-    hook.add(core.sym("CPlayerController::FixedStep"), {before = function() clock.stepped = true end})
+    -- The player's step is the fallback for a client whose game definition lacks the physics step.
+    local at = core.sym("CIsBulletWorld::FixedStep") or core.sym("CPlayerController::FixedStep")
+    hook.add(at, {before = function() clock.now = clock.now + STEP end})
     events.on("frame", run)
 end
 
@@ -68,6 +72,8 @@ local function add(seconds, interval, fn)
     table.insert(clock.list, timer)
     return timer
 end
+
+start()
 
 --- Runs fn() once, `seconds` of game time from now. Returns a timer with :cancel().
 function timers.after(seconds, fn)

@@ -332,14 +332,20 @@ class BOZ_OT_make_prefab(Operator):
                       "as one, can have a script, and Save as new prefab puts it in the library")
     bl_options = {"REGISTER", "UNDO"}
 
+    # Runs whenever something is selected and explains when nothing can be grouped: a failing
+    # poll would hand Ctrl+G to Blender's own Create New Collection.
     @classmethod
     def poll(cls, context):
-        return bool(_selected_parts(context))
+        return bool(context.selected_objects)
 
     def execute(self, context):
         from mathutils import Matrix, Vector
 
         parts = _selected_parts(context)
+        if not parts:
+            self.report({"WARNING"}, "Nothing to group: select your own models, volumes and "
+                                     "prefabs (objects from the original map cannot be grouped)")
+            return {"CANCELLED"}
         if len(parts) == 1 and convert.is_prefab_group(parts[0]):
             self.report({"WARNING"}, f"{parts[0].name} is a prefab already: select more objects "
                                      "to group with it")
@@ -391,14 +397,18 @@ class BOZ_OT_ungroup_prefab(Operator):
     bl_description = "Take the prefab apart: its parts stay where they are"
     bl_options = {"REGISTER", "UNDO"}
 
+    # As Make prefab: a failing poll would hand Ctrl+Alt+G to Blender's Remove from Collections.
     @classmethod
     def poll(cls, context):
-        return convert.is_prefab_group(context.object)
+        return context.object is not None
 
     def execute(self, context):
         from mathutils import Matrix
 
         prefab = context.object
+        if not convert.is_prefab_group(prefab):
+            self.report({"WARNING"}, "Select one of your prefabs to ungroup")
+            return {"CANCELLED"}
         outer = prefab.parent
         for child in list(prefab.children):
             matrix = convert.world_matrix(child)
