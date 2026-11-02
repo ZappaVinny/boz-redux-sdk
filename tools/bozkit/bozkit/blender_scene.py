@@ -16,7 +16,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import collision, group, map_resources, native, navbuild, navigation, reflect, resources
+from . import collision, group, links, map_resources, native, navbuild, navigation, reflect, resources
 from .hashing import iw_hash
 from . import spec_fields
 from .spec_fields import (IDENTITY_ROTATION, UNIT_SCALE)
@@ -81,8 +81,7 @@ AREA = iw_hash('CArea')
 # Reference fields between entities. Field names were recovered by hashing the game's strings
 # (the reflection export misses them). Values are IwHashString of a CIsNamed name, except
 # m_AreasUnlock, which holds CArea resource names.
-POWERED = ('CPerk', 'CDoor', 'CPackAPunch', 'CTrapSwitch', 'CTeleporter', 'CTVScreen',
-           'CProjectorScreen', 'CTurret', 'CTeleportMainframe')
+POWERED = links.POWERED
 LINK_FIELDS = {  # (component, field) -> (link kind, is a list)
     **{(component, 'powerSwitch'): ('power', False) for component in POWERED},
     ('CTrapSwitch', 'traps'): ('trap', True),

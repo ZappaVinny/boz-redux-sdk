@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import bpy
 
-from . import (assets_tab, effects_tab, game_tab, link, objects, palette, placeholders, preview,
-               scene_view, shapes, shell, shipped_maps, sounds_tab, weapons_tab)
+from . import (assets_tab, effects_tab, game_tab, link, objects, palette, placeholders, prefab_links,
+               preview, scene_view, shapes, shell, shipped_maps, sounds_tab, weapons_tab)
 
 
 def _offline() -> None:
@@ -31,6 +31,7 @@ def register():
     scene_view.register()   # after the Shipped files panel its Selected panel nests in
     link.register()
     objects.register()
+    prefab_links.register()
     weapons_tab.register()
     assets_tab.register()
     sounds_tab.register()
@@ -54,6 +55,7 @@ def unregister():
     sounds_tab.unregister()
     assets_tab.unregister()
     weapons_tab.unregister()
+    prefab_links.unregister()
     objects.unregister()
     link.unregister()
     scene_view.unregister()

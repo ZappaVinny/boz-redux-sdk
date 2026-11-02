@@ -19,7 +19,7 @@ from bpy.types import Operator, Panel
 
 from ._bozkit import scripts, toolkit, world
 
-from . import convert, link, tabs
+from . import convert, link, prefab_links, tabs
 
 KINDS = ("model", "volume", "prefab")
 
@@ -693,6 +693,7 @@ class BOZ_PT_object(Panel):
                 box.label(text="Delete (X) takes it out of the map; Shift+D adds a copy")
                 box.operator(link.BOZ_OT_reset_base.bl_idname, icon="LOOP_BACK")
             _draw_game_settings(layout, obj)
+            prefab_links.draw(layout, obj, context)
             if obj.get("boz_custom_model") or obj.get("boz_game_model"):
                 box = layout.box()
                 box.label(text="Draws your mesh; works as before" if obj.get("boz_custom_model")

@@ -536,6 +536,8 @@ def world_data_lua(runtime: dict) -> str:
     data['names'] = list(runtime.get('names', []))
     if runtime.get('aliases'):
         data['aliases'] = dict(runtime['aliases'])
+    if runtime.get('links'):
+        data['links'] = {name: dict(kinds) for name, kinds in runtime['links'].items()}
     data['weapons'] = list(runtime.get('weapons', []))
     data['effects'] = list(runtime.get('effects', []))
     if runtime.get('start_weapon'):

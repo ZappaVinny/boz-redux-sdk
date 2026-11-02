@@ -1052,7 +1052,8 @@ if LIBRARY:
     fourth = next((o for o in scene.objects if o.boz.source == "spawn_player_4"), None)
     if fourth is not None:
         bpy.data.objects.remove(fourth)
-    for key in ("juggernog", "pack_a_punch", "mystery_box", "player_spawn", "wall_buy"):
+    for key in ("juggernog", "pack_a_punch", "mystery_box", "player_spawn", "wall_buy", "trap",
+                "trap_switch"):
         stand_in = bpy.data.objects.new(f"piece {key}", None)
         stand_in["boz_asset_kind"] = "piece"
         stand_in["boz_piece"] = key
@@ -1100,6 +1101,24 @@ if LIBRARY:
           <= jug.fields.items(), f"game prefab settings are written ({jug.fields})")
     spawns = sorted(p.source for p in back.prefabs if p.source.startswith("spawn_player"))
     check(spawns == [f"spawn_player_{n}" for n in range(1, 5)], f"a dropped spawn takes the free name ({spawns})")
+    # Links: the switch runs the trap the user links, by name, and follows a rename.
+    trap, switch = pieces["trap"], pieces["trap_switch"]
+    kinds = [k.name for k in suite.prefab_links.kinds(switch, scene.boz.base)]
+    check(kinds == ["power", "traps"], f"a trap switch has power and traps links ({kinds})")
+    select_only(trap, switch)
+    bpy.ops.boz.prefab_link_selected(kind="traps")
+    try:
+        bpy.ops.boz.prefab_link_selected(kind="power")
+        check(False, "a trap cannot be a power switch")
+    except RuntimeError as exc:
+        check("Select what to link" in str(exc), f"linking the wrong kind says so ({exc})")
+    trap.name = "Fire_Trap"
+    back = link.scene_to_world(scene, [])
+    linked = next(p for p in back.prefabs if p.piece == "trap_switch").links
+    check(linked == {"traps": ["Fire_Trap"]}, f"the set link is written and follows a rename ({linked})")
+    again = world.object_from_json(world.object_json(
+        next(p for p in back.prefabs if p.piece == "trap_switch")))
+    check(again.links == linked, "and read back")
     check(any(v.kind_of == "use" for v in back.volumes), "the dropped volume is written")
     prefab = prefab_checks((0.0, -600.0, 0.0))
     # A game prefab inside your prefab.

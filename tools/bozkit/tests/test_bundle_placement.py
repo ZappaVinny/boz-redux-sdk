@@ -201,5 +201,31 @@ class Placement(unittest.TestCase):
         self.assertNotIn((SPEC, iw_hash('boz_moon_statics_%08x' % iw_hash('PowerSwitch'))), everything)
 
 
+
+def explosion_spec(special):
+    """A projectile whose explosion has the hit special *special* (3: the Wunder Waffe's)."""
+    def u32(name, value):
+        return reflect.Property(iw_hash('CExplosion'), iw_hash('unsigned int'), iw_hash(name),
+                                struct.pack('<I', value))
+    component = resources.Component(iw_hash('CIsComponentSpec'), 0, iw_hash('CExplosion'), [
+        reflect.Blob(iw_hash('CExplosion'), [u32('directHitSpecial', special)])])
+    return resources.encode_entity_spec(resources.EntitySpec([component]))
+
+
+class CodeSpawnTests(unittest.TestCase):
+    def test_chain_lightning_comes_with_the_wunder_waffe_projectile(self):
+        game = Game()
+        game.files['ingame/weapons/weapon_projectiles_callofthedead.group.bin'] = levels.make_group(
+            'weapon_projectiles_callofthedead', types=[rtype(SPEC, [
+                (iw_hash('wunder_bolt'), explosion_spec(3)), (iw_hash('other_bolt'), explosion_spec(1)),
+                (iw_hash('chain_lightning'), explosion_spec(0))])])
+        game.paths = list(game.files)
+        reg = bundle.Registry(game.read, game.paths)
+        reg.runtime = {}
+        refs = lambda name: reg.references(next(e for e in reg.entries(iw_hash(name)) if e.cls == SPEC))
+        self.assertIn(iw_hash('chain_lightning'), refs('wunder_bolt'))
+        self.assertNotIn(iw_hash('chain_lightning'), refs('other_bolt'))
+
+
 if __name__ == '__main__':
     unittest.main()

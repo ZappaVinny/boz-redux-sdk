@@ -86,4 +86,13 @@ run_hook("CHealth::Damage", {0xa900, 75, PLAYER})
 check(hurt == 75, "damage to an object")
 objects.on("Secret_Wall", "use", function() error("broken handler") end)
 run_hook("Poi_SendUse", {})   -- logged, the other handlers keep working
+-- Links (world_data links: set in the editor, or the defaults the map got)
+package.loaded["boz.world_data"] = {links = {Electro_Switch = {power = {"Power"}, traps = {"Firepit", "Zapper"}},
+                                             Window_1 = {spawns = {"Window_Spawn"}}}}
+local traps = objects.links("electro_switch", "traps")
+check(#traps == 2 and traps[1].name == "Firepit" and traps[2].name == "Zapper", "links by kind, any case")
+check(#objects.links("Electro_Switch", "siblings") == 0 and #objects.links("Nobody", "power") == 0, "none")
+check(objects.get("Window_1"):links("spawns")[1].name == "Window_Spawn", "an object's own links")
+local from = objects.linked_from("ZAPPER", "traps")
+check(#from == 1 and from[1].name == "Electro_Switch", "what links to an object")
 print("objects_test: OK")

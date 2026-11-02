@@ -28,7 +28,11 @@ LINK_COLOURS = {
     "power": (1.0, 0.95, 0.1, 1.0), "trap": (1.0, 0.15, 0.1, 1.0),
     "sibling": (1.0, 0.55, 0.1, 1.0), "unlocks": (0.1, 0.9, 1.0, 1.0),
     "member": (0.7, 0.45, 1.0, 1.0),
+    # Links set in the editor (bozkit.links names): the same colours, window spawns green.
+    "traps": (1.0, 0.15, 0.1, 1.0), "siblings": (1.0, 0.55, 0.1, 1.0),
+    "spawns": (0.2, 1.0, 0.3, 1.0),
 }
+SET_KINDS = {"power": "power", "trap": "traps", "sibling": "siblings"}   # node_links -> set
 # Scene switch -> object kinds it shows.
 SWITCHES = {
     "boz_show_markers": {"entity"},
@@ -122,9 +126,17 @@ def _draw_link_lines():
     index = link_index(scene)
     selected = {obj for obj in context.selected_objects} if scene.boz_links_selected_only else None
     lines: dict[str, list] = {}
+    from . import prefab_links
+    for kind, source, target in prefab_links.lines(scene):
+        if selected is None or source in selected or target in selected:
+            lines.setdefault(kind, []).extend(
+                [source.matrix_world.translation[:], target.matrix_world.translation[:]])
     for source in scene.objects:
         links = links_of(source) if "boz_links" in source else []
+        overridden = prefab_links.set_links(source) if prefab_links.SET_KEY in source else {}
         for link in links:
+            if SET_KINDS.get(link["kind"]) in overridden:
+                continue    # the user set this link: drawn above
             for target_id in link["targets"]:
                 target = index.get(_hex(target_id))
                 if target is None:

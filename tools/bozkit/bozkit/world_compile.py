@@ -5,6 +5,7 @@ additions (only the navmesh tiles near changes are rebuilt)."""
 from __future__ import annotations
 
 import copy
+import dataclasses
 import struct
 
 from . import group, levels, maps, spec_fields
@@ -191,16 +192,19 @@ def window_links(navmesh_body: bytes, barricade: int, home, placed) -> list[tupl
     barricade, its user id the barricade's name hash, from 1 m outside to 1 m inside. *home* and
     *placed* are (position cm, rotation xyzw) of the barricade in its level and in the map; the
     links come back moved with it, in metres, as navbuild.build takes them (user still the
-    barricade's home name). None found: one generated through it along its local Z."""
+    barricade's home name), with their polygon flags (WINDOW_FLAGS: zombies stop and tear the
+    boards down only on a link flagged so). None found: one generated through it along its
+    local Z."""
     from . import navigation
 
     found = []
     mesh = navigation.decode(navmesh_body)
     for tile in mesh.tiles:
-        for start, end, radius, _extra, _poly, flags, _side, user in \
-                navigation.decode_tile(tile.data).off_mesh:
+        decoded = navigation.decode_tile(tile.data)
+        for start, end, radius, _extra, poly, flags, _side, user in decoded.off_mesh:
             if user == barricade:
-                found.append((start, end, radius, bool(flags & 1)))
+                poly_flags = decoded.polys[poly].flags if poly < len(decoded.polys) else 0
+                found.append((start, end, radius, bool(flags & 1), poly_flags or WINDOW_FLAGS))
     home_position, home_rotation = home
     position, rotation = placed
     undo = (-home_rotation[0], -home_rotation[1], -home_rotation[2], home_rotation[3])
@@ -215,12 +219,14 @@ def window_links(navmesh_body: bytes, barricade: int, home, placed) -> list[tupl
         outside, inside = (tuple((home_position[i] + offset[i]) / 100 for i in range(3))
                            for offset in (spec_fields.rotate(tuple(home_rotation), (0.0, 0.0, side))
                                           for side in (-WINDOW_REACH, WINDOW_REACH)))
-        found = [(outside, inside, WINDOW_RADIUS, False)]
-    return [(move(start), move(end), radius, both, barricade) for start, end, radius, both in found]
+        found = [(outside, inside, WINDOW_RADIUS, False, WINDOW_FLAGS)]
+    return [(move(start), move(end), radius, both, barricade, poly_flags)
+            for start, end, radius, both, poly_flags in found]
 
 
 WINDOW_REACH = 100.0   # cm: a shipped window link starts and ends this far either side
 WINDOW_RADIUS = 0.4    # metres: every shipped window link's radius
+WINDOW_FLAGS = 128     # every shipped barricade link's polygon flags (other climbs: 64)
 
 
 def library_map(path: str) -> str:
@@ -368,6 +374,12 @@ class _Level:
         self.pack_a_punch = False                  # a Pack-a-Punch was placed
         self.window_spawns: list = []              # (name, position) of window zombie spawns
         self.barricades: list = []   # (placement, home name, group, home position and rotation)
+        # bozkit.links: lower world name -> (name hash in the map, component names, toolkit
+        # piece, the name as written), and the placed entities whose links the user set
+        # (resource, placement).
+        self.named: dict[str, tuple[int, list, str, str]] = {}
+        self.link_requests: list = []
+        self.barricade_spawns: dict[str, list] = {}   # barricade world name -> its window spawns
 
     def add(self, cls: int, key: int, body: bytes) -> None:
         if key in self.present[cls]:
@@ -444,6 +456,7 @@ class _Level:
             existing.body = resources.encode_entity_spec(spec)
             self._mark([old, entity.position])
             self.moved.append(existing)
+            self._remember_links(entity, entity.hash, spec, existing)
             if entity.script and script_of(entity)['dynamic']:
                 self._script_entity(entity, existing, spec)
             return
@@ -532,9 +545,19 @@ class _Level:
         self.kept.append(resource)
         self.added.append(resource)
         self.homes[id(resource)] = home
+        self._remember_links(entity, key, spec, resource)
         self._mark([entity.position])
         if entity.script and script_of(entity)['dynamic']:
             self._script_entity(entity, resource, spec)
+
+    def _remember_links(self, entity: Placement, key: int, spec, resource) -> None:
+        """Remember a placed entity for links: by its world name, and its links if set."""
+        from .blender_scene import component_names
+
+        name = script_of(entity).get('name') or entity.source
+        self.named[name.lower()] = (key, component_names(spec), entity.piece, name)
+        if entity.links:
+            self.link_requests.append((resource, entity))
 
     def _trigger_volume(self, entity: Placement) -> None:
         """A trigger volume: an invisible ghost box (from Call of the Dead's snow triggers) that
@@ -661,6 +684,14 @@ class _Level:
                        for c in _box_corners(native.decode_model(self.models[model]).vertices)]
         if not corners:
             corners = [tuple(entity.position)]
+        if not script_of(entity)['collision'] and spec_fields.component(spec, 'CTrap') is not None:
+            # A trap's collision is its kill volume, which the trap reads every frame while it
+            # runs: taken out of the physics world, the game crashes when the trap is bought.
+            name = script_of(entity).get('name') or entity.source
+            self.runtime.setdefault('warnings', []).append(
+                f'{name}: a trap keeps its collision (its kill volume); "Start collision" is '
+                'ignored')
+            entity = dataclasses.replace(entity, script={**entity.script, 'collision': True})
         self.script(entity, corners)
 
     def _configure(self, spec, entity: Placement, rotation, scale) -> None:
@@ -1184,31 +1215,96 @@ class _Level:
             spec = resources.decode_entity_spec(resource.body)
             if rewire_links(spec, home, self.renames, present, self.power):
                 resource.body = resources.encode_entity_spec(spec)
-        self.link_trap_switches()
+        self.apply_links()
+        self.runtime_links()
 
-    def link_trap_switches(self) -> None:
-        """A placed trap switch whose own traps are not in the map (another trap was placed,
-        say Kino's electro switch with the Firepit) runs the trap nearest to it."""
-        from . import resources, toolkit
+    def apply_links(self) -> None:
+        """Write the links the user set (Placement.links, bozkit.links) over the defaults
+        rewire_links left. A link to an object the map does not have, or to the wrong kind of
+        object, is an error: the game would look for it by name and find nothing."""
+        from . import links, reflect, resources, toolkit
 
-        traps, switches = [], []
+        for resource, entity in self.link_requests:
+            spec = resources.decode_entity_spec(resource.body)
+            own = script_of(entity).get('name') or entity.source
+            components = self.named[own.lower()][1]
+            changed = False
+            for kind_name, targets in links.clean(entity.links).items():
+                kind = links.BY_NAME[kind_name]
+                if not kind.on & set(components):
+                    raise WorldError(f'{own} has no {kind.label} link')
+                values = []
+                for target in targets:
+                    found = self.named.get(target.lower())
+                    if found is None:
+                        raise WorldError(f'{own}: its {kind.label} link names {target}, which is '
+                                         'not in the map')
+                    if not links.can_target(kind, found[1], found[2]):
+                        raise WorldError(f'{own}: its {kind.label} link names {target}, which '
+                                         f'cannot be one')
+                    values.append(found[0])
+                if kind.name == 'spawns':
+                    self.barricade_spawns[own] = list(targets)
+                for component_name, field_name in kind.fields:
+                    component = spec_fields.component(spec, component_name)
+                    if component is None or component.blob is None:
+                        continue
+                    raw = (toolkit.encode_hash_list(values) if kind.many
+                           else struct.pack('<I', values[0] if values else 0))
+                    prop = spec_fields.prop(component.blob, field_name)
+                    if prop is None:
+                        type_name = 'std::list<unsigned int>' if kind.many else 'unsigned int'
+                        prop = reflect.Property(iw_hash(component_name), iw_hash(type_name),
+                                                iw_hash(field_name), b'')
+                        component.blob.properties.append(prop)
+                    if prop.raw != raw:
+                        prop.raw, prop.nested, prop.elements = raw, None, None
+                        changed = True
+            if changed:
+                resource.body = resources.encode_entity_spec(spec)
+        # A trap switch with no trap does nothing when bought: say so rather than guess one.
         for resource in self.added:
             spec = resources.decode_entity_spec(resource.body)
-            if spec_fields.component(spec, 'CTrapSwitch') is not None:
-                switches.append((resource, spec))
-            elif spec_fields.component(spec, 'CTrap') is not None:
-                traps.append((resource.in_group_hash, spec_fields.local_transform(spec)[0]))
-        if not traps:
-            return
-        for resource, spec in switches:
             prop = spec_fields.prop(spec_fields.component_blob(spec, 'CTrapSwitch'), 'traps')
-            if prop is None or toolkit.hash_list(prop.raw):
+            if prop is not None and not toolkit.hash_list(prop.raw):
+                name = self.name_of(resource.in_group_hash)
+                self.runtime.setdefault('warnings', []).append(
+                    f'trap switch {name} runs no trap: set its Traps link')
+
+    def name_of(self, key: int) -> str:
+        """The world name of a placed entity (its name hash in the map), else 0x<hash>."""
+        return next((found[3] for found in self.named.values() if found[0] == key),
+                    f'0x{key:08x}')
+
+    def runtime_links(self) -> None:
+        """Every placed entity's links, set or default, by world name for boz.objects.links
+        (world_data.lua ``links``)."""
+        from . import links, resources, toolkit
+
+        names = {found[0]: found[3] for found in self.named.values()}
+        out: dict = {}
+        for resource in self.added + self.moved:
+            own = names.get(resource.in_group_hash)
+            if own is None:
                 continue
-            where = spec_fields.local_transform(spec)[0]
-            nearest = min(traps, key=lambda trap: sum((a - b) ** 2 for a, b in zip(trap[1], where)))
-            prop.raw = toolkit.encode_hash_list([nearest[0]])
-            prop.nested = prop.elements = None
-            resource.body = resources.encode_entity_spec(spec)
+            spec = resources.decode_entity_spec(resource.body)
+            for kind in links.KINDS:
+                values = []
+                for component_name, field_name in kind.fields:
+                    prop = spec_fields.prop(spec_fields.component_blob(spec, component_name),
+                                            field_name)
+                    if prop is None:
+                        continue
+                    values = (toolkit.hash_list(prop.raw) if kind.many else
+                              list(struct.unpack('<I', prop.raw)) if len(prop.raw) == 4 else [])
+                    break
+                targets = [names.get(v, f'0x{v:08x}') for v in values if v]
+                if targets:
+                    out.setdefault(own, {})[kind.name] = targets
+            if own in self.barricade_spawns:
+                out.setdefault(own, {})['spawns'] = list(self.barricade_spawns[own])
+        if out:
+            self.runtime['links'] = out
 
     def window_links(self) -> list[tuple]:
         """The off-mesh links zombies climb through the placed barricades by, taken from their
@@ -1220,12 +1316,25 @@ class _Level:
             if navmesh is None:
                 continue
             placed = (tuple(entity.position), entity.quaternion())
-            for start, end, radius, both, _user in window_links(navmesh, value, home_transform,
-                                                                 placed):
-                links.append((start, end, radius, both, self.renames[(home, value)]))
-        # Window zombies climb in through a barricade's window crossing: a window spawn with no
-        # barricade near it is never used.
+            for start, end, radius, both, _user, poly_flags in window_links(
+                    navmesh, value, home_transform, placed):
+                links.append((start, end, radius, both, self.renames[(home, value)], poly_flags))
+        # Window zombies climb in through a barricade's window crossing: a window spawn far from
+        # its barricade (the one whose Window spawns link names it, else any) is never used.
+        linked = {spawn.lower(): barricade for barricade, spawns in self.barricade_spawns.items()
+                  for spawn in spawns}
         for name, where in self.window_spawns:
+            barricade = linked.get(name.lower())
+            if barricade is not None:
+                entity = next((e for e, _v, _h, _t in self.barricades
+                               if (script_of(e).get('name') or e.source).lower()
+                               == barricade.lower()), None)
+                if entity is not None and sum((a - b) ** 2 for a, b in zip(
+                        where, entity.position)) > SPAWN_TO_BARRICADE ** 2:
+                    self.runtime.setdefault('warnings', []).append(
+                        f'window zombie spawn {name} is more than {SPAWN_TO_BARRICADE / 100:g} m '
+                        f'from {barricade}, the barricade it is linked to')
+                continue
             if not any(sum((a - b) ** 2 for a, b in zip(where, entity.position))
                        <= SPAWN_TO_BARRICADE ** 2
                        for entity, _value, _home, _transform in self.barricades):

@@ -1,4 +1,5 @@
-"""Placed game prefabs' links to each other (world_compile.rewire_links, set_level_boxes)."""
+"""Placed game prefabs' links to each other (bozkit.links, world_compile.rewire_links and
+apply_links, set_level_boxes)."""
 import struct
 import sys
 import unittest
@@ -6,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bozkit import reflect, resources, spec_fields, toolkit, world_compile  # noqa: E402
+from bozkit import group, links, reflect, resources, spec_fields, toolkit, world, world_compile  # noqa: E402,E501
 from bozkit.hashing import iw_hash  # noqa: E402
 
 KINO = 'levels/kino/kino_statics.group.bin'
@@ -84,6 +85,104 @@ class RewireTests(unittest.TestCase):
         renames = {(KINO, top): iw_hash('Copy_Top')}
         self.assertFalse(world_compile.rewire_links(door, KINO, renames, {top, bottom}, 0))
         self.assertEqual(value(door, 'CDoor', 'm_Siblings'), [top])
+
+
+def placed(name, spec, piece='', set_links=None):
+    """(resource, placement) of an entity placed under the world name *name*."""
+    resource = group.Resource(None, iw_hash(name), resources.encode_entity_spec(spec))
+    return resource, world.Placement(name, (0.0, 0.0, 0.0), piece=piece,
+                                     script={'name': name}, links=set_links or {})
+
+
+def level_with(*items):
+    """A bare _Level holding *items* ((resource, placement)), as entity() leaves it."""
+    from bozkit.blender_scene import component_names
+
+    level = world_compile._Level.__new__(world_compile._Level)
+    level.named, level.link_requests, level.barricade_spawns = {}, [], {}
+    level.added, level.moved, level.runtime = [], [], {}
+    for resource, placement in items:
+        spec = resources.decode_entity_spec(resource.body)
+        level.named[placement.script['name'].lower()] = (
+            resource.in_group_hash, component_names(spec), placement.piece,
+            placement.script['name'])
+        level.added.append(resource)
+        if placement.links:
+            level.link_requests.append((resource, placement))
+    return level
+
+
+def decoded(resource):
+    return resources.decode_entity_spec(resource.body)
+
+
+class SetLinkTests(unittest.TestCase):
+    def test_table(self):
+        kinds = [kind.name for kind in links.kinds_for(['CIsTransform', 'CTrapSwitch'])]
+        self.assertEqual(kinds, ['power', 'traps'])
+        self.assertEqual([k.name for k in links.kinds_for(['CBarricade'])], ['spawns'])
+        self.assertTrue(links.can_target(links.BY_NAME['traps'], ['CTrap']))
+        self.assertFalse(links.can_target(links.BY_NAME['spawns'], ['CSpawnPoint'], 'zombie_ground'))
+        self.assertEqual(links.clean({'power': ['A', 'B'], 'traps': 'T', 'nope': ['x']}),
+                         {'power': ['A'], 'traps': ['T']})
+        self.assertEqual(links.renamed({'traps': ['A', 'B']}, 'A', 'C'), {'traps': ['C', 'B']})
+
+    def test_world_json_round_trip(self):
+        prefab = world.Prefab('Switch', source='Traps_Switch', links={'traps': ['Firepit']})
+        again = world.object_from_json(world.object_json(prefab))
+        self.assertEqual(again.links, {'traps': ['Firepit']})
+        self.assertNotIn('links', world.object_json(world.Prefab('Perk', source='perk')))
+
+    def test_set_links_are_written_by_map_name(self):
+        switch = placed('Electro', resources.EntitySpec([component('CTrapSwitch', [
+            u32('CTrapSwitch', 'powerSwitch', POWER),
+            names('CTrapSwitch', 'traps', [iw_hash('Traps_Electro')])])]),
+            set_links={'traps': ['Firepit', 'Zapper'], 'power': ['Power']})
+        firepit = placed('Firepit', resources.EntitySpec([component('CTrap')]))
+        zapper = placed('Zapper', resources.EntitySpec([component('CTrap')]))
+        power = placed('Power', resources.EntitySpec([component('CPowerSwitch')]))
+        power[0].in_group_hash = POWER   # a new map's switch is always called PowerSwitch
+        level = level_with(switch, firepit, zapper, power)
+        level.apply_links()
+        spec = decoded(switch[0])
+        self.assertEqual(value(spec, 'CTrapSwitch', 'traps'), [iw_hash('Firepit'), iw_hash('Zapper')])
+        self.assertEqual(value(spec, 'CTrapSwitch', 'powerSwitch'), POWER)
+        self.assertNotIn('warnings', level.runtime)
+        level.runtime_links()
+        self.assertEqual(level.runtime['links']['Electro'],
+                         {'power': ['Power'], 'traps': ['Firepit', 'Zapper']})
+
+    def test_missing_or_wrong_target_is_an_error(self):
+        switch = placed('Electro', resources.EntitySpec([component('CTrapSwitch')]),
+                        set_links={'traps': ['Gone']})
+        with self.assertRaisesRegex(world_compile.WorldError, 'Gone, which is not in the map'):
+            level_with(switch).apply_links()
+        door = placed('Door', resources.EntitySpec([component('CDoor')]))
+        switch = placed('Electro', resources.EntitySpec([component('CTrapSwitch')]),
+                        set_links={'traps': ['Door']})
+        with self.assertRaisesRegex(world_compile.WorldError, 'cannot be one'):
+            level_with(switch, door).apply_links()
+
+    def test_switch_without_traps_warns(self):
+        switch = placed('Electro', resources.EntitySpec([component('CTrapSwitch', [
+            names('CTrapSwitch', 'traps', [])])]))
+        level = level_with(switch)
+        level.apply_links()
+        self.assertEqual(level.runtime['warnings'],
+                         ['trap switch Electro runs no trap: set its Traps link'])
+
+    def test_barricade_spawns_link_has_no_game_field(self):
+        barricade = placed('Window', resources.EntitySpec([component('CBarricade')]),
+                           set_links={'spawns': ['Window_Spawn']})
+        spawn = placed('Window_Spawn', resources.EntitySpec([component('CSpawnPoint')]),
+                       piece='zombie_window')
+        level = level_with(barricade, spawn)
+        before = barricade[0].body
+        level.apply_links()
+        self.assertEqual(barricade[0].body, before)
+        self.assertEqual(level.barricade_spawns, {'Window': ['Window_Spawn']})
+        level.runtime_links()
+        self.assertEqual(level.runtime['links'], {'Window': {'spawns': ['Window_Spawn']}})
 
 
 class LevelBoxTests(unittest.TestCase):

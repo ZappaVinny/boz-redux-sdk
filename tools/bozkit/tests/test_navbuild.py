@@ -128,19 +128,23 @@ class NavRebuildTests(unittest.TestCase):
         # A barricade's window link (user id: its name), moved with it from its level.
         vertices, triangles = floor()
         barricade = 0xc0ffee
-        link = ((2.0, 0.0, 3.2), (4.0, 0.0, 3.2), 0.4, False, barricade)
+        link = ((2.0, 0.0, 3.2), (4.0, 0.0, 3.2), 0.4, False, barricade, world_compile.WINDOW_FLAGS)
         shipped = navbuild.build(empty_navmesh(), vertices, triangles, links=[link])
-        found = [entry for tile in navigation.decode(shipped).tiles
-                 for entry in navigation.decode_tile(tile.data).off_mesh]
+        tiles = [navigation.decode_tile(tile.data) for tile in navigation.decode(shipped).tiles]
+        found = [entry for tile in tiles for entry in tile.off_mesh]
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0][-1], barricade)
         self.assertAlmostEqual(found[0][3], 0.9)    # the extra float every shipped link has
+        # Its polygon is flagged as a window (128), as shipped: zombies stop at the boards.
+        crossing = [tile.polys[entry[4]] for tile in tiles for entry in tile.off_mesh]
+        self.assertEqual([poly.flags for poly in crossing], [world_compile.WINDOW_FLAGS])
         # In its level the barricade stood at x 3 m; placed at x 9.6 m, turned 90 degrees.
         half = 0.5 ** 0.5
         moved = world_compile.window_links(shipped, barricade, ((300.0, 0.0, 320.0),
                                                                 (0.0, 0.0, 0.0, 1.0)),
                                            ((960.0, 0.0, 320.0), (0.0, half, 0.0, half)))
         self.assertEqual(len(moved), 1)
+        self.assertEqual(moved[0][5], world_compile.WINDOW_FLAGS)   # the flags come with it
         start, end = moved[0][0], moved[0][1]
         self.assertAlmostEqual(abs(start[2] - end[2]), 2.0, places=3)   # now across Z
         self.assertAlmostEqual(start[0], 9.6, places=3)

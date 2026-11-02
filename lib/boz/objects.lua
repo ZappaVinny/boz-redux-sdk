@@ -97,6 +97,46 @@ function objects.get(name)
     return object
 end
 
+local link_data = nil   -- lower world name -> {name =, kinds = {kind -> {world names}}}
+
+local function all_links()
+    if link_data == nil then
+        link_data = {}
+        local ok, data = pcall(require, "boz.world_data")
+        for name, kinds in pairs(ok and type(data) == "table" and data.links or {}) do
+            link_data[string.lower(name)] = {name = name, kinds = kinds}
+        end
+    end
+    return link_data
+end
+
+--- The objects `name` links to by the link `kind` ("power", "traps", "siblings", "spawns"; the
+--- links set in the editor, or the defaults the map got), as a list of objects (empty if none).
+function objects.links(name, kind)
+    local out = {}
+    local entry = all_links()[string.lower(name)]
+    for _, target in ipairs(entry and entry.kinds[kind] or {}) do
+        out[#out + 1] = objects.get(target)
+    end
+    return out
+end
+
+--- The objects that link to `name` by the link `kind` (e.g. the switches running a trap), as a
+--- list of objects.
+function objects.linked_from(name, kind)
+    local out, key = {}, string.lower(name)
+    for _, source in pairs(all_links()) do
+        for _, target in ipairs(source.kinds[kind] or {}) do
+            if string.lower(target) == key then
+                out[#out + 1] = objects.get(source.name)
+                break
+            end
+        end
+    end
+    table.sort(out, function(a, b) return a.name < b.name end)
+    return out
+end
+
 --- The object called `name` if it exists in the running level, else nil.
 function objects.find(name)
     local object = objects.get(name)
@@ -116,6 +156,12 @@ end
 --- True when the object is in the running level.
 function Object:exists()
     return self:entity_pointer() ~= 0
+end
+
+--- The objects this one links to by the link `kind` (see objects.links): in a prefab script,
+--- `self:links("traps")`.
+function Object:links(kind)
+    return objects.links(self.name, kind)
 end
 
 -- The entity and its children (parts such as a wall buy's weapon model).
@@ -181,10 +227,16 @@ function Object:hide()
 end
 
 --- Switches the object's collision on or off (players and bullets pass through it when off).
+--- A trap keeps its kill volume: the game reads it every frame while the trap runs.
 --- Returns the object.
 function Object:set_collision(enabled)
     local target = enabled and "CIsCollisionObject::Enable" or "CIsCollisionObject::Disable"
+    local root = self:entity_pointer()
+    local trap = not enabled and find_component("CTrap", root) ~= nil
     local function switch(entity)
+        if trap and entity ~= root then
+            return
+        end
         for _, class_name in ipairs(COLLISION_CLASSES) do
             local shape = find_component(class_name, entity)
             if shape then
@@ -192,7 +244,7 @@ function Object:set_collision(enabled)
             end
         end
     end
-    each_entity(self:entity_pointer(), switch)
+    each_entity(root, switch)
     -- Meshes and props scripts change have their collision in an entity of its own.
     each_entity(objects.get(self.name .. "_collision"):entity_pointer(), switch)
     return self

@@ -47,6 +47,11 @@ MATERIAL = iw_hash('CIwMaterial')
 TEXTURE = iw_hash('CIwTexture')
 PROJECTILE = iw_hash('CProjectileEntity')
 PLAYER_WEAPON = iw_hash('CPlayerWeapon')
+# Spawned by code from a component's values, so no data and no runtime name list names it:
+# Explosion_Detonate spawns chain_lightning (Call of the Dead's weapon_projectiles) for a
+# projectile whose hit special is 3, the Wunder Waffe's (the only one in the game).
+CHAIN_LIGHTNING = iw_hash('chain_lightning')
+CHAIN_LIGHTNING_SPECIAL = 3
 # Level structure: never copied from another map (the map has its own).
 NOT_COPIED = {iw_hash(n) for n in ('CLevel', 'CArea', 'CIsNavMesh', 'CIsPortal', 'CIsOccluder',
                                    'CWave', 'CScoreConfig', 'CResolutionSpecificString')}
@@ -163,6 +168,7 @@ class Registry:
             out = world_compile.spec_hashes(spec)
             for component in _components(spec):
                 out += self.runtime.get(component.type_hash, [])
+            out += _code_spawns(spec)
             return [h for h in out if h in self.by_hash]
         if reflect.is_blob(body, 4) or reflect.is_blob(body):
             from . import world_compile
@@ -246,6 +252,18 @@ def _components(spec):
     yield from spec.components
     for _cls, _reserved, child in spec.children:
         yield from _components(child)
+
+
+def _code_spawns(spec) -> list[int]:
+    """Specs the game's code spawns for this spec because of its values (CHAIN_LIGHTNING)."""
+    from . import spec_fields
+    blob = spec_fields.component_blob(spec, 'CExplosion')
+    for name in ('directHitSpecial', 'areaHitSpecial'):
+        prop = spec_fields.prop(blob, name) if blob is not None else None
+        if prop is not None and len(prop.raw) >= 4 and \
+                struct.unpack_from('<I', prop.raw)[0] == CHAIN_LIGHTNING_SPECIAL:
+            return [CHAIN_LIGHTNING]
+    return []
 
 
 def _spec_kind(body: bytes) -> str:

@@ -26,7 +26,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import levels, maps, png, spec_fields
+from . import levels, links, maps, png, spec_fields
 from .hashing import iw_hash
 
 COLLISION_KINDS = ('floor', 'solid', 'none')
@@ -137,6 +137,7 @@ class Placement:
     settings: dict = field(default_factory=dict)  # the piece's settings as the editor shows them
     chalk_texture: Texture | None = field(default=None, compare=False, repr=False)  # boz.chalk image
     script: dict = field(default_factory=dict)   # SCRIPT_DEFAULTS; a copy's name is script name
+    links: dict = field(default_factory=dict)    # bozkit.links: link name -> world names
 
     @property
     def hash(self) -> int:
@@ -531,6 +532,7 @@ class Prefab:
     mesh: str = ''            # draws one of the world's meshes instead of its own model
     game: str = ''            # or a game model
     base: bool = False        # the inherited base level's own entity (moved / edited)
+    links: dict = field(default_factory=dict)      # bozkit.links set by the user: name -> names
     chalk_texture: Texture | None = field(default=None, compare=False, repr=False)
 
     kind = 'prefab'
@@ -631,6 +633,8 @@ def object_json(item) -> dict:
             out['settings'] = item.settings
         if item.fields:
             out['fields'] = item.fields
+        if item.links:
+            out['links'] = item.links
     else:
         out['parts'] = [object_json(part) for part in item.parts]
         if item.library:
@@ -667,7 +671,7 @@ def object_from_json(item: dict):
                   piece=str(item.get('piece', '')), settings=dict(item.get('settings', {})),
                   fields=dict(item.get('fields', {})), mesh=str(item.get('mesh', '')),
                   game=str(item.get('game', '')), base=bool(item.get('base', False)),
-                  **place, **common)
+                  links=links.clean(item.get('links', {})), **place, **common)
 
 
 def _write_meshes(source: Path, meshes: list[Mesh]) -> tuple[list[dict], set]:
@@ -906,6 +910,7 @@ def from_layout(layout: Layout) -> World:
             scale=tuple(entity.scale), start=_start_of(entity.script), source=entity.source,
             group=entity.group, piece=entity.piece, settings=dict(entity.settings),
             fields=dict(entity.fields), mesh=entity.prop, game=entity.model, base=base,
+            links=dict(entity.links),
             chalk_texture=entity.chalk_texture))
     return world
 
@@ -979,7 +984,7 @@ def lower(world: World) -> Layout:
                 item.source, position, group=item.group, rotation=rotation, scale=scale,
                 prop=prop_for(item.mesh, 'none', 'box') if item.mesh else '', model=item.game,
                 fields=dict(item.fields), piece=item.piece, settings=dict(item.settings),
-                chalk_texture=item.chalk_texture,
+                chalk_texture=item.chalk_texture, links=dict(item.links),
                 script=script_for(name, item, scripted_owner)))
         else:
             for part in item.parts:

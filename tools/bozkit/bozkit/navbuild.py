@@ -194,11 +194,12 @@ def _door_tag(flags: int, doors) -> tuple[int, int]:
     return 1, 0
 
 
-def to_boz_tile(stock: bytes, tag, link_extras) -> bytes:
+def to_boz_tile(stock: bytes, tag, link_extras, link_flags=None) -> bytes:
     """Re-pack a stock Detour tile into BOZ's layout.
 
     *tag(poly_index, centre)* returns (flags, name hash) for a ground polygon; *link_extras*
-    maps an off-mesh userId to the BOZ float stored after the radius.
+    maps an off-mesh userId to the BOZ float stored after the radius; *link_flags* maps it to
+    its polygon's flags (the helper gives every link 1, walking: a window crossing is 128).
     """
     header = bytearray(stock[:navigation._TILE_HEADER.size])
     fields = navigation._TILE_HEADER.unpack_from(stock)
@@ -212,6 +213,13 @@ def to_boz_tile(stock: bytes, tag, link_extras) -> bytes:
     p += verts_size
     polys = [_STOCK_POLY.unpack_from(stock, p + i * 32) for i in range(poly_count)]
     p += _align(poly_count * 32)
+    rest_size = (_align(max_links * 12) + _align(detail_count * 12) + _align(detail_verts * 12)
+                 + _align(detail_tris * 4) + _align(bv_count * 16))
+    links_at = p + rest_size
+    link_users = {}   # off-mesh polygon index -> its link's userId
+    for index in range(off_mesh_count):
+        values = _STOCK_OFF_MESH.unpack_from(stock, links_at + index * 36)
+        link_users[values[7]] = values[10]
     for index, (first_link, *rest) in enumerate(polys):
         verts, neis = rest[:6], rest[6:12]
         flags, count, area_type = rest[12:15]
@@ -222,9 +230,9 @@ def to_boz_tile(stock: bytes, tag, link_extras) -> bytes:
                 flags, extra = tag(index, centre, flags)
             except TypeError:
                 flags, extra = tag(index, centre)
+        elif index in link_users and link_flags:
+            flags = link_flags.get(link_users[index], flags)
         out += _BOZ_POLY.pack(first_link, *verts, *neis, flags, extra, count, area_type)
-    rest_size = (_align(max_links * 12) + _align(detail_count * 12) + _align(detail_verts * 12)
-                 + _align(detail_tris * 4) + _align(bv_count * 16))
     out += stock[p:p + rest_size]
     p += rest_size
     for index in range(off_mesh_count):
@@ -295,11 +303,13 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
         old_by_xy[(decoded.x, decoded.y)] = (tile, decoded)
     old_tiles = [decoded for _, decoded in old_by_xy.values()]
     surfaces = _SurfaceIndex(old_tiles)
-    links, link_extras = [], {}
+    links, link_extras, link_flags = [], {}, {}
     for tile in old_tiles:
         for start, end, radius, extra_float, poly, flags, side, user in tile.off_mesh:
             links.append((start, end, radius, bool(flags & 1), user))
             link_extras[user] = extra_float
+            if poly < len(tile.polys):
+                link_flags[user] = tile.polys[poly].flags
     columns = math.ceil((settings.bmax[0] - mesh.origin[0]) / mesh.tile_width)
     rows = math.ceil((settings.bmax[2] - mesh.origin[2]) / mesh.tile_width)
     margin = settings.agent_radius + settings.cell_size * 4
@@ -377,7 +387,7 @@ def rebuild(body: bytes, vertices_m, triangles, *, dirty=None, helper: Path | No
     for xy in grid:
         old = old_by_xy.get(xy)
         stock = built.get(xy)
-        data = to_boz_tile(stock, tag, link_extras) if stock is not None else None
+        data = to_boz_tile(stock, tag, link_extras, link_flags) if stock is not None else None
         decoded = navigation.decode_tile(data) if data is not None else None
         old_links = old[1].off_mesh_count if old else 0
         if old_links and (decoded is None or decoded.off_mesh_count < old_links):
@@ -415,8 +425,9 @@ def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None,
     walkable on top. *doors*: (name hash, XZ polygon, min y, max y): floor under each is cut out
     as its own polygons, tagged as the game tags doors (flags | 2, the door's name), so it opens
     only when the door is bought. *links*: off-mesh links (start, end in metres, radius,
-    bidirectional, user), as shipped levels have for window crossings (user: the barricade's
-    name)."""
+    bidirectional, user[, polygon flags]), as shipped levels have for window crossings (user:
+    the barricade's name; flags 128, which makes zombies stop and tear the boards down; default
+    1, a plain walk)."""
     triangles = _facing_up(vertices_m, triangles)
     mesh = navigation.decode(body)
     settings = Settings.from_raw(mesh.config.raw)
@@ -438,8 +449,9 @@ def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None,
     # Recast puts floor up to a cell above the geometry and Detour drops a link whose end lies
     # below the tile's floor: links start half a cell up (Detour still finds the floor under).
     lift = settings.cell_height / 2
+    link_flags = {link[4]: link[5] for link in links if len(link) > 5}
     links = [((start[0], start[1] + lift, start[2]), (end[0], end[1] + lift, end[2]), radius,
-              both, user) for start, end, radius, both, user in links]
+              both, user) for start, end, radius, both, user, *_flags in links]
     request = _request(settings, mesh, vertices_m, triangles, grid, links, blocking,
                        [(polygon, low - 0.5, high) for _name, polygon, low, high in doors])
     with tempfile.TemporaryDirectory(prefix='boz-navmesh-') as directory:
@@ -453,7 +465,8 @@ def build(body: bytes, vertices_m, triangles, *, helper: Path | None = None,
     poly_bits = max(1, math.ceil(math.log2(mesh.max_polygons)))
     tiles = []
     for x, y, stock in sorted(built, key=lambda item: (item[1], item[0])):
-        data = to_boz_tile(stock, lambda index, centre, flags=1: _door_tag(flags, doors), {})
+        data = to_boz_tile(stock, lambda index, centre, flags=1: _door_tag(flags, doors), {},
+                           link_flags)
         decoded = navigation.decode_tile(data)
         if not decoded.polys:
             continue

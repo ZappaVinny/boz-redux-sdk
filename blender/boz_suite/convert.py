@@ -478,6 +478,9 @@ def game_prefab_object(prefab: "world.Prefab", base: str, scene, parent=None, cu
     if prefab.piece:
         obj["boz_piece"] = prefab.piece
     _field_props(obj, prefab.settings or prefab.fields)
+    if prefab.links:
+        from . import prefab_links
+        prefab_links.write(obj, prefab.links)
     _place(obj, prefab, scene, parent)
     set_common(obj, prefab)
     if weapon:
@@ -1018,7 +1021,9 @@ TINY = 5.0   # centimetres: smaller is Blender's 2 cm default cube, not a game o
 def scene_to_world(scene, problems: list | None = None) -> "world.World":
     """The world the scene's objects describe. *problems* collects (message, object name)."""
     from mathutils import Matrix
+    from . import prefab_links
 
+    prefab_links.follow_renames(scene)   # links name objects: renamed ones are followed
     problems = problems if problems is not None else []
     result = world.World(scene.boz.base, inherit=scene.boz.inherit)
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -1081,7 +1086,7 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
             return world.Prefab(name, position, rotation, scale, source=obj.boz.source,
                                 group=obj.boz.group, piece=obj.get("boz_piece", ""),
                                 settings=_panel_values(obj), fields=_fields(obj),
-                                mesh=custom or "",
+                                links=prefab_links.set_links(obj), mesh=custom or "",
                                 game="" if custom else obj.get("boz_game_model", ""),
                                 start=start_of(obj), **common)
         children = sorted(obj.children, key=object_name)   # stable files, small diffs

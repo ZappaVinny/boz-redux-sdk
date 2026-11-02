@@ -678,15 +678,18 @@ transform moved.
 | --- | --- |
 | `objects.level()` | A key that changes when another level loads (0 outside a match). |
 | `objects.get(name)` | The object called `name` (a handle: it finds the entity when used, so it can be made before the level loads). Names are not case-sensitive. |
+| `objects.links(name, kind)` | The objects `name` links to by the link `kind` ("power", "traps", "siblings", "spawns"; the links set in the editor, or the defaults the map got), as a list of objects (empty if none). |
+| `objects.linked_from(name, kind)` | The objects that link to `name` by the link `kind` (e.g. the switches running a trap), as a list of objects. |
 | `objects.find(name)` | The object called `name` if it exists in the running level, else nil. |
 | `Object:entity_pointer()` | The entity pointer, or 0 when the object is not in the running level. |
 | `Object:exists()` | True when the object is in the running level. |
+| `Object:links(kind)` | The objects this one links to by the link `kind` (see objects.links): in a prefab script, `self:links("traps")`. |
 | `objects.is_hidden(name)` | True while the object called *name* is hidden (set_visible): a hidden volume sends nothing. |
 | `objects.forget_hidden()` | Forgets which objects were hidden: a level that starts (or restarts) shows every object, so the volumes of objects a script hid in the last run send their events again. |
 | `Object:set_visible(visible)` | Shows or hides the object's models (its collision stays; a hidden volume sends no events and shows no prompt). Returns the object. |
 | `Object:show()` | Shows the object. Returns the object. |
 | `Object:hide()` | Hides the object. Returns the object. |
-| `Object:set_collision(enabled)` | Switches the object's collision on or off (players and bullets pass through it when off). Returns the object. |
+| `Object:set_collision(enabled)` | Switches the object's collision on or off (players and bullets pass through it when off). A trap keeps its kill volume: the game reads it every frame while the trap runs. Returns the object. |
 | `objects.set_navmesh(tag, open)` | Opens (true) or closes (false) the walkable area tagged `tag` (a name: an object set to block the walkable area, or a door). Returns true when the level has a navmesh. |
 | `Object:set_navmesh(open)` | Opens or closes the walkable area under the object (it must be set to block the walkable area in the editor). Returns the object. |
 | `Object:open_navmesh()` | Lets zombies and players walk where the object blocked them. Returns the object. |
