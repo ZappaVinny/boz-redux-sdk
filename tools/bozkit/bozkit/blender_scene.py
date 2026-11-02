@@ -82,11 +82,9 @@ AREA = iw_hash('CArea')
 # (the reflection export misses them). Values are IwHashString of a CIsNamed name, except
 # m_AreasUnlock, which holds CArea resource names.
 POWERED = links.POWERED
-LINK_FIELDS = {  # (component, field) -> (link kind, is a list)
-    **{(component, 'powerSwitch'): ('power', False) for component in POWERED},
-    ('CTrapSwitch', 'traps'): ('trap', True),
-    ('CDoor', 'm_Siblings'): ('sibling', True),
-    ('CDoor', 'm_AreasUnlock'): ('unlocks', True),
+LINK_FIELDS = {  # (component, field) -> (link kind, is a list): bozkit.links's kinds by name
+    **{field: (kind.name, kind.many) for kind in links.KINDS for field in kind.fields},
+    ('CDoor', 'm_AreasUnlock'): ('unlocks', True),   # areas: a links kind once zones exist
 }
 AREA_FIELDS = ('m_SpawnPoints', 'm_PerkMachines', 'm_GerschTeleportPoints', 'm_Shortcuts',
                'm_Locators')

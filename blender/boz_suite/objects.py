@@ -43,8 +43,8 @@ def kind_label(obj) -> tuple[str, str]:
                 label = toolkit.piece(piece).label if piece else settings.source
             except KeyError:
                 label = settings.source
-            return f"Game prefab: {label}", "TOOL_SETTINGS"
-        return "Prefab", "OUTLINER_OB_EMPTY"
+            return f"Game prefab (native): {label}", "TOOL_SETTINGS"
+        return "Your prefab", "OUTLINER_OB_EMPTY"
     return "Not part of the map", "QUESTION"
 
 
@@ -209,7 +209,7 @@ class BOZ_OT_script_new(Operator):
     bl_description = "Make a script for this object from the template and open it"
     bl_options = {"REGISTER", "UNDO"}
 
-    name: StringProperty(name="Script name")
+    name: StringProperty(name="Script name", description="The name scripts know it by")
 
     @classmethod
     def poll(cls, context):
@@ -325,6 +325,43 @@ def _selected_parts(context):
             if obj.boz.role in KINDS and not obj.boz.original]
 
 
+def group_into_prefab(parts, name: str = "Prefab"):
+    """Group *parts* (your models, volumes and prefabs) into a new prefab of yours, centred on
+    them at their lowest point (Make prefab, and the palette's Window); returns it."""
+    from mathutils import Matrix, Vector
+
+    matrices = {obj: convert.world_matrix(obj) for obj in parts}
+    points = [matrices[obj].translation for obj in parts]
+    centre = Vector((sum(p.x for p in points) / len(points), sum(p.y for p in points) / len(points),
+                     min(p.z for p in points)))
+    parents = {obj.parent for obj in parts}
+    outer = parents.pop() if len(parents) == 1 else None
+    prefab = bpy.data.objects.new(name, None)
+    prefab.empty_display_type = "CUBE"
+    prefab.empty_display_size = 20.0
+    prefab.show_name = True
+    prefab.boz.role = "prefab"
+    collection = convert.map_collection(link.map_scene())
+    collection.objects.link(prefab)
+    if convert.is_prefab_group(outer):
+        prefab.parent = outer
+        prefab.matrix_parent_inverse = Matrix.Identity(4)
+        prefab.matrix_basis = convert.world_matrix(outer).inverted() @ Matrix.Translation(centre)
+        prefab.boz.part_name = name
+    else:
+        prefab.location = centre
+    inverse = convert.world_matrix(prefab).inverted()
+    for obj in parts:
+        obj.parent = prefab
+        obj.matrix_parent_inverse = Matrix.Identity(4)
+        obj.matrix_basis = inverse @ matrices[obj]
+        convert.move_to(obj, collection)   # parts sit with their prefab in the outliner
+        if not obj.boz.part_name:
+            obj.boz.part_name = convert.clean_name(convert.without_suffix(obj.name))
+    convert.sync_part_names(link.map_scene())
+    return prefab
+
+
 class BOZ_OT_make_prefab(Operator):
     bl_idname = "boz.make_prefab"
     bl_label = "Make prefab"
@@ -339,8 +376,6 @@ class BOZ_OT_make_prefab(Operator):
         return bool(context.selected_objects)
 
     def execute(self, context):
-        from mathutils import Matrix, Vector
-
         parts = _selected_parts(context)
         if not parts:
             self.report({"WARNING"}, "Nothing to group: select your own models, volumes and "
@@ -351,35 +386,7 @@ class BOZ_OT_make_prefab(Operator):
                                      "to group with it")
             return {"CANCELLED"}
         skipped = len([o for o in context.selected_objects if o.boz.original])
-        matrices = {obj: convert.world_matrix(obj) for obj in parts}
-        points = [matrices[obj].translation for obj in parts]
-        centre = Vector((sum(p.x for p in points) / len(points), sum(p.y for p in points) / len(points),
-                         min(p.z for p in points)))
-        parents = {obj.parent for obj in parts}
-        outer = parents.pop() if len(parents) == 1 else None
-        prefab = bpy.data.objects.new("Prefab", None)
-        prefab.empty_display_type = "CUBE"
-        prefab.empty_display_size = 20.0
-        prefab.show_name = True
-        prefab.boz.role = "prefab"
-        collection = convert.map_collection(link.map_scene())
-        collection.objects.link(prefab)
-        if convert.is_prefab_group(outer):
-            prefab.parent = outer
-            prefab.matrix_parent_inverse = Matrix.Identity(4)
-            prefab.matrix_basis = convert.world_matrix(outer).inverted() @ Matrix.Translation(centre)
-            prefab.boz.part_name = "Prefab"
-        else:
-            prefab.location = centre
-        inverse = convert.world_matrix(prefab).inverted()
-        for obj in parts:
-            obj.parent = prefab
-            obj.matrix_parent_inverse = Matrix.Identity(4)
-            obj.matrix_basis = inverse @ matrices[obj]
-            convert.move_to(obj, collection)   # parts sit with their prefab in the outliner
-            if not obj.boz.part_name:
-                obj.boz.part_name = convert.clean_name(convert.without_suffix(obj.name))
-        convert.sync_part_names(link.map_scene())
+        prefab = group_into_prefab(parts)
         for other in context.selected_objects:
             other.select_set(False)
         prefab.select_set(True)
@@ -430,8 +437,10 @@ class BOZ_OT_save_prefab(Operator):
                       "makes independent copies")
     bl_options = {"REGISTER"}
 
-    name: StringProperty(name="Prefab name")
-    replace: BoolProperty(name="Replace the prefab of that name", default=False)
+    name: StringProperty(name="Prefab name", description="The name it gets in the prefab library")
+    replace: BoolProperty(name="Replace the prefab of that name",
+                          description="Overwrite a library prefab that has this name",
+                          default=False)
 
     @classmethod
     def poll(cls, context):
@@ -553,6 +562,82 @@ class BOZ_MT_prefab_library(bpy.types.Menu):
 # The object's Game panel
 
 
+def _draw_in_game(layout, obj, context) -> None:
+    """What the object does in the game, in three settings: Visible (the master: hidden, it
+    stops and blocks nothing), Walking (players and zombies share the walkable area) and Stops
+    bullets (collision). Scripts can switch all three while the game runs."""
+    settings = obj.boz
+    box = layout.box()
+    box.label(text="In the game", icon="PLAY")
+    box.prop(settings, "start_visible", toggle=True)
+    if not settings.original:
+        if convert.is_scripted(obj):
+            row = box.row()
+            row.enabled = False
+            row.label(text="Scripts can switch it (it has a script)", icon="CHECKBOX_HLT")
+        else:
+            box.prop(settings, "switchable")
+    column = box.column()
+    column.active = settings.start_visible
+    game_prefab = settings.role == "prefab" and bool(settings.source)
+    if settings.role == "model":
+        column.row().prop(settings, "walking", expand=True)
+        column.prop(settings, "stops_bullets", toggle=True)
+        if settings.collision != "none":
+            row = column.row()
+            row.prop(settings, "shape", expand=True)
+            if settings.shape == "box":
+                column.prop(settings, "padding")
+        if settings.walking == "block" and not settings.original:
+            column.prop(settings, "block_margin")
+    elif game_prefab:
+        if not settings.original:
+            column.prop(settings, "blocks_walking", toggle=True)
+        names = prefab_links.components(obj, context.scene.boz.base)
+        if "CTrap" in names:   # a trap's collision is its kill volume: it always stays (the build)
+            column.label(text="Stops bullets: always (its kill volume)")
+        elif "CBarricade" in names:   # its only collision is the box the build bakes from it
+            on = bool(obj.get(convert.FIELD_PREFIX + toolkit.BULLETS_FIELD, False))
+            column.operator(BOZ_OT_barricade_bullets.bl_idname, text="Stops bullets",
+                            depress=on).value = not on
+        else:
+            column.prop(settings, "start_collision", toggle=True)
+
+
+class BOZ_OT_barricade_bullets(Operator):
+    bl_idname = "boz.barricade_bullets"
+    bl_label = "Stops bullets"
+    bl_description = "Shots hit the boards. Off (the default): bullets pass between them"
+    bl_options = {"REGISTER", "UNDO"}
+
+    value: BoolProperty(name="Stops bullets", description="Shots hit the boards")
+
+    def execute(self, context):
+        context.object[convert.FIELD_PREFIX + toolkit.BULLETS_FIELD] = self.value
+        return {"FINISHED"}
+
+
+class BOZ_OT_spawn_type(Operator):
+    bl_idname = "boz.spawn_type"
+    bl_label = "Spawn type"
+    bl_description = "What comes out of this zombie spawn"
+    bl_options = {"REGISTER", "UNDO"}
+
+    kind: EnumProperty(name="Type", description="What comes out of this zombie spawn",
+                       items=[(key, label, description)
+                              for key, label, _type, description in toolkit.SPAWN_TYPES])
+
+    def execute(self, context):
+        from . import game
+        obj = context.object
+        found = game.resolve_piece(context.scene.boz.base, self.kind)
+        if obj is None or found is None:
+            self.report({"ERROR"}, "No shipped map has that kind of spawn")
+            return {"CANCELLED"}
+        obj.boz.source, obj.boz.group, obj["boz_piece"] = found.name, found.group, self.kind
+        return {"FINISHED"}
+
+
 def _draw_game_settings(layout, obj) -> None:
     """A game prefab's settings (cost, needs power, weapon, chalk, ...)."""
     key = obj.get("boz_piece")
@@ -564,6 +649,11 @@ def _draw_game_settings(layout, obj) -> None:
         return
     box = layout.box()
     box.label(text="Settings", icon="TOOL_SETTINGS")
+    if key in toolkit.SPAWN_KEYS:
+        label = next(label for k, label, *_rest in toolkit.SPAWN_TYPES if k == key)
+        row = box.row()
+        row.label(text="Type")
+        row.operator_menu_enum(BOZ_OT_spawn_type.bl_idname, "kind", text=label)
     for setting in piece.settings:
         name = convert.FIELD_PREFIX + setting.key
         if setting.kind == "weapon":
@@ -572,10 +662,11 @@ def _draw_game_settings(layout, obj) -> None:
             row.operator(link.BOZ_OT_choose_weapon.bl_idname, text="Choose…")
         elif setting.kind == "weapons":
             from . import weapons_tab
-            chosen = [n for n in str(obj.get(name, "")).split(",") if n]
+            rolled, default = weapons_tab.box_pool(
+                bpy.context, [n for n in str(obj.get(name, "")).split(",") if n])
             row = box.row()
-            row.label(text=f"{setting.label}: {len(chosen)} weapons" if chosen else
-                      f"{setting.label}: the game's")
+            row.label(text=f"{setting.label}: {len(rolled)} weapons" +
+                      (" (the map's list)" if default else ""))
             row.operator(weapons_tab.BOZ_OT_box_pool.bl_idname, text="Edit…")
         elif setting.kind == "chalk":
             if obj.boz.original:
@@ -587,6 +678,8 @@ def _draw_game_settings(layout, obj) -> None:
             row.operator(link.BOZ_OT_chalk.bl_idname, text="None", depress=mode == "none").mode = "none"
             row.operator(link.BOZ_OT_chalk_image.bl_idname, text="Image…",
                          depress=mode not in ("", "none"))
+        elif setting.kind == "bullets":
+            continue   # shown under In the game
         elif name in obj:
             box.prop(obj, f'["{name}"]', text=setting.label)
     if obj.boz.original and obj.get(convert.FIELD_PREFIX + toolkit.WEAPON_FIELD):
@@ -658,11 +751,6 @@ class BOZ_PT_object(Panel):
                 layout.label(text=f"Mesh {convert.mesh_name(obj)}" +
                              (f": {users} copies share it" if users > 1 else " (Alt+D copies share it)"))
                 layout.prop(settings, "double_sided")
-            layout.prop(settings, "collision", expand=True)
-            if settings.collision != "none":
-                layout.prop(settings, "shape", expand=True)
-                if settings.shape == "box":
-                    layout.prop(settings, "padding")
         elif settings.role == "volume":
             layout.prop(settings, "volume", expand=True)
             layout.prop(settings, "who", expand=True)
@@ -704,15 +792,7 @@ class BOZ_PT_object(Panel):
                                 icon="MESH_DATA")
 
         if settings.role in ("model", "prefab"):
-            box = layout.box()
-            box.label(text="When the level starts", icon="PLAY")
-            row = box.row()
-            row.prop(settings, "start_visible")
-            row.prop(settings, "start_collision")
-            if not settings.original:
-                box.prop(settings, "blocks")
-                if settings.blocks and settings.role == "model":
-                    box.prop(settings, "block_margin")
+            _draw_in_game(layout, obj, context)
         _draw_script(layout, obj)
 
 
@@ -736,7 +816,7 @@ def draw_object_menu(self, context):
     self.layout.operator(BOZ_OT_ungroup_prefab.bl_idname)
 
 
-CLASSES = (BOZ_OT_script_new, BOZ_OT_script_pick, BOZ_OT_script_open, BOZ_OT_script_clear,
+CLASSES = (BOZ_OT_barricade_bullets, BOZ_OT_spawn_type, BOZ_OT_script_new, BOZ_OT_script_pick, BOZ_OT_script_open, BOZ_OT_script_clear,
            BOZ_OT_script_reload, BOZ_OT_make_prefab, BOZ_OT_ungroup_prefab, BOZ_OT_save_prefab,
            BOZ_OT_place_prefab, BOZ_OT_delete_library_prefab, BOZ_MT_prefab_library,
            BOZ_PT_object)

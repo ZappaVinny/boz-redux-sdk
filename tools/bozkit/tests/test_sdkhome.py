@@ -210,5 +210,18 @@ class BrokenBlendTests(unittest.TestCase):
             self.assertNotIn(str(root / 'map.blend'), command)
 
 
+
+class BuildWarningsTests(unittest.TestCase):
+    def test_reads_the_installed_build_report(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.assertEqual(sdkhome.build_warnings(root, 'my_map'), [])   # nothing installed
+            report = root / 'mods' / 'my_map' / project.BUILD_REPORT
+            report.parent.mkdir(parents=True)
+            report.write_text('{"warnings": ["trap switch Switch runs no trap"]}', encoding='utf-8')
+            self.assertEqual(sdkhome.build_warnings(root, 'my_map'),
+                             ['trap switch Switch runs no trap'])
+
+
 if __name__ == '__main__':
     unittest.main()

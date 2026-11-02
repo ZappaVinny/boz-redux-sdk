@@ -650,14 +650,44 @@ def set_common(obj, item) -> None:
     obj.boz.start_visible = bool(start["visible"])
     obj.boz.start_collision = bool(start["collision"])
     obj.boz.blocks = bool(start["blocks"])
+    obj.boz.blocks_walking = not start["walk_through"]
+    obj.boz.switchable = bool(start["switchable"])
+    if obj.boz.role == "model" and not start["collision"]:
+        obj.boz.stops_bullets = False   # maps saved before Stops bullets was the model's own
     obj.boz.script = item.script
     for key, value in item.properties.items():
         obj[PROPERTY_PREFIX + key] = value
 
 
+def is_scripted(obj) -> bool:
+    """It, or a prefab holding it, has a script (scripts can switch it)."""
+    while obj is not None:
+        if obj.boz.script:
+            return True
+        obj = obj.parent
+    return False
+
+
 def start_of(obj) -> dict:
-    start = {"visible": obj.boz.start_visible, "collision": obj.boz.start_collision,
-             "blocks": obj.boz.blocks and not obj.boz.original}
+    """The world's start state from the panel. Visible is the master (the compiler and
+    boz.objects make a hidden object stop and block nothing). Walking and Stops bullets are
+    what the object does; an object scripts can switch keeps a tagged walkable area (blocks)
+    instead of a hole, so it is set only for those."""
+    settings = obj.boz
+    visible = settings.start_visible
+    switchable = settings.switchable and not is_scripted(obj)   # a script makes it so anyway
+    if settings.role == "prefab" and settings.source:
+        collision = settings.start_collision
+        walk_through = not settings.blocks_walking and not settings.original
+        dynamic = is_scripted(obj) or switchable or not visible or not collision
+        blocks = settings.blocks_walking and dynamic and not settings.original
+    else:
+        collision, walk_through = True, False
+        dynamic = is_scripted(obj) or switchable or not visible
+        blocks = settings.role == "model" and settings.walking == "block" and dynamic \
+            and not settings.original
+    start = {"visible": visible, "collision": collision, "blocks": blocks,
+             "walk_through": walk_through, "switchable": switchable}
     return {key: value for key, value in start.items() if world.START_DEFAULTS[key] != value}
 
 
@@ -914,7 +944,8 @@ def show_game_models(scene) -> int:
             colour_marker(replacement, entity_category(scene.boz.base, item.hash, obj.boz.group))
         replacement.matrix_world = world_matrix(obj)
         for key in ("role", "source", "group", "collision", "shape", "double_sided", "original",
-                    "start_visible", "start_collision", "blocks", "script", "part_name"):
+                    "start_visible", "start_collision", "blocks", "blocks_walking", "switchable",
+                    "script", "part_name"):
             setattr(replacement.boz, key, getattr(obj.boz, key))
         for key, value in obj.items():
             replacement[key] = value

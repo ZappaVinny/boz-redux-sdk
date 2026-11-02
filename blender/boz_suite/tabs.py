@@ -99,6 +99,7 @@ def setup_area(area, workspace_name: str, screen=None) -> None:
         return
     if area.type == "VIEW_3D":
         space.show_region_ui = True
+        space.show_region_tool_header = True   # the World tab's switches sit there (preview)
         space.clip_start = 1.0
         space.clip_end = 200000.0
         # Game materials (vertex colours, lightmaps) only show in material preview.

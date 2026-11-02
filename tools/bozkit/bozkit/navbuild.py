@@ -50,8 +50,9 @@ def helper_path() -> Path:
     found = shutil.which('boz-navmesh')
     if found:
         return Path(found)
-    raise FileNotFoundError('boz-navmesh is not built; run cmake in tools/navmesh '
-                            '(see docs/map-editor.md, Navigation meshes)')
+    raise FileNotFoundError('the navmesh builder (boz-navmesh) is missing from this SDK: update '
+                            'or reinstall the SDK (a source checkout builds it in tools/navmesh, '
+                            'see docs/map-editor.md, Navigation meshes)')
 
 
 @dataclass

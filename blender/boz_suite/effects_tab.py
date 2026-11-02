@@ -390,7 +390,9 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.boz_effect_entries = CollectionProperty(type=BOZ_EffectEntry)
     bpy.types.Scene.boz_effect_index = IntProperty(update=_entry_changed)
-    bpy.types.Scene.boz_effect_kind = EnumProperty(name="Effects", items=KIND_ITEMS,
+    bpy.types.Scene.boz_effect_kind = EnumProperty(name="Effects",
+                                                   description="Which effects the list shows",
+                                                   items=KIND_ITEMS,
                                                    update=_kind_changed)
     bpy.types.Scene.boz_effect_new_name = StringProperty(
         name="Name", description="What scripts call it (a-z, 0-9, _)")

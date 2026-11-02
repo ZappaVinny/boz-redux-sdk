@@ -89,11 +89,15 @@ UNIT_ITEMS = [("auto", "Guess", "Guessed from its size (a weapon 30-200 cm long,
 
 
 class BOZ_AssetSettings(PropertyGroup):
-    kind: EnumProperty(name="Kind", update=_settings_changed, items=[
+    kind: EnumProperty(name="Kind",
+                       description="What the asset is used as in the game",
+                       update=_settings_changed, items=[
         ("prop", "Prop", "A model to place in maps"),
         ("weapon", "Weapon", "A gun: its bones and parts (magazine, ...) are kept for the "
                              "Weapons tab")])
-    preset: EnumProperty(name="Preset", update=_settings_changed, items=[
+    preset: EnumProperty(name="Preset",
+                         description="How hard the converter works: triangle and texture budgets",
+                         update=_settings_changed, items=[
         (key, assets.PRESET_LABELS[key],
          ", ".join(f"{kind}: {tris} triangles, {side} textures"
                    for kind, (tris, side) in assets.PRESETS[key].items()))
@@ -102,7 +106,9 @@ class BOZ_AssetSettings(PropertyGroup):
                                 description="Set the triangle budget yourself")
     triangles: IntProperty(name="Triangles", min=50, max=20000, default=1500,
                            update=_settings_changed, description="The most triangles it may have")
-    texture_size: EnumProperty(name="Textures", items=TEXTURE_ITEMS, update=_settings_changed)
+    texture_size: EnumProperty(name="Textures",
+                               description="The largest size its textures are made at",
+                               items=TEXTURE_ITEMS, update=_settings_changed)
     unit: EnumProperty(name="Source unit", items=UNIT_ITEMS, update=_settings_changed,
                        description="The unit the source file was made in")
     bake_normals: BoolProperty(name="Bake normal map", default=True, update=_settings_changed,
@@ -527,9 +533,13 @@ class BOZ_OT_asset_import(Operator):
 
     filepath: StringProperty(subtype="FILE_PATH")
     filter_glob: StringProperty(default="*.blend;*.fbx;*.glb;*.gltf;*.obj", options={"HIDDEN"})
-    kind: EnumProperty(name="Kind", items=[("prop", "Prop", "A model to place in maps"),
+    kind: EnumProperty(name="Kind",
+                       description="What the asset is used as in the game",
+                       items=[("prop", "Prop", "A model to place in maps"),
                                            ("weapon", "Weapon", "A gun (its bones are kept)")])
-    preset: EnumProperty(name="Preset", items=[(k, assets.PRESET_LABELS[k], "") for k in assets.PRESETS])
+    preset: EnumProperty(name="Preset",
+                         description="How hard the converter works: triangle and texture budgets",
+                         items=[(k, assets.PRESET_LABELS[k], "") for k in assets.PRESETS])
     name: StringProperty(name="Name", description="The asset's name (empty: from the file)")
 
     def invoke(self, context, event):

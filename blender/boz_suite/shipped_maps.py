@@ -85,9 +85,14 @@ class BOZ_OT_import_group(Operator, ImportHelper):
     include_models: BoolProperty(
         name="Local asset models", default=False,
         description="Import reusable local-space CIwModel assets; these are not map placements")
-    include_collision: BoolProperty(name="Collision", default=True)
-    include_portals: BoolProperty(name="Portals", default=True)
-    include_navigation: BoolProperty(name="Navigation connections", default=True)
+    include_collision: BoolProperty(name="Collision",
+                                    description="Import the level's collision too", default=True)
+    include_portals: BoolProperty(name="Portals",
+                                  description="Import the level's portals (room culling) too",
+                                  default=True)
+    include_navigation: BoolProperty(name="Navigation connections",
+                                     description="Import the navmesh connections (climbs, windows) too",
+                                     default=True)
 
     def execute(self, context):
         try:
@@ -119,10 +124,17 @@ class BOZ_OT_import_level(Operator):
     include_mod: BoolProperty(
         name="Include mod edits", default=True,
         description="Load groups previously saved to your mod instead of the game's copies")
-    include_models: BoolProperty(name="Local asset models", default=False)
-    include_collision: BoolProperty(name="Collision", default=True)
-    include_portals: BoolProperty(name="Portals", default=True)
-    include_navigation: BoolProperty(name="Navigation connections", default=True)
+    include_models: BoolProperty(name="Local asset models",
+                                 description="Also import the models the level keeps in its own rooms",
+                                 default=False)
+    include_collision: BoolProperty(name="Collision",
+                                    description="Import the level's collision too", default=True)
+    include_portals: BoolProperty(name="Portals",
+                                  description="Import the level's portals (room culling) too",
+                                  default=True)
+    include_navigation: BoolProperty(name="Navigation connections",
+                                     description="Import the navmesh connections (climbs, windows) too",
+                                     default=True)
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)

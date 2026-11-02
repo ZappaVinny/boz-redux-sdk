@@ -185,9 +185,13 @@ def _wave_props() -> dict:
         else:
             annotations[field.name] = StringProperty(name=field.label, description=description,
                                                      update=_wave_changed)
-    annotations["round_class"] = EnumProperty(name="Kind", items=ROUND_CLASS_ITEMS,
+    annotations["round_class"] = EnumProperty(name="Kind",
+                                              description="The game's own kind of round this one is",
+                                              items=ROUND_CLASS_ITEMS,
                                               update=_wave_changed)
-    annotations["special_class"] = EnumProperty(name="Kind", items=SPECIAL_CLASS_ITEMS,
+    annotations["special_class"] = EnumProperty(name="Kind",
+                                                description="The kind of special round (dogs, monkeys, ...)",
+                                                items=SPECIAL_CLASS_ITEMS,
                                                 update=_wave_changed)
     return annotations
 
@@ -291,7 +295,8 @@ def _look_changed(self, context):
 class BOZ_GameLook(PropertyGroup):
     hash: IntProperty()
     detail: StringProperty()
-    used: BoolProperty(name="Spawns", update=_look_changed)
+    used: BoolProperty(name="Spawns",
+                       description="This look can spawn in the map", update=_look_changed)
 
 
 class BOZ_GameHook(PropertyGroup):
@@ -528,7 +533,9 @@ def _economy_props() -> dict:
                                                    description="How likely this power-up is, against "
                                                                "the others (0: never)",
                                                    update=_economy_changed)
-    annotations["set_pickups"] = BoolProperty(name="Change the power-ups", update=_economy_changed)
+    annotations["set_pickups"] = BoolProperty(name="Change the power-ups",
+                                              description="Use your own power-up settings instead of the base level's",
+                                              update=_economy_changed)
     for action, label, points in game.SCORES:
         annotations["score_" + action] = IntProperty(name=label, min=0, default=points,
                                                      description=f"Points for this (the game's: {points})",
@@ -538,13 +545,17 @@ def _economy_props() -> dict:
                                                      description=f"At most this x the round number in a "
                                                                  f"round (the game's: {limit})",
                                                      update=_economy_changed)
-    annotations["set_scores"] = BoolProperty(name="Change the points", update=_economy_changed)
+    annotations["set_scores"] = BoolProperty(name="Change the points",
+                                             description="Use your own points settings instead of the base level's",
+                                             update=_economy_changed)
     for name, (label, stock) in game.BOX_FIELDS.items():
         annotations["box_" + name] = IntProperty(name=label, min=0, default=stock,
                                                  description=f"(the game's: {stock}); a box given its "
                                                              "own value in the World tab keeps it",
                                                  update=_economy_changed)
-    annotations["set_box"] = BoolProperty(name="Change the mystery box", update=_economy_changed)
+    annotations["set_box"] = BoolProperty(name="Change the mystery box",
+                                          description="Use your own mystery box settings instead of the base level's",
+                                          update=_economy_changed)
     return annotations
 
 
@@ -1056,7 +1067,9 @@ CLASSES = (BOZ_GameWave, BOZ_GameRound, BOZ_GameLook, BOZ_GameHook, BOZ_GameEcon
            BOZ_PT_game_economy, BOZ_PT_game_hooks)
 
 SCENE_PROPS = {
-    "boz_game_chain": lambda: EnumProperty(name="Game", items=CHAIN_ITEMS, default="normal",
+    "boz_game_chain": lambda: EnumProperty(name="Game",
+                                           description="How rounds follow each other",
+                                           items=CHAIN_ITEMS, default="normal",
                                            update=_chain_changed),
     "boz_game_same_rounds": lambda: BoolProperty(
         name="Same rounds for every game", default=False,
@@ -1067,7 +1080,9 @@ SCENE_PROPS = {
     "boz_game_specials": lambda: CollectionProperty(type=BOZ_GameRound),
     "boz_game_special_index": lambda: IntProperty(update=_round_selected),
     "boz_game_special": lambda: PointerProperty(type=BOZ_GameWave),
-    "boz_game_repeat_health": lambda: EnumProperty(name="Repeating health", items=HEALTH_ITEMS,
+    "boz_game_repeat_health": lambda: EnumProperty(name="Repeating health",
+                                                   description="How zombie health grows once the round list runs out",
+                                                   items=HEALTH_ITEMS,
                                                    update=_repeat_health_changed),
     "boz_game_looks": lambda: CollectionProperty(type=BOZ_GameLook),
     "boz_game_look_index": lambda: IntProperty(),
@@ -1077,7 +1092,8 @@ SCENE_PROPS = {
     "boz_game_display_name": lambda: StringProperty(
         name="Name", description="The map's name in the launcher and mod list",
         update=_display_name_changed),
-    "boz_game_loading": lambda: StringProperty(name="Loading screen"),
+    "boz_game_loading": lambda: StringProperty(name="Loading screen",
+                                               description="The picture shown while the map loads"),
     "boz_game_behaves_like": lambda: EnumProperty(
         name="Behaves like", update=_level_changed,
         items=[("none" if k == "" else k, v.split(":")[0], v) for k, v in game.BEHAVES_LIKE.items()],

@@ -20,7 +20,7 @@ from . import convert, game
 from . import link
 
 LIBRARY_NAME = "BOZ Game"
-PALETTE_VERSION = 6   # 6: My prefabs catalog
+PALETTE_VERSION = 7   # 7: one Zombie spawn (Type), trap kinds, Window
 _build = {"process": None}
 
 
@@ -33,7 +33,21 @@ def _stamp() -> dict | None:
         source = json.loads((library.library_dir() / "stamp.json").read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
-    return {"palette": PALETTE_VERSION, "library": source}
+    return {"palette": PALETTE_VERSION, "library": source, "pieces": _pieces_fingerprint()}
+
+
+def _pieces_fingerprint() -> str:
+    """Changes whenever the palette's contents could: the piece list (bozkit.toolkit) or the
+    palette builder, so an editor update rebuilds the palette without a version bump."""
+    import hashlib
+    from ._bozkit import toolkit
+    digest = hashlib.sha256()
+    for path in (Path(toolkit.__file__), Path(__file__).with_name("palette_build.py")):
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            pass
+    return digest.hexdigest()[:16]
 
 
 def needs_build() -> bool:
@@ -152,6 +166,8 @@ def realize() -> None:
             made = assets_tab.place_asset(scene, obj.get("boz_asset", ""), position, rotation)
             if made is not None:
                 label = made.name
+        elif kind == "window":
+            made = _place_window(scene, position, rotation)
         elif kind == "volume":
             made = convert.volume_object(world.Volume(label, obj.get("boz_volume", "trigger"),
                                                       position, rotation), scene)
@@ -228,6 +244,28 @@ def _place_piece(scene, key: str, label: str, position, rotation):
                                                    group=found.group, piece=key,
                                                    settings=dict(found.defaults)),
                                       scene.boz.base, scene)
+
+
+WINDOW_BARRICADE = "barricade:0xd3473f79"   # Kino's lobby window boards
+WINDOW_SPAWN_OFFSET = 150.0   # cm outside the barricade (its window crossing starts 100 out)
+
+
+def _place_window(scene, position, rotation):
+    """A barricade and a window zombie spawn just outside it (the side zombies climb in from),
+    grouped into a prefab of yours called Window. Not linked: that is the modder's call."""
+    from . import objects
+    from ._bozkit import spec_fields
+    barricade = _place_piece(scene, WINDOW_BARRICADE, "Barricade", position, rotation)
+    outside = spec_fields.rotate(tuple(rotation), (0.0, 0.0, -WINDOW_SPAWN_OFFSET))
+    spawn = _place_piece(scene, "zombie_window", "Spawn",
+                         tuple(position[i] + outside[i] for i in range(3)), rotation)
+    parts = [obj for obj in (barricade, spawn) if obj is not None]
+    if len(parts) < 2:
+        for obj in parts:
+            bpy.data.objects.remove(obj)
+        return None
+    barricade.name, spawn.name = "Barricade", "Spawn"
+    return objects.group_into_prefab(parts, "Window")
 
 
 def _realize_timer():

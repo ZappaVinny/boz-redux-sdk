@@ -1053,11 +1053,15 @@ if LIBRARY:
     if fourth is not None:
         bpy.data.objects.remove(fourth)
     for key in ("juggernog", "pack_a_punch", "mystery_box", "player_spawn", "wall_buy", "trap",
-                "trap_switch"):
+                "trap_switch", "trap_electro"):
         stand_in = bpy.data.objects.new(f"piece {key}", None)
         stand_in["boz_asset_kind"] = "piece"
         stand_in["boz_piece"] = key
         scene.collection.objects.link(stand_in)
+    stand_in = bpy.data.objects.new("Window", None)
+    stand_in["boz_asset_kind"] = "window"
+    stand_in.location = (0.0, 900.0, 0.0)
+    scene.collection.objects.link(stand_in)
     palette.realize()
     check(not any("boz_asset_kind" in o for o in scene.objects), "stand-ins are gone")
     dropped = [o for o in scene.objects if o.name.startswith("dropped")]
@@ -1092,10 +1096,30 @@ if LIBRARY:
     bpy.ops.boz.make_editable(name="my_rock")
     check(not game_model.boz.source and game_model.data.name == "my_rock",
           "Make editable gives a game model its own mesh")
+    # In the game: Walking and Stops bullets are the model's kind; Visible is the master.
+    game_model.boz.walking = "block"
+    game_model.boz.stops_bullets = False
+    check(game_model.boz.collision == "block", f"blocks walking, bullets pass ({game_model.boz.collision})")
+    game_model.boz.start_visible = False
+    rock = next(m for m in link.scene_to_world(scene, []).models if m.name == convert.object_name(game_model))
+    check(rock.collision == "block" and rock.start == {"visible": False, "blocks": True},
+          f"a hidden blocker starts hidden with its walkable area tagged ({rock.collision}, {rock.start})")
+    game_model.boz.start_visible = True
+    game_model.boz.switchable = True
+    rock = next(m for m in link.scene_to_world(scene, []).models if m.name == convert.object_name(game_model))
+    check(rock.start == {"switchable": True, "blocks": True},
+          f"Scripts can switch it: its own collision and walkable area ({rock.start})")
+    game_model.boz.switchable = False
+    game_model.boz.walking, game_model.boz.stops_bullets = "block", True
+    check(game_model.boz.collision == "solid", "blocks walking and stops bullets is solid")
     dropped_on = floor.material_slots[-1].material
     check(dropped_on is not None and dropped_on.name.startswith("BOZ Material"),
           "a dropped texture becomes a game-shaded material")
     back = link.scene_to_world(scene, [])
+    pieces["juggernog"].boz.blocks_walking = False
+    jug = next(p for p in link.scene_to_world(scene, []).prefabs if p.piece == "juggernog")
+    check(jug.start == {"walk_through": True}, f"a machine players walk through ({jug.start})")
+    pieces["juggernog"].boz.blocks_walking = True
     jug = next(p for p in back.prefabs if p.piece == "juggernog")
     check({"CPerk.m_perkSinglePCost": 1234, "CPerk.powerSwitch": "boz_no_power"}.items()
           <= jug.fields.items(), f"game prefab settings are written ({jug.fields})")
@@ -1119,6 +1143,32 @@ if LIBRARY:
     again = world.object_from_json(world.object_json(
         next(p for p in back.prefabs if p.piece == "trap_switch")))
     check(again.links == linked, "and read back")
+    # A Window: a barricade and a window spawn outside it, one prefab of yours, not linked.
+    window = next((o for o in scene.objects if o.name.startswith("Window") and convert.is_prefab_group(o)), None)
+    check(window is not None and sorted(c.boz.part_name for c in window.children) == ["Barricade", "Spawn"],
+          f"a Window is a barricade and a spawn ({window and [c.name for c in window.children]})")
+    spawn = next(c for c in window.children if c.boz.part_name == "Spawn")
+    barricade = next(c for c in window.children if c.boz.part_name == "Barricade")
+    check(not suite.prefab_links.set_links(barricade), "the window is not linked for you")
+    check(spawn.get("boz_piece") == "zombie_window", "its spawn is a window spawn")
+    check(not barricade.get("boz_f:boz.stops_bullets", False), "barricades let bullets through by default")
+    # A zombie spawn's Type picks the shipped spawn of that kind.
+    select_only(spawn)
+    bpy.ops.boz.spawn_type(kind="monkey_spawn")
+    check(spawn.get("boz_piece") == "monkey_spawn" and "ascension" in spawn.boz.group,
+          f"Type: monkeys come from Ascension ({spawn.boz.group})")
+    bpy.ops.boz.spawn_type(kind="zombie_window")
+    check(pieces["trap_electro"].boz.source and pieces["trap_electro"].boz.source != pieces["trap"].boz.source,
+          "the Electro zapper is a trap piece of its own")
+    # Check: a link to a missing object stops the build.
+    write = suite.prefab_links.write
+    write(switch, {"traps": ["Nothing_Here"]})
+    bad, _warn = suite.prefab_links.check(scene)
+    check(any("Nothing_Here" in m for m, _n in bad), f"Check finds a link to nothing ({bad})")
+    write(switch, {"traps": ["Fire_Trap"]})
+    _bad, warnings = suite.prefab_links.check(scene)
+    own = suite.prefab_links.world_name(switch)
+    check(not any(own in m for m, _n in warnings), f"a linked switch is not warned ({warnings})")
     check(any(v.kind_of == "use" for v in back.volumes), "the dropped volume is written")
     prefab = prefab_checks((0.0, -600.0, 0.0))
     # A game prefab inside your prefab.

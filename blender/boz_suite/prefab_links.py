@@ -11,12 +11,12 @@ from bpy.props import StringProperty, EnumProperty
 from bpy.types import Operator
 
 from . import convert
-from ._bozkit import blender_scene, hashing, links
+from ._bozkit import blender_scene, hashing, links, toolkit
 
 SET_KEY = "boz_link_set"     # the links the user set: JSON {kind: [world names]}
 NAME_KEY = "boz_link_name"   # the world name links knew the object by (to follow renames)
 
-_components: dict = {}   # (base, source, group) -> component names, or None (no game data yet)
+_components: dict = {}   # (base, source, group) -> component names ([] when not found)
 
 
 def world_name(obj) -> str:
@@ -36,12 +36,14 @@ def components(obj, base: str) -> list:
     """The component names of a game prefab's entity (cached)."""
     from . import game
     key = (base, obj.boz.source, obj.boz.group)
-    if _components.get(key) is None:
+    if key not in _components:
+        if game.game_models() is None:
+            return []   # the asset library is not loaded yet: asked again later
         source = obj.boz.source
         value = int(source, 16) if source.startswith("0x") else hashing.iw_hash(source)
         spec = game.entity_spec(base, value, obj.boz.group)
-        _components[key] = blender_scene.component_names(spec) if spec is not None else None
-    return _components[key] or []
+        _components[key] = blender_scene.component_names(spec) if spec is not None else []
+    return _components[key]
 
 
 def kinds(obj, base: str) -> list:
@@ -99,6 +101,43 @@ def follow_renames(scene) -> int:
     return len(renames)
 
 
+SPAWN_REACH = 600.0   # cm: a window spawn this far from its barricade is never used (the build)
+
+
+def check(scene) -> tuple[list, list]:
+    """(problems that stop the build, warnings) of the scene's links, as (message, object name):
+    a link to an object the map does not have, or that cannot be one, stops it as the compiler
+    would; a trap switch with no trap and a window spawn far from its barricade are warned."""
+    base = scene.boz.base
+    found = by_world_name(scene)
+    problems, warnings = [], []
+    for obj in scene.objects:
+        if not is_linkable(obj):
+            continue
+        own = world_name(obj)
+        values = set_links(obj)
+        for kind_name, targets in values.items():
+            kind = links.BY_NAME[kind_name]
+            for target in targets:
+                other = found.get(target.lower())
+                if other is None:
+                    problems.append((f"{own}: its {kind.label} link names {target}, which is not "
+                                     "in the map", obj.name))
+                elif not links.can_target(kind, components(other, base), other.get("boz_piece", "")):
+                    problems.append((f"{own}: its {kind.label} link names {target}, which cannot "
+                                     "be one", obj.name))
+                elif kind_name == "spawns" and (other.matrix_world.translation
+                                                - obj.matrix_world.translation).length > SPAWN_REACH:
+                    warnings.append((f"{target} is more than {SPAWN_REACH / 100:g} m from {own}, "
+                                     "the barricade it is linked to", obj.name))
+        if "traps" in values and not values["traps"]:
+            warnings.append((f"trap switch {own} runs no trap: set its Traps link", obj.name))
+        elif "traps" not in values and "CTrapSwitch" in components(obj, base):
+            warnings.append((f"trap switch {own} has no Traps link: it runs only its own map's "
+                             "traps, if they are placed", obj.name))
+    return problems, warnings
+
+
 def lines(scene) -> list:
     """(kind name, source object, target object) of every set link, for the overlay."""
     found = by_world_name(scene)
@@ -111,6 +150,41 @@ def lines(scene) -> list:
     return out
 
 
+def default_lines(scene) -> list:
+    """(kind name, source, target) of the links a prefab keeps when the user has not set them,
+    resolved as the compiler does (world_compile.rewire_links): power goes to the map's power
+    switch; a home-map trap or door counts only if it was placed from that same map."""
+    base = scene.boz.base
+    linkable = [obj for obj in scene.objects if is_linkable(obj)]
+    switch = next((obj for obj in linkable if "CPowerSwitch" in components(obj, base)), None)
+    placed = {}   # (group, source name hash) -> object
+    for obj in linkable:
+        source = obj.boz.source
+        value = int(source, 16) if source.startswith("0x") else hashing.iw_hash(source)
+        placed.setdefault((obj.boz.group, value), obj)
+    no_power = hashing.iw_hash(toolkit.NO_POWER)
+    out = []
+    for obj in linkable:
+        own = set_links(obj) if SET_KEY in obj else {}
+        try:
+            home = json.loads(obj.get("boz_links", "[]"))
+        except ValueError:
+            continue
+        for link in home:
+            kind_name = link["kind"]
+            if kind_name in own:
+                continue
+            if kind_name == "power":
+                if switch is not None and any(t and t != no_power for t in link["targets"]):
+                    out.append((kind_name, obj, switch))
+                continue
+            for target in link["targets"]:
+                other = placed.get((obj.boz.group, target))
+                if other is not None and other is not obj:
+                    out.append((kind_name, obj, other))
+    return out
+
+
 def _changed(context, obj, kind_name, change) -> None:
     values = set_links(obj)
     kind = links.BY_NAME[kind_name]
@@ -118,6 +192,11 @@ def _changed(context, obj, kind_name, change) -> None:
     current = change(current)
     values[kind_name] = current if kind.many else current[-1:]
     write(obj, values)
+    found = by_world_name(context.scene)
+    for target in values[kind_name]:   # targets remember their name too, to follow a rename
+        other = found.get(target.lower())
+        if other is not None and NAME_KEY not in other:
+            other[NAME_KEY] = world_name(other)
     for area in context.screen.areas if context.screen else []:
         area.tag_redraw()
 
@@ -273,12 +352,29 @@ def draw(layout, obj, context) -> None:
         box.label(text="Linked from: " + ", ".join(incoming[:6]) + ("…" if len(incoming) > 6 else ""))
 
 
-@bpy.app.handlers.persistent
-def _on_change(scene, _depsgraph=None):
+# Renames are followed when an object's name changes (a message bus subscription: nothing runs
+# while objects move) and before saving (convert.scene_to_world).
+_owner = object()
+
+
+def _on_rename():
     try:
-        follow_renames(scene)
-    except Exception as exc:   # a handler must never break editing
+        from . import link
+        follow_renames(link.map_scene())
+    except Exception as exc:   # never break editing
         print(f"BOZ Redux: links could not follow a rename: {exc}")
+
+
+def _subscribe() -> None:
+    bpy.msgbus.clear_by_owner(_owner)
+    bpy.msgbus.subscribe_rna(key=(bpy.types.Object, "name"), owner=_owner, args=(),
+                             notify=_on_rename)
+
+
+@bpy.app.handlers.persistent
+def _on_load(_dummy=None):
+    _subscribe()   # a loaded file starts with no subscriptions
+    _on_rename()   # every linkable object remembers its name from the start
 
 
 CLASSES = (BOZ_OT_prefab_link_add, BOZ_OT_prefab_link_selected, BOZ_OT_prefab_link_remove,
@@ -288,11 +384,13 @@ CLASSES = (BOZ_OT_prefab_link_add, BOZ_OT_prefab_link_selected, BOZ_OT_prefab_li
 def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
-    bpy.app.handlers.depsgraph_update_post.append(_on_change)
+    bpy.app.handlers.load_post.append(_on_load)
+    _subscribe()
 
 
 def unregister():
-    if _on_change in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(_on_change)
+    if _on_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_load)
+    bpy.msgbus.clear_by_owner(_owner)
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)

@@ -25,14 +25,22 @@ MARKER_TYPES = [
     ("entity", "Other", ""),
 ]
 LINK_COLOURS = {
-    "power": (1.0, 0.95, 0.1, 1.0), "trap": (1.0, 0.15, 0.1, 1.0),
-    "sibling": (1.0, 0.55, 0.1, 1.0), "unlocks": (0.1, 0.9, 1.0, 1.0),
-    "member": (0.7, 0.45, 1.0, 1.0),
-    # Links set in the editor (bozkit.links names): the same colours, window spawns green.
-    "traps": (1.0, 0.15, 0.1, 1.0), "siblings": (1.0, 0.55, 0.1, 1.0),
-    "spawns": (0.2, 1.0, 0.3, 1.0),
+    # By bozkit.links kind (the editor's Links box and the shipped files' links alike).
+    "power": (1.0, 0.95, 0.1, 1.0), "traps": (1.0, 0.15, 0.1, 1.0),
+    "siblings": (1.0, 0.55, 0.1, 1.0), "spawns": (0.2, 1.0, 0.3, 1.0),
+    "unlocks": (0.1, 0.9, 1.0, 1.0), "member": (0.7, 0.45, 1.0, 1.0),
+    "trap": (1.0, 0.15, 0.1, 1.0), "sibling": (1.0, 0.55, 0.1, 1.0),   # blend files saved before
 }
-SET_KINDS = {"power": "power", "trap": "traps", "sibling": "siblings"}   # node_links -> set
+SWITCH_HELP = {
+    "boz_show_markers": "Markers for spawns and game objects that draw nothing in the game",
+    "boz_show_badges": "Labels over the shipped level's game objects",
+    "boz_show_areas": "The shipped level's areas (zones)",
+    "boz_show_shapes": "Trigger, hit and use volumes",
+    "boz_show_collision": "The shipped level's collision",
+    "boz_show_portals": "The shipped level's portals (room culling)",
+    "boz_show_navigation": "The shipped level's navmesh connections (climbs, windows)",
+    "boz_show_navmesh": "The shipped level's navmesh (walkable area)",
+}
 # Scene switch -> object kinds it shows.
 SWITCHES = {
     "boz_show_markers": {"entity"},
@@ -127,15 +135,20 @@ def _draw_link_lines():
     selected = {obj for obj in context.selected_objects} if scene.boz_links_selected_only else None
     lines: dict[str, list] = {}
     from . import prefab_links
-    for kind, source, target in prefab_links.lines(scene):
-        if selected is None or source in selected or target in selected:
-            lines.setdefault(kind, []).extend(
-                [source.matrix_world.translation[:], target.matrix_world.translation[:]])
+    defaults: dict[str, list] = {}   # links prefabs keep unless set (drawn fainter)
+    for chosen, found in ((lines, prefab_links.lines(scene)),
+                          (defaults, prefab_links.default_lines(scene))):
+        for kind, source, target in found:
+            if selected is None or source in selected or target in selected:
+                chosen.setdefault(kind, []).extend(
+                    [source.matrix_world.translation[:], target.matrix_world.translation[:]])
     for source in scene.objects:
+        if prefab_links.is_linkable(source):
+            continue   # a new-map prefab: its set and default links are drawn above
         links = links_of(source) if "boz_links" in source else []
         overridden = prefab_links.set_links(source) if prefab_links.SET_KEY in source else {}
         for link in links:
-            if SET_KINDS.get(link["kind"]) in overridden:
+            if link["kind"] in overridden:
                 continue    # the user set this link: drawn above
             for target_id in link["targets"]:
                 target = index.get(_hex(target_id))
@@ -145,7 +158,7 @@ def _draw_link_lines():
                     continue
                 lines.setdefault(link["kind"], []).extend(
                     [source.matrix_world.translation[:], target.matrix_world.translation[:]])
-    if not lines:
+    if not lines and not defaults:
         return
     region = context.region
     try:
@@ -155,14 +168,16 @@ def _draw_link_lines():
         shader, wide = gpu.shader.from_builtin("UNIFORM_COLOR"), False
     gpu.state.depth_test_set("NONE")
     gpu.state.blend_set("ALPHA")
-    for kind, coordinates in lines.items():
-        batch = batch_for_shader(shader, "LINES", {"pos": coordinates})
-        shader.bind()
-        if wide and region is not None:
-            shader.uniform_float("viewportSize", (region.width, region.height))
-            shader.uniform_float("lineWidth", 2.5)
-        shader.uniform_float("color", LINK_COLOURS.get(kind, (1.0, 1.0, 1.0, 1.0)))
-        batch.draw(shader)
+    for found, width, alpha in ((defaults, 1.2, 0.45), (lines, 2.5, 1.0)):
+        for kind, coordinates in found.items():
+            batch = batch_for_shader(shader, "LINES", {"pos": coordinates})
+            shader.bind()
+            if wide and region is not None:
+                shader.uniform_float("viewportSize", (region.width, region.height))
+                shader.uniform_float("lineWidth", width)
+            colour = LINK_COLOURS.get(kind, (1.0, 1.0, 1.0, 1.0))
+            shader.uniform_float("color", (*colour[:3], alpha))
+            batch.draw(shader)
     gpu.state.blend_set("NONE")
 
 
@@ -200,8 +215,10 @@ def _crossing(obj, base: str):
                 start, end = found[0][0], found[0][1]
                 _crossings[key] = (blender_scene.to_blender(tuple(c * 100 for c in start)),
                                    blender_scene.to_blender(tuple(c * 100 for c in end)))
-        except Exception:  # noqa: BLE001 - no game data, no navmesh: no arrow
-            pass
+        except StopIteration:
+            pass   # its level has no such entity or no navmesh: no arrow
+        except Exception as exc:  # noqa: BLE001 - logged once per barricade (cached as None)
+            print(f"BOZ Redux: no window arrow for {obj.name}: {type(exc).__name__}: {exc}")
     return _crossings[key]
 
 
@@ -424,8 +441,11 @@ def draw_switches(layout, scene):
 CLASSES = (BOZ_OT_link_select, BOZ_OT_link_remove, BOZ_OT_link_add_selected, BOZ_PT_selected)
 
 _PROPERTIES = {
-    **{switch: BoolProperty(default=False, update=_update) for switch in SWITCHES},
-    "boz_show_links": BoolProperty(default=False, update=_redraw),
+    **{switch: BoolProperty(default=False, update=_update, description=SWITCH_HELP[switch])
+       for switch in SWITCHES},
+    "boz_show_links": BoolProperty(default=False, update=_redraw,
+                                   description="Lines between linked objects (power, traps, doors, "
+                                   "window spawns); faint lines are defaults you have not set"),
     "boz_links_selected_only": BoolProperty(
         name="Only selected", default=True, update=_redraw,
         description="Draw only the links of the selected objects"),

@@ -487,6 +487,15 @@ def start_vars_text(start_vars: dict | None) -> str:
     return ';'.join(f'{name}={value}' for name, value in (start_vars or {}).items())
 
 
+def build_warnings(root: str | Path, mod_id: str) -> list[str]:
+    """The warnings of the build installed in the client (its boz-build.json), [] if none."""
+    report = Path(root).expanduser() / 'mods' / mod_id / sdk_project.BUILD_REPORT
+    try:
+        return [str(w) for w in json.loads(report.read_text(encoding='utf-8')).get('warnings', [])]
+    except (OSError, ValueError):
+        return []
+
+
 def run_in_game(project: sdk_project.Project, root: str | Path,
                 start_vars: dict | None = None) -> str:
     """Install a project (and the Developer mod) into the client and start the game. A map

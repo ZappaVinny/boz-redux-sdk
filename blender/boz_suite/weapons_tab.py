@@ -437,7 +437,7 @@ class BOZ_OT_weapon_new(Operator):
     bl_label = "New weapon"
     bl_description = "A new weapon made from the selected one (its model and animations, your values)"
 
-    name: StringProperty(name="Name")
+    name: StringProperty(name="Name", description="The new weapon's name")
 
     def invoke(self, context, event):
         item = selected(link.map_scene())
@@ -597,6 +597,30 @@ class BOZ_PoolItem(PropertyGroup):
     enabled: BoolProperty(name="")
 
 
+_stock_pools: list = []   # [set of the game's own box pools] once read
+
+
+def box_pool(context, chosen: list[str]) -> tuple[list[str], bool]:
+    """(the weapons a mystery box with the pool *chosen* rolls, whether that is the map's
+    default), as the build makes it (weapons.limit_box_pools): the game's own pool, or one with
+    none of the listed weapons, rolls every listed weapon but the starting one; a pool of your
+    own keeps its listed weapons. Without a list the pool is kept."""
+    index = list(project_index(context))
+    if not index:
+        return chosen, False
+    if not _stock_pools:
+        from . import game
+        pack = game.game_pack()
+        _stock_pools.append(wp.stock_box_pools(pack) if pack is not None else set())
+    start = wp.hash_of(start_weapon()[0])
+    default = [name for name in index if wp.hash_of(name) != start] or index
+    listed = {wp.hash_of(name) for name in index}
+    kept = [name for name in chosen if wp.hash_of(name) in listed]
+    if frozenset(wp.hash_of(name) for name in chosen) in _stock_pools[0] or not kept:
+        return default, True
+    return kept, False
+
+
 class BOZ_OT_box_pool(Operator):
     bl_idname = "boz.box_pool"
     bl_label = "Mystery box weapons"
@@ -609,12 +633,13 @@ class BOZ_OT_box_pool(Operator):
         if obj is None:
             return {"CANCELLED"}
         key = convert.FIELD_PREFIX + "CMysteryBox.m_Weapons"
-        chosen = {n for n in str(obj.get(key, "")).split(",") if n}
+        rolled, _default = box_pool(context, [n for n in str(obj.get(key, "")).split(",") if n])
+        chosen = {wp.hash_of(n) for n in rolled}
         items = context.window_manager.boz_pool_items
         items.clear()
         for name, label, _desc in weapon_items(context, include_none=False, listed_only=True):
             item = items.add()
-            item.name, item.label, item.enabled = name, label, name in chosen
+            item.name, item.label, item.enabled = name, label, wp.hash_of(name) in chosen
         return context.window_manager.invoke_props_dialog(self, width=360)
 
     def draw(self, context):

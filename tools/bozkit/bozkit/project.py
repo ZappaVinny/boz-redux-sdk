@@ -532,6 +532,9 @@ def world_data_lua(runtime: dict) -> str:
     """boz/world_data.lua: the map's start state and scripted objects, read by boz.world and
     boz.prefabs when the level starts (world_compile.compile_world's runtime)."""
     data = {key: list(runtime.get(key, [])) for key in ('hidden', 'no_collision', 'blocked')}
+    for key in ('solid', 'blocking'):   # what boz.objects show() gives back (visible: master)
+        if runtime.get(key):
+            data[key] = list(runtime[key])
     data['objects'] = list(runtime.get('objects', []))
     data['names'] = list(runtime.get('names', []))
     if runtime.get('aliases'):

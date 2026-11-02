@@ -10,8 +10,8 @@ import struct
 
 from . import group, levels, maps, spec_fields
 from .hashing import iw_hash
-from .world import (BLOCK_MARGIN, CHALK_FIELD, HIT_SOURCE, INGAME, Instance, Layout, Mesh, Model,
-                    PLAYER_RADIUS, Placement, TRIGGER_SIZE, TRIGGER_SOURCE, Texture, UNIT,
+from .world import (BLOCK_MARGIN, CHALK_FIELD, COLLISION_PARTS, HIT_SOURCE, INGAME, Instance,
+                    Layout, Mesh, Model, PLAYER_RADIUS, Placement, TRIGGER_SIZE, TRIGGER_SOURCE, Texture, UNIT,
                     USE_SOURCE, WEAPON_FIELD, World, WorldError, describe, lower, object_names,
                     script_of, validate, validate_layout, walk)
 
@@ -224,6 +224,7 @@ def window_links(navmesh_body: bytes, barricade: int, home, placed) -> list[tupl
             for start, end, radius, both, poly_flags in found]
 
 
+NAV, BULLETS = 1, 2      # what a collision triangle feeds (_Level.feeds)
 WINDOW_REACH = 100.0   # cm: a shipped window link starts and ends this far either side
 WINDOW_RADIUS = 0.4    # metres: every shipped window link's radius
 WINDOW_FLAGS = 128     # every shipped barricade link's polygon flags (other climbs: 64)
@@ -351,6 +352,10 @@ class _Level:
         self.solid: list[tuple[float, float, float]] = []
         self.single: list[tuple[int, int, int]] = []
         self.blocking: list[int] = []     # per collision triangle: 1 = blocks, never floor
+        # Per collision triangle, what it feeds (world.COLLISION_PARTS): NAV the navmesh (players
+        # and zombies walk on or around it), BULLETS the collision mesh (shots), or both.
+        self.feeds: list[int] = []
+        self.placed_settings: dict[int, dict] = {}   # id() of an added resource -> its settings
         self.zombie_spawns: list[int] = []
         self.used: set[int] = set()       # entity names already placed
         self.copies = 0
@@ -545,6 +550,7 @@ class _Level:
         self.kept.append(resource)
         self.added.append(resource)
         self.homes[id(resource)] = home
+        self.placed_settings[id(resource)] = entity.settings
         self._remember_links(entity, key, spec, resource)
         self._mark([entity.position])
         if entity.script and script_of(entity)['dynamic']:
@@ -899,12 +905,18 @@ class _Level:
         name = script.get('name', '')
         if not name:
             return ''
+        # Visible is the master: a hidden object stops nothing and blocks nothing until a script
+        # shows it (boz.objects show() brings back what it has: runtime solid and blocking).
         if not script['visible']:
             self.runtime['hidden'].append(name)
-        if not script['collision']:
+        if script['collision']:
+            self.runtime.setdefault('solid', []).append(name)
+        if not script['collision'] or not script['visible']:
             self.runtime['no_collision'].append(name)
         if script['blocks'] and script['dynamic']:
-            self.runtime['blocked'].append(name)
+            self.runtime.setdefault('blocking', []).append(name)
+            if script['visible']:
+                self.runtime['blocked'].append(name)
             if footprint_points:
                 # A little below it: the floor it stands on is what gets tagged. The area is the
                 # object's collision footprint (its box with padding), so they match.
@@ -922,8 +934,9 @@ class _Level:
         """Add collision; a scripted object's goes into its own collision entity. Returns the
         world-space points used."""
 
-        if kind == 'none':
-            return []
+        walking, bullets = COLLISION_PARTS[kind]
+        if kind == 'none' or (script and not bullets):
+            return []   # a scripted object's walking is its tagged area (script()), not geometry
         chain = [(tuple(position), tuple(rotation), tuple(scale))] if position else []
         # Padding is in world centimetres: in the model's own units it is divided by its scale.
         local_padding = tuple(padding / abs(scale[i]) if scale[i] else 0.0 for i in range(3))
@@ -951,7 +964,9 @@ class _Level:
                       else tuple(map(float, v)) for v in vertices]
             self.solid.extend(points)
             self.single.extend((a + offset, b + offset, c + offset) for a, b, c in triangles)
-        self.blocking.extend([1 if kind == 'solid' else 0] * (len(self.single) - before))
+        added = len(self.single) - before
+        self.blocking.extend([1 if walking == 'block' else 0] * added)
+        self.feeds.extend([(NAV if walking != 'none' else 0) | (BULLETS if bullets else 0)] * added)
         self._mark(points)
         return points
 
@@ -1127,7 +1142,7 @@ class _Level:
 
     def entity_boxes(self, resources_list) -> None:
         """Shipped levels bake props into their collision and navmesh; added entities get a box."""
-        from . import resources
+        from . import resources, toolkit
 
         for resource in resources_list:
             if id(resource) in self.own or id(resource) in self.scripted:
@@ -1135,9 +1150,15 @@ class _Level:
             spec = resources.decode_entity_spec(resource.body)
             if spec_fields.component(spec, 'CDoor') is not None:
                 continue   # doors gate the navmesh (door_footprints), they do not cut it
+            feeds = NAV | BULLETS
+            settings = self.placed_settings.get(id(resource), {})
+            if spec_fields.component(spec, 'CBarricade') is not None and \
+                    not settings.get(toolkit.BULLETS_FIELD):
+                feeds = NAV   # bullets pass between the boards unless set to stop them
             for box in levels.prop_boxes(spec, self.models):
                 self.single += levels.box_triangles(len(self.solid))
                 self.blocking += [1] * 12
+                self.feeds += [feeds] * 12
                 self.solid += box
                 self._mark(box)
 
@@ -1193,11 +1214,21 @@ class _Level:
         component = next(c for c in spec.components
                          if c.class_hash == resources.COLLISION_MESH_SPEC)
         mesh_data = collision.decode(component.extra)
+        shot = self.triangles(BULLETS)
         mesh_data.vertices = list(self.solid)
-        mesh_data.indices = [i for t in self.single for i in t]
-        mesh_data.materials = bytes(len(self.single))
+        mesh_data.indices = [i for t in shot for i in t]
+        mesh_data.materials = bytes(len(shot))
         component.extra = collision.encode(mesh_data)
         resource.body = resources.encode_entity_spec(spec)
+
+    def triangles(self, feed: int) -> list:
+        """The collision triangles feeding *feed* (NAV: the navmesh input, BULLETS: the
+        collision mesh)."""
+        return [t for t, f in zip(self.single, self.feeds) if f & feed]
+
+    def nav_blocking(self) -> list[int]:
+        """Blocking flags of the NAV triangles, in triangles(NAV) order."""
+        return [b for b, f in zip(self.blocking, self.feeds) if f & NAV]
 
     def finish_entities(self) -> None:
         self.by_class[levels.ENTITY_SPEC].resources = self.kept
@@ -1453,8 +1484,8 @@ def _compile_layout(pack, name: str, world: Layout,
     navmesh = by_class[levels.NAVMESH].resources[0]
     template = navmesh.body
     navmesh.body = level.build_navmesh(lambda: navbuild.build(
-        template, [(x / 100, y / 100, z / 100) for x, y, z in level.solid], level.single,
-        blocking=level.blocking, doors=level.door_footprints(level.kept),
+        template, [(x / 100, y / 100, z / 100) for x, y, z in level.solid], level.triangles(NAV),
+        blocking=level.nav_blocking(), doors=level.door_footprints(level.kept),
         links=level.window_links()))
 
     files.groups[f'{name}.group.bin'] = levels.renamed(
@@ -1552,8 +1583,8 @@ def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFil
         offset = len(vertices)
         vertices = list(vertices) + [(x / 100, y / 100, z / 100) for x, y, z in level.solid]
         triangles = list(triangles) + [(a + offset, b + offset, c + offset)
-                                       for a, b, c in level.single]
-        blocking = [0] * len(navmesh_input[1]) + level.blocking
+                                       for a, b, c in level.triangles(NAV)]
+        blocking = [0] * len(navmesh_input[1]) + level.nav_blocking()
         navmesh.body = navbuild.rebuild(
             navmesh.body, vertices, triangles, dirty=level.dirty, blocking=blocking,
             doors=level.door_footprints(level.added + level.moved, blockers=False))[0]

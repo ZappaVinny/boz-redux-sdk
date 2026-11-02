@@ -610,20 +610,25 @@ the client's loadscript(name, env) loads a script with a fresh environment per o
 
 ### boz.objects
 
-The map's objects by name: show and hide them, switch their collision, open and
+The map's objects by name, with the editor's three "In the game" settings
 
-close the walkable area under them, and react when players walk into them, use them or shoot them. The building blocks for triggers and easter eggs.
+(Visible, Walking, Stops bullets) to switch while the game runs, and events for when players walk into them, use them or shoot them. The building blocks for triggers and easter eggs.
 
 ```lua
 local objects = require("boz.objects")
-local skull = objects.get("Skull_1")
-skull:on("use", function(object) object:hide() end)
+local wall = objects.get("Secret_Wall")
+wall:hide()                      -- Visible off: unseen, walk and shoot through it
+wall:show()                      -- back as the map has it (its walking and bullets too)
+wall:set_blocks_walking(false)   -- Walking: players and zombies walk through it
+wall:set_stops_bullets(false)    -- Stops bullets off: shots pass through
 objects.on("Secret_Room_Trigger", "enter", function(object, who)
-    if who.player then objects.get("Secret_Wall"):hide():set_collision(false):open_navmesh() end
+    if who.player then wall:hide() end
 end)
 ```
 
-Names are the script names the editor shows for each object (Properties → Object → Game → Scripts): turn on "Scripts can change it" there. Shipped entities use their own names.
+Blocks walking needs Walking: Blocks in the editor (that gives the object its own walkable area to open and close; a door's works the same way).
+
+Names are the names the editor shows for each object (Properties → Object → Game → Name; a prefab's parts are "<Prefab>.<Part>"). An object another script switches needs "Scripts can switch it" under In the game (on by itself for objects with a script of their own). Shipped entities use their own names.
 
 <details><summary>How it works</summary>
 
@@ -686,12 +691,14 @@ transform moved.
 | `Object:links(kind)` | The objects this one links to by the link `kind` (see objects.links): in a prefab script, `self:links("traps")`. |
 | `objects.is_hidden(name)` | True while the object called *name* is hidden (set_visible): a hidden volume sends nothing. |
 | `objects.forget_hidden()` | Forgets which objects were hidden: a level that starts (or restarts) shows every object, so the volumes of objects a script hid in the last run send their events again. |
-| `Object:set_visible(visible)` | Shows or hides the object's models (its collision stays; a hidden volume sends no events and shows no prompt). Returns the object. |
+| `Object:set_visible(visible)` | Shows or hides the object. Visible is the master switch: a hidden object is seen by nobody, stops no bullets and blocks no walking (and, as a volume, sends no events and shows no prompt); shown again, it gets back the collision and blocking the map gave it. Returns the object. |
 | `Object:show()` | Shows the object. Returns the object. |
 | `Object:hide()` | Hides the object. Returns the object. |
-| `Object:set_collision(enabled)` | Switches the object's collision on or off (players and bullets pass through it when off). A trap keeps its kill volume: the game reads it every frame while the trap runs. Returns the object. |
+| `Object:set_collision(enabled)` | Switches the object's collision on or off: what bullets and other ray casts hit (walking is the walkable area: set_blocks_walking). A trap keeps its kill volume: the game reads it every frame while the trap runs. set_stops_bullets is the same by the editor's name. Returns the object. |
 | `objects.set_navmesh(tag, open)` | Opens (true) or closes (false) the walkable area tagged `tag` (a name: an object set to block the walkable area, or a door). Returns true when the level has a navmesh. |
-| `Object:set_navmesh(open)` | Opens or closes the walkable area under the object (it must be set to block the walkable area in the editor). Returns the object. |
+| `Object:set_blocks_walking(blocks)` | The editor's Walking: Blocks, switched: true, players and zombies cannot walk through it; false, they walk straight through (it must be set to Walking: Blocks in the editor). Returns the object. |
+| `Object:set_stops_bullets(stops)` | The editor's Stops bullets, switched: false, shots pass through it. Returns the object. |
+| `Object:set_navmesh(open)` | Opens or closes the walkable area under the object (it must be set to Walking: Blocks in the editor; set_blocks_walking says the same the other way round). Returns the object. |
 | `Object:open_navmesh()` | Lets zombies and players walk where the object blocked them. Returns the object. |
 | `Object:close_navmesh()` | Blocks the walkable area under the object again. Returns the object. |
 | `objects.transform_position(transform)` | The world position of a CIsTransform component: {x, y, z} in game centimetres (y is up). |

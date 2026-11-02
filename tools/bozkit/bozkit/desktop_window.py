@@ -594,6 +594,9 @@ class ProjectPage(QWidget):
             return
         QApplication.restoreOverrideCursor()
         self.main.statusBar().showMessage(message, 8000)
+        warnings = sdkhome.build_warnings(self.main.settings.client, self.project.mod.id)
+        if warnings:
+            QMessageBox.information(self, 'Build warnings', '\n'.join(warnings))
         self.log_size = -1
         self.log.clear()
 

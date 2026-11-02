@@ -185,6 +185,43 @@ class SetLinkTests(unittest.TestCase):
         self.assertEqual(level.runtime['links'], {'Window': {'spawns': ['Window_Spawn']}})
 
 
+class CollisionKindTests(unittest.TestCase):
+    """What a model's kind feeds: the navmesh (walking, players and zombies alike) and the
+    collision mesh (bullets), each on or off."""
+
+    def level(self):
+        level = world_compile._Level.__new__(world_compile._Level)
+        level.solid, level.single, level.blocking, level.feeds = [], [], [], []
+        level.script_collision, level.dirty = {}, []
+        return level
+
+    def test_each_kind_feeds_what_it_says(self):
+        triangle = [(0, 0, 0), (100, 0, 0), (0, 0, 100)]
+        self.assertEqual(world.collision_kind('block', False), 'block')
+        for kind, (nav, shot, blocks) in {'floor': (1, 1, 0), 'walk': (1, 0, 0),
+                                           'solid': (1, 1, 1), 'block': (1, 0, 1),
+                                           'bullets': (0, 1, 0), 'none': (0, 0, 0)}.items():
+            level = self.level()
+            level.collide(triangle, [(0, 1, 2)], kind, 'mesh')
+            self.assertEqual(len(level.triangles(world_compile.NAV)), nav, kind)
+            self.assertEqual(len(level.triangles(world_compile.BULLETS)), shot, kind)
+            self.assertEqual(level.nav_blocking(), [blocks] * nav, kind)
+
+    def test_hidden_object_stops_and_blocks_nothing_until_shown(self):
+        level = self.level()
+        level.runtime = {'hidden': [], 'no_collision': [], 'blocked': []}
+        level.blockers, level.blocker_points, level.player_radius = [], {}, 0.4
+        item = world.Placement('wall', (0.0, 0.0, 0.0), script={
+            'name': 'Wall', 'visible': False, 'collision': True, 'blocks': True, 'dynamic': True})
+        level.script(item, [(0.0, 0.0, 0.0), (100.0, 0.0, 0.0), (0.0, 0.0, 100.0)])
+        self.assertEqual(level.runtime['hidden'], ['Wall'])
+        self.assertEqual(level.runtime['no_collision'], ['Wall'])
+        self.assertEqual(level.runtime['blocked'], [])            # open while hidden
+        self.assertEqual(level.runtime['solid'], ['Wall'])        # what show() brings back
+        self.assertEqual(level.runtime['blocking'], ['Wall'])
+        self.assertEqual(len(level.blockers), 1)                  # its tagged area exists
+
+
 class LevelBoxTests(unittest.TestCase):
     def level(self, *props):
         return reflect.Blob(iw_hash('CLevel'), list(props))

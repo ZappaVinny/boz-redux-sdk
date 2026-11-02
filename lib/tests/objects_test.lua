@@ -66,8 +66,11 @@ objects.get("Secret_Wall"):hide()
 local shown = called("CIsRenderableModel::SetVisible")
 check(#shown == 2 and shown[1][2] == 0xa200 and shown[2][2] == 0xa300 and shown[1][3] == 0,
       "hide reaches the object's model and its child's")
+check(#called("CIsCollisionObject::Disable") == 1, "hidden: it stops no bullets either (visible is the master)")
+objects.get("Secret_Wall"):show()
+check(#called("CIsCollisionObject::Enable") == 1, "shown: its collision comes back")
 objects.get("Secret_Wall"):set_collision(false):open_navmesh()
-check(#called("CIsCollisionObject::Disable") == 1, "collision off")
+check(#called("CIsCollisionObject::Disable") == 2, "collision off")
 local nav = called("NavMesh_SetTagOpen")
 check(#nav == 1 and nav[1][2] == 0x9000 and nav[1][3] == hash.name("Secret_Wall") and nav[1][4] == 1,
       "the walkable area under it opens, tagged with its name")

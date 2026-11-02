@@ -299,7 +299,9 @@ def _settings_changed(self, context):
 
 
 class BOZ_SoundSettings(PropertyGroup):
-    rate: EnumProperty(name="Rate", items=[("22050", "22050 Hz", "The game's better quality (most "
+    rate: EnumProperty(name="Rate",
+                       description="The sample rate the sound is saved at",
+                       items=[("22050", "22050 Hz", "The game's better quality (most "
                                                          "weapon sounds)"),
                                            ("11025", "11025 Hz", "Half the size (most voices and "
                                                                  "effects)")],
@@ -311,9 +313,13 @@ class BOZ_SoundSettings(PropertyGroup):
     normalize: BoolProperty(name="Normalize", default=True,
                             description="Bring the loudest point to -1 dB, as loud as the sound "
                             "can be without clipping", update=_settings_changed)
-    fade_in: FloatProperty(name="Fade in", min=0.0, soft_max=2.0, unit="TIME_ABSOLUTE",
+    fade_in: FloatProperty(name="Fade in",
+                           description="Seconds it fades in at the start",
+                           min=0.0, soft_max=2.0, unit="TIME_ABSOLUTE",
                            update=_settings_changed)
-    fade_out: FloatProperty(name="Fade out", min=0.0, soft_max=2.0, unit="TIME_ABSOLUTE",
+    fade_out: FloatProperty(name="Fade out",
+                            description="Seconds it fades out at the end",
+                            min=0.0, soft_max=2.0, unit="TIME_ABSOLUTE",
                             update=_settings_changed)
 
 
@@ -939,7 +945,9 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.boz_sound_slots = CollectionProperty(type=BOZ_SoundSlot)
     bpy.types.Scene.boz_sound_slot_index = IntProperty(update=_slot_selected)
-    bpy.types.Scene.boz_sound_category = EnumProperty(name="Sounds", items=CATEGORY_ITEMS,
+    bpy.types.Scene.boz_sound_category = EnumProperty(name="Sounds",
+                                                      description="Which sounds the list shows",
+                                                      items=CATEGORY_ITEMS,
                                                       update=_category_changed)
     bpy.types.Scene.boz_sounds = CollectionProperty(type=BOZ_SoundItem)
     bpy.types.Scene.boz_sound_index = IntProperty(update=_sound_selected)

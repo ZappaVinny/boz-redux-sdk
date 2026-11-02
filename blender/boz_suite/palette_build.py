@@ -98,6 +98,8 @@ def main() -> None:
     collection = bpy.context.scene.collection
     count = 0
     for piece in toolkit.all_pieces(pack):
+        if not piece.palette:
+            continue   # another Type of a listed marker (zombie spawns)
         found = None
         for base in ("kino", "callofthedead", "ascension", "tutorial"):
             found = toolkit.resolve(pack, base, piece.key, names)
@@ -111,11 +113,23 @@ def main() -> None:
         obj["boz_asset_kind"] = "piece"
         obj["boz_piece"] = piece.key
         collection.objects.link(obj)
-        describe(obj, piece.catalog, piece.description)
+        # Native: the game's own prefab, working as in its map (My prefabs are "Your prefab").
+        describe(obj, piece.catalog, f"Game prefab (native): {piece.description}", ("native",))
         group_name = piece.catalog.split("/")[-1]
         if not (found.model and preview_file(obj, built.thumb_for("model", found.model))):
             icon(obj, ICON_COLOURS.get(group_name, (120, 120, 120)))
         count += 1
+    # A window: a barricade and a window zombie spawn outside it, placed as one prefab of yours
+    # (link the barricade's Window spawns yourself).
+    obj = bpy.data.objects.new("Window", None)
+    obj.empty_display_type = "PLAIN_AXES"
+    obj["boz_asset_kind"] = "window"
+    collection.objects.link(obj)
+    describe(obj, "Game prefabs/Barricades", "A window barricade and a window zombie spawn "
+             "outside it, as one prefab (link the spawn in the barricade's Links yourself)",
+             ("native",))
+    icon(obj, ICON_COLOURS.get("Barricades", (120, 120, 120)))
+    count += 1
     for kind, label, description in VOLUMES:
         obj = bpy.data.objects.new(label, None)
         obj.empty_display_type = "CUBE"

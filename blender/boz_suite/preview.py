@@ -197,12 +197,14 @@ def draw_switches(layout, context, compact=False) -> None:
 
 
 def draw_header(self, context):
+    """The World tab's tool settings bar (next to Orientation and Drag): game shapes and the
+    one-click switches for what the viewport shows."""
     workspace = context.workspace
     if workspace is None or workspace.name != "World":
         return
     self.layout.separator()
     self.layout.menu("BOZ_MT_shapes", text="Shapes", icon="MESH_CUBE")
-    draw_switches(self.layout, context, compact=True)
+    draw_switches(self.layout, context)
 
 
 class BOZ_PT_show(Panel):
@@ -286,7 +288,7 @@ def register():
     global _box_handle
     for cls in CLASSES:
         bpy.utils.register_class(cls)
-    bpy.types.VIEW3D_HT_header.append(draw_header)
+    bpy.types.VIEW3D_HT_tool_header.append(draw_header)
     if not bpy.app.background:
         _box_handle = bpy.types.SpaceView3D.draw_handler_add(draw_collision_boxes, (), "WINDOW",
                                                              "POST_VIEW")
@@ -297,6 +299,6 @@ def unregister():
     if _box_handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_box_handle, "WINDOW")
         _box_handle = None
-    bpy.types.VIEW3D_HT_header.remove(draw_header)
+    bpy.types.VIEW3D_HT_tool_header.remove(draw_header)
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)

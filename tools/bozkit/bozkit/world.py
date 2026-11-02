@@ -29,7 +29,19 @@ from pathlib import Path
 from . import levels, links, maps, png, spec_fields
 from .hashing import iw_hash
 
-COLLISION_KINDS = ('floor', 'solid', 'none')
+# What a model does in the game: walking (players and zombies both move on the navmesh) and
+# bullets (collision only stops shots and ray casts). (walking, stops bullets) by kind:
+COLLISION_PARTS = {'floor': ('walk', True), 'walk': ('walk', False),     # walk on top of it
+                   'solid': ('block', True), 'block': ('block', False),  # nobody walks through
+                   'bullets': ('none', True), 'none': ('none', False)}   # walk through it
+COLLISION_KINDS = tuple(COLLISION_PARTS)
+
+
+def collision_kind(walking: str, bullets: bool) -> str:
+    """The collision kind for a walking setting ('walk', 'block', 'none') and stops bullets."""
+    return next(kind for kind, parts in COLLISION_PARTS.items() if parts == (walking, bullets))
+
+
 SHAPES = ('box', 'mesh')
 NAME_RE = re.compile(r'^[a-z][a-z0-9_]{0,31}$')
 SCRIPT_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_.]{0,95}$')   # '.' joins prefab parts
@@ -38,6 +50,7 @@ SCRIPT_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_.]{0,95}$')   # '.' joins pref
 # own (<name>_collision) and, when they block, a tagged walkable area instead of a hole, so
 # boz.objects can switch both; boz.world applies the start state when the level starts.
 SCRIPT_DEFAULTS = {'name': '', 'visible': True, 'collision': True, 'blocks': False,
+                   'walk_through': False, 'switchable': False,
                    'dynamic': True}   # dynamic: scripts may switch it (own collision, tagged area)
 MAX_TEXTURE = 1024
 INGAME = 'ingame/ingame.group.bin'
@@ -328,7 +341,8 @@ def validate_layout(world: Layout) -> list[str]:
         return sorted(set(problems), key=problems.index)
     if not any(entity.source.startswith('spawn_player_') for entity in world.entities):
         problems.append('the world needs a player spawn (spawn_player_1)')
-    if not any(mesh.collision == 'floor' for mesh in world.meshes + world.props):
+    if not any(COLLISION_PARTS[mesh.collision][0] == 'walk'
+               for mesh in world.meshes + world.props):
         problems.append('the world needs a floor mesh to walk on')
     return sorted(set(problems), key=problems.index)
 
@@ -466,7 +480,11 @@ FORMAT = 3
 OBJECT_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{0,47}$')
 VOLUME_KINDS = ('trigger', 'hit', 'use')
 VOLUME_WHO = ('players', 'zombies', 'anyone')
-START_DEFAULTS = {'visible': True, 'collision': True, 'blocks': False}
+# How an object starts. visible is the master: hidden, it stops nothing and blocks nothing until
+# a script shows it. walk_through: a game prefab players and zombies walk through. switchable:
+# scripts may switch it although it has no script of its own (another object's script does).
+START_DEFAULTS = {'visible': True, 'collision': True, 'blocks': False, 'walk_through': False,
+                  'switchable': False}
 
 
 @dataclass
@@ -851,7 +869,8 @@ def validate(world: World) -> list[str]:
     if not any(isinstance(i, Prefab) and (i.piece == 'player_spawn' or
                                           i.source.startswith('spawn_player_')) for i in flat):
         problems.append('the world needs a player spawn')
-    if not any(isinstance(i, Model) and i.collision == 'floor' for i in flat):
+    if not any(isinstance(i, Model) and COLLISION_PARTS.get(i.collision, ('',))[0] == 'walk'
+               for i in flat):
         problems.append('the world needs a walkable model to stand on')
     return sorted(set(problems), key=problems.index)
 

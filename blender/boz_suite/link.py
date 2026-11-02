@@ -20,13 +20,35 @@ from ._bozkit import project as sdk_project, sdkhome, toolkit, world
 
 from . import convert, tabs
 
+# Stored kinds (world.COLLISION_PARTS); the panel shows them as Walking and Stops bullets.
+# Saved files store an item's number: new kinds go at the end.
 COLLISION_ITEMS = [
-    ("floor", "Walkable", "Floors, ramps, stairs: players stand on it and zombies walk on it "
-     "(the navmesh is built on its top)"),
-    ("solid", "Blocking", "Walls, crates, machines: players and zombies cannot pass through it "
-     "and nobody walks on it (it cuts a hole in the navmesh)"),
-    ("none", "None", "Decoration: no collision, and the navmesh ignores it"),
+    ("floor", "Walk on it, stops bullets", ""), ("solid", "Blocks walking, stops bullets", ""),
+    ("none", "Walk through", ""), ("walk", "Walk on it", ""), ("block", "Blocks walking", ""),
+    ("bullets", "Stops bullets only", ""),
 ]
+WALKING_ITEMS = [
+    ("walk", "Walk on it", "A floor, ramp or stairs: players and zombies walk on top of it"),
+    ("block", "Blocks", "A wall or crate: players and zombies cannot walk through it"),
+    ("none", "Walk through", "Players and zombies walk straight through it"),
+]
+_WALKING = [key for key, _label, _help in WALKING_ITEMS]
+
+
+def _get_walking(self):
+    return _WALKING.index(world.COLLISION_PARTS[self.collision][0])
+
+
+def _set_walking(self, index):
+    self.collision = world.collision_kind(_WALKING[index], world.COLLISION_PARTS[self.collision][1])
+
+
+def _get_bullets(self):
+    return world.COLLISION_PARTS[self.collision][1]
+
+
+def _set_bullets(self, value):
+    self.collision = world.collision_kind(world.COLLISION_PARTS[self.collision][0], bool(value))
 # Saved files store an item's number, so every item keeps its number for good.
 ROLE_ITEMS = [("model", "Model", "A mesh you see and bump into: a game model or your own", 2),
               ("reference", "Base level", "Part of the inherited base level, shown read only", 4),
@@ -92,16 +114,33 @@ def _volume_changed(self, context):
 
 
 class BOZ_ObjectSettings(PropertyGroup):
-    role: EnumProperty(name="Kind", items=ROLE_ITEMS, default="model")
+    role: EnumProperty(name="Kind",
+                       description="What this object is in the game",
+                       items=ROLE_ITEMS, default="model")
     collision: EnumProperty(name="Collision", items=COLLISION_ITEMS, default="floor",
-                            description="How players and zombies treat this mesh in the game")
+                            description="What it does in the game (shown as Walking and Stops "
+                            "bullets)")
+    walking: EnumProperty(name="Walking", items=WALKING_ITEMS, get=_get_walking, set=_set_walking,
+                          description="How players and zombies move at it (both walk on the "
+                          "same walkable area)")
+    stops_bullets: BoolProperty(name="Stops bullets", get=_get_bullets, set=_set_bullets,
+                                description="Shots hit it and leave marks. Off: bullets pass "
+                                "through")
+    switchable: BoolProperty(name="Scripts can switch it", default=False,
+                             description="A script (another object's too) can show, hide and "
+                             "switch its walking and bullets while the game runs. Objects with a "
+                             "script of their own always can")
+    blocks_walking: BoolProperty(name="Blocks walking", default=True,
+                                 description="Players and zombies cannot walk through it. Off: "
+                                 "they walk straight through")
     double_sided: BoolProperty(name="Double-sided", default=False,
                                description="Draw the back of every face too")
     source: StringProperty(name="Source", description="The game entity (a name or 0x hash) or "
                            "game model (group#0xhash) this places")
     group: StringProperty(name="Group", description="The game group holding the entity (empty: "
                           "the base level)")
-    shape: EnumProperty(name="Shape", items=SHAPE_ITEMS, default="mesh")
+    shape: EnumProperty(name="Shape",
+                        description="How its collision is made", items=SHAPE_ITEMS, default="mesh")
     padding: FloatProperty(name="Box padding (cm)", default=0.0, min=0.0, max=500.0, step=100,
                            precision=1, description="How far the collision box (and the area it "
                            "blocks) reaches past the model on every side")
@@ -116,18 +155,21 @@ class BOZ_ObjectSettings(PropertyGroup):
                               "(scripts: self:part(\"<name>\")); copies keep it",
                               update=_part_name_changed)
     start_visible: BoolProperty(name="Visible", default=True,
-                                description="Off: the level starts with it hidden")
-    start_collision: BoolProperty(name="Collision", default=True,
-                                  description="Off: players, zombies and bullets pass through it "
-                                  "until a script switches it on")
-    blocks: BoolProperty(name="Blocks the walkable area", default=False,
-                         description="Zombies and players cannot walk through its spot until a "
-                         "script opens it (open_navmesh())")
+                                description="In the game at all. Off: unseen, stops no bullets "
+                                "and blocks no walking until a script shows it (show())")
+    start_collision: BoolProperty(name="Stops bullets", default=True,
+                                  description="Shots hit it and leave marks. Off: bullets pass "
+                                  "through")
+    blocks: BoolProperty(name="Blocks walking", default=False,
+                         description="Saved start state: the walkable area under a scripted "
+                         "object starts shut (set from Walking)")
     script: StringProperty(name="Script", description="Its Lua script, in the project's scripts "
                            "folder (prefabs/<Name>.lua)")
-    volume: EnumProperty(name="Volume", items=VOLUME_ITEMS, default="trigger",
+    volume: EnumProperty(name="Volume",
+                         description="What it reacts to", items=VOLUME_ITEMS, default="trigger",
                          update=_volume_changed)
-    who: EnumProperty(name="Set off by", items=WHO_ITEMS, default="players")
+    who: EnumProperty(name="Set off by",
+                      description="Who can set it off", items=WHO_ITEMS, default="players")
     once: BoolProperty(name="Only once", default=False,
                        description="Sends its event the first time only")
     prompt: StringProperty(name="Prompt", description="What players see when they can use it")
@@ -143,9 +185,15 @@ class BOZ_SceneSettings(PropertyGroup):
                           "navmesh) and add this map's contents to it")
     start_level: BoolProperty(name="Start the level", default=True,
                               description="Start the game straight into this map")
-    unlimited_health: BoolProperty(name="Unlimited health", default=False)
-    unlimited_points: BoolProperty(name="Unlimited points", default=False)
-    starting_points: IntProperty(name="Starting points", default=500, min=0, max=1000000)
+    unlimited_health: BoolProperty(name="Unlimited health",
+                                   description="Build & Run starts you with unlimited health (testing only)",
+                                   default=False)
+    unlimited_points: BoolProperty(name="Unlimited points",
+                                   description="Build & Run starts you with unlimited points (testing only)",
+                                   default=False)
+    starting_points: IntProperty(name="Starting points",
+                                 description="The points Build & Run starts you with (testing only)",
+                                 default=500, min=0, max=1000000)
 
 
 def append_log(lines) -> None:
@@ -210,7 +258,11 @@ def write_source(scene) -> list:
     world.save(result, project.root / "source")
     if result.removed:
         convert.tidy_removed(scene, result.removed)
+    from . import prefab_links
+    link_problems, warnings = prefab_links.check(scene)
+    problems += link_problems
     scene["boz_problems"] = [f"{message}\t{name}" for message, name in problems]
+    scene["boz_warnings"] = [f"{message}\t{name}" for message, name in warnings]
     return problems
 
 
@@ -304,8 +356,10 @@ def on_save(_dummy):
         append_log([f"check {message}" for message, _ in problems])
 
 
-def problems_of(scene) -> list[tuple[str, str]]:
-    return [tuple((entry.split("\t") + [""])[:2]) for entry in scene.get("boz_problems", [])]
+def problems_of(scene, key: str = "boz_problems") -> list[tuple[str, str]]:
+    """(message, object name) entries: boz_problems stop the build; boz_warnings (Check) and
+    boz_build_warnings (the last build) do not."""
+    return [tuple((entry.split("\t") + [""])[:2]) for entry in scene.get(key, [])]
 
 
 class BOZ_OT_build_and_run(Operator):
@@ -345,7 +399,13 @@ class BOZ_OT_build_and_run(Operator):
             return {"CANCELLED"}
         _log_state["size"] = 0  # the game rewrites boz-log.txt
         append_log(f"build {message}")
-        self.report({"INFO"}, message)
+        warnings = sdkhome.build_warnings(client, project.mod.id)
+        map_scene()["boz_build_warnings"] = [f"{w}\t" for w in warnings]
+        if warnings:
+            append_log([f"warning {w}" for w in warnings])
+            self.report({"WARNING"}, f"{message}; {len(warnings)} warnings (see Problems)")
+        else:
+            self.report({"INFO"}, message)
         return {"FINISHED"}
 
 
@@ -399,9 +459,14 @@ class BOZ_OT_check(Operator):
     bl_description = "Look for problems that would stop the build"
 
     def execute(self, context):
+        from . import prefab_links
         problems = []
-        scene_to_world(map_scene(), problems)
-        map_scene()["boz_problems"] = [f"{m}\t{n}" for m, n in problems]
+        scene = map_scene()
+        scene_to_world(scene, problems)
+        link_problems, warnings = prefab_links.check(scene)
+        problems += link_problems
+        scene["boz_problems"] = [f"{m}\t{n}" for m, n in problems]
+        scene["boz_warnings"] = [f"{m}\t{n}" for m, n in warnings]
         self.report({"INFO"} if not problems else {"WARNING"},
                     "No problems" if not problems else f"{len(problems)} problems")
         return {"FINISHED"}
@@ -414,7 +479,7 @@ class BOZ_OT_make_editable(Operator):
                       "your own; a game prefab keeps working as before and draws your mesh")
     bl_options = {"REGISTER", "UNDO"}
 
-    name: StringProperty(name="Mesh name")
+    name: StringProperty(name="Mesh name", description="The name of the new mesh")
 
     @classmethod
     def poll(cls, context):
@@ -772,14 +837,22 @@ class BOZ_PT_problems(Panel):
     def draw(self, context):
         layout = self.layout
         layout.operator(BOZ_OT_check.bl_idname, icon="CHECKMARK")
-        problems = problems_of(map_scene())
+        scene = map_scene()
+        problems = problems_of(scene)
         if not problems:
             layout.label(text="Nothing stops the build", icon="CHECKMARK")
-        for message, name in problems:
-            row = layout.row()
-            row.label(text=message, icon="ERROR")
-            if name:
-                row.operator(BOZ_OT_select_problem.bl_idname, text="", icon="RESTRICT_SELECT_OFF").name = name
+        for title, key, icon in ((None, "boz_problems", "ERROR"),
+                                 ("Warnings", "boz_warnings", "INFO"),
+                                 ("Last build", "boz_build_warnings", "INFO")):
+            entries = problems_of(scene, key)
+            if title and entries:
+                layout.label(text=title)
+            for message, name in entries:
+                row = layout.row()
+                row.label(text=message, icon=icon)
+                if name:
+                    row.operator(BOZ_OT_select_problem.bl_idname, text="",
+                                 icon="RESTRICT_SELECT_OFF").name = name
 
 
 class BOZ_PT_project(Panel):

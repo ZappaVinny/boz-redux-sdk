@@ -24,6 +24,8 @@ POWER_SWITCH = 'powerSwitch'
 NO_POWER = 'boz_no_power'
 WEAPON_FIELD = 'boz.weapon'
 CHALK_FIELD = 'boz.chalk'   # editor-only: '' automatic, 'none', or an image in the project
+# Editor-only: a barricade's baked box also stops shots (off: bullets pass between the boards).
+BULLETS_FIELD = 'boz.stops_bullets'
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,7 @@ class Piece:
     settings: tuple[Setting, ...] = ()
     description: str = ''
     model: bool | None = None          # True: must draw a model; False: must not; None: either
+    palette: bool = True               # listed in the palette (spawn types: one marker, a Type)
 
 
 def _cost(component: str, field_name: str = 'm_Cost') -> Setting:
@@ -64,6 +67,27 @@ def _reach(default: float = 200.0) -> Setting:
 def _power(component: str) -> Setting:
     return Setting(f'{component}.powerSwitch', 'Needs power', 'power',
                    'On: works once the power switch is turned on. Off: works from the start')
+
+
+TRAP_SETTINGS = (Setting('CTrap.m_ActivePeriodMS', 'Runs for (s)', 'seconds',
+                         'How long it stays on once bought'),
+                 Setting('CTrap.m_CoolDownPeriodMS', 'Cool-down (s)', 'seconds',
+                         'How long before it can be bought again'),
+                 Setting('CTrap.m_PlayerDamage', 'Player damage', 'int',
+                         'Damage to players who walk into it'))
+
+SPAWN_TYPES = (   # (piece key, Type label, spawnType, what it does), the palette's first
+    ('zombie_window', 'Window', 'WINDOWS', 'Zombies climb in through a window (link it to its '
+     'barricade)'),
+    ('zombie_ground', 'Ground', 'GROUND', 'Zombies burst out of the ground'),
+    ('zombie_crawler', 'From above', 'HOLE', 'Zombies drop in from a hole above'),
+    ('zombie_ceiling', 'Ceiling', 'CEILING', 'Zombies come down from the ceiling (Call of the '
+     'Dead)'),
+    ('zombie_climb', 'Climb', 'CLIMB', 'Zombies climb up onto the floor (Call of the Dead)'),
+    ('dog_spawn', 'Dogs', 'LIGHTNING', 'Hellhounds appear here in dog rounds'),
+    ('monkey_spawn', 'Monkeys', 'MONKEY', 'Space monkeys appear here in monkey rounds (Ascension)'),
+)
+SPAWN_KEYS = {key for key, *_rest in SPAWN_TYPES}
 
 
 PERKS = (('juggernog', 'Juggernog', 'jugg'), ('quick_revive', 'Quick Revive', 'revive'),
@@ -108,30 +132,30 @@ PIECES = [
                             'The chalk drawing on the wall: the weapon\'s own, one drawn from its '
                             'model, your image, or none')),
           description='Where players buy a weapon (any weapon of the level)'),
-    Piece('trap', 'Trap', 'Game prefabs/Defence', 'trap', exclude=('CTrapSwitch',),
-          settings=(Setting('CTrap.m_ActivePeriodMS', 'Runs for (s)', 'seconds',
-                            'How long it stays on once bought'),
-                    Setting('CTrap.m_CoolDownPeriodMS', 'Cool-down (s)', 'seconds',
-                            'How long before it can be bought again'),
-                    Setting('CTrap.m_PlayerDamage', 'Player damage', 'int',
-                            'Damage to players who walk into it')),
-          description='A trap a trap switch turns on'),
+    # One piece per kind of trap in the game; any trap switch runs any of them (its Traps link).
+    *(Piece(key, label, 'Game prefabs/Defence', 'trap', words, exclude=('CTrapSwitch',),
+            settings=TRAP_SETTINGS, description=description, palette=bool(words))
+      for key, label, words, description in (
+          ('trap_firepit', 'Trap: Firepit', ('firepit',), 'A fire pit that burns what stands in '
+           'it (Kino)'),
+          ('trap_electro', 'Trap: Electro zapper', ('electro',), 'An electric barrier across a '
+           'doorway (Kino)'),
+          ('trap_firewall', 'Trap: Firewall', ('firewall',), 'A wall of fire across a passage '
+           '(Ascension)'),
+          ('trap', 'Trap', (), 'A trap a trap switch turns on'))),
     Piece('trap_switch', 'Trap switch', 'Game prefabs/Defence', 'trap', require=('CTrapSwitch',),
           settings=(_cost('CTrapSwitch'), _power('CTrapSwitch'), _reach(260.0)),
           description='The switch players pay to run a trap'),
     Piece('player_spawn', 'Player spawn', 'Level markers/Spawns', 'spawn', ('spawn_player',),
           description='Where a player starts (up to four)'),
-    *(Piece(key, label, 'Level markers/Spawns', 'spawn', spawn_type=kind,
+    # One "Zombie spawn" marker in the palette; its Type picks the shipped spawn of that kind
+    # (each type is a piece of its own, resolved on the base level or another map).
+    *(Piece(key, 'Zombie spawn', 'Level markers/Spawns', 'spawn', spawn_type=kind,
             settings=(Setting('CSpawnPoint.m_StartActive', 'Active from the start', 'bool',
                               'On: used from the first round wherever players are. Off: used '
                               'once players reach its area', False),),
-            description=description)
-      for key, label, kind, description in (
-          ('zombie_window', 'Zombie spawn: window', 'WINDOWS',
-           'Zombies climb in through a window here'),
-          ('zombie_crawler', 'Zombie spawn: from above', 'hole',
-           'Zombies drop in from a hole here'),
-          ('dog_spawn', 'Dog spawn', 'LIGHTNING', 'Hellhounds appear here in dog rounds'))),
+            description=description, palette=key == SPAWN_TYPES[0][0])
+      for key, _label, kind, description in SPAWN_TYPES),
     Piece('jump_point', 'Jump point', 'Level markers/Jump points', 'jump',
           description='Where zombies jump across a gap'),
     Piece('sound_emitter', 'Sound emitter', 'Level markers/Sound', 'sound', model=False,
@@ -152,7 +176,9 @@ VARIANTS = {   # pieces with one design per distinct model in the game's levels
              'A door or debris players pay to open'),
     'barricade': ('Window barricade', 'Game prefabs/Barricades',
                   (Setting('CBarricade.m_StartBroken', 'Starts broken', 'bool',
-                           'On: the boards start torn down', False),),
+                           'On: the boards start torn down', False),
+                   Setting(BULLETS_FIELD, 'Stops bullets', 'bullets',
+                           'Shots hit the boards. Off: bullets pass between them', False)),
                   'Boards zombies tear down and players rebuild'),
 }
 # Wall buys: which weapon a chalk outline sells is not in its reflected fields (it is not the
@@ -359,8 +385,8 @@ def field_value(setting: Setting, value):
 def fields_for(setting: Setting, value) -> dict:
     """The Placement.fields a setting's value writes (none for the chalk, which the compiler
     reads from the settings)."""
-    if setting.kind == 'chalk':
-        return {}
+    if setting.kind in ('chalk', 'bullets'):
+        return {}   # read by the compiler from the settings
     if setting.kind == 'weapons' and not field_value(setting, value):
         return {}   # no pool chosen: the box keeps the game's
     return _fields_for(setting, value)

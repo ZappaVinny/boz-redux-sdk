@@ -1732,15 +1732,19 @@ def register():
     wm.boz_fit_location = FloatVectorProperty(name="Position", size=3, step=100,
                                               update=_fit_fields_changed,
                                               description="In the stock gun's model units")
-    wm.boz_fit_rotation = FloatVectorProperty(name="Rotation", size=3, subtype="EULER",
+    wm.boz_fit_rotation = FloatVectorProperty(name="Rotation",
+                                              description="Turn the model by this much to fit the hands",
+                                              size=3, subtype="EULER",
                                               update=_fit_fields_changed)
     wm.boz_fit_scale = FloatProperty(name="Scale", min=0.001, default=1.0, step=10,
                                      update=_fit_fields_changed,
                                      description="Model units per unit of your asset")
     wm.boz_weapon_bones = CollectionProperty(type=BOZ_WeaponBone)
-    wm.boz_copy_part = EnumProperty(name="Part", default="BOTH", items=[
+    wm.boz_copy_part = EnumProperty(name="Part",
+                                    description="What to copy: the weapon, the arms or both",
+                                    default="BOTH", items=[
         ("ARMS", "Arms", ""), ("GUN", "Gun", ""), ("BOTH", "Both", "")])
-    wm.boz_copy_source = EnumProperty(name="From", items=[
+    wm.boz_copy_source = EnumProperty(name="From", description="The weapon to copy it from", items=[
         ("ORIGINAL", "Original", "The game's own animation at this frame"),
         ("YOURS", "Yours", "What the view shows at this frame")])
     wm.boz_copy_from = IntProperty(name="From", min=0, description="First original frame to copy")
