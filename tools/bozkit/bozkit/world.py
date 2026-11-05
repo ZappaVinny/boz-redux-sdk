@@ -22,7 +22,6 @@ import dataclasses
 import json
 import re
 import shutil
-import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -394,59 +393,12 @@ def _empty_layout(base: str = 'kino') -> Layout:
     return Layout(base, [floor], _player_spawns())
 
 
-def start_area_spawns(pack, base: str = 'kino') -> list[tuple[int, int]]:
-    """(entity hash, spawn type hash) of the base level's starting-area zombie spawn points."""
-    from . import resources
-
-    statics = levels.read_group_at(pack, f'levels/{base}/{base}_statics')
-    by_class = {t.class_hash: t for t in statics.types()}
-    blob = resources.decode_reflected(by_class[levels.LEVEL].resources[0].body)
-    (area_hash,) = struct.unpack_from('<I', spec_fields.prop(blob, 'm_StartingArea').raw)
-    area = next((r for r in by_class[levels.AREA].resources if r.in_group_hash == area_hash), None)
-    if area is None:
-        raise WorldError(f'{base} has no starting area')
-    raw = spec_fields.prop(resources.decode_reflected(area.body), 'm_SpawnPoints').raw
-    hashes = struct.unpack_from(f'<{struct.unpack_from("<I", raw)[0]}I', raw, 4)
-    specs = {r.in_group_hash: r for r in by_class[levels.ENTITY_SPEC].resources}
-    out = []
-    for value in hashes:
-        spec = resources.decode_entity_spec(specs[value].body)
-        point = spec_fields.component(spec, 'CSpawnPoint').blob
-        out.append((value, struct.unpack_from('<I', spec_fields.prop(point, 'spawnType').raw)[0]))
-    return out
-
-
-def _arena_layout(pack, arena: levels.Arena | None = None, base: str = 'kino') -> Layout:
-    """The debug arena: a walled square with the base level's starting-area zombie spawns around
-    the walls (crawlers on top), Juggernog and the power switch."""
-    arena = arena or levels.Arena()
-    h, inset = arena.half_size, 120
-    vertices, uvs, triangles = _quads(_floor_quads(h, arena.cell)
-                                      + _wall_quads(h, arena.cell, arena.wall_height))
-    mesh = Mesh('arena', vertices, uvs, triangles, [_arena_texture()], 'floor', True)
-    ring = [(0, h - inset), (0, -h + inset), (h - inset, 0), (-h + inset, 0),
-            (h - inset, h - inset), (-h + inset, h - inset), (h - inset, -h + inset),
-            (-h + inset, -h + inset), (h // 2, h - inset), (-h // 2, -h + inset),
-            (h - inset, h // 2), (-h + inset, -h // 2)]
-    entities = _player_spawns()
-    for index, (value, spawn_type) in enumerate(start_area_spawns(pack, base)):
-        x, z = ring[index % len(ring)]
-        y = arena.wall_height if spawn_type == iw_hash('hole') else 0
-        entities.append(Placement(f'0x{value:08x}', (float(x), float(y), float(z))))
-    entities.append(Placement('Juggernog', (float(-h + 200), 0.0, -400.0), 90.0))
-    entities.append(Placement('powerSwitch', (float(h - 60), 0.0, 0.0), -90.0))
-    return Layout(base, [mesh], entities)
-
-
 def template_world(template: str, pack=None) -> 'World':
-    """The starting world of a map template: 'empty', 'debug' (needs the game's data) or one
-    of the game's levels, inherited whole (a fresh copy every time)."""
-    if template == 'empty':
+    """The starting world of a map template: 'new' (a floor, the player spawns and the Colt:
+    a new map on the compiled level core) or one of the game's levels to remix, inherited whole
+    (a fresh copy every time)."""
+    if template == 'new':
         return from_layout(_empty_layout())
-    if template == 'debug':
-        if pack is None:
-            raise WorldError('the debug arena needs the game data (build the asset library)')
-        return from_layout(_arena_layout(pack))
     if template in maps.SHIPPED:
         if pack is None:
             raise WorldError(f'the {template} template needs the game data (build the asset library)')
@@ -657,6 +609,10 @@ def object_json(item) -> dict:
         out['parts'] = [object_json(part) for part in item.parts]
         if item.library:
             out['library'] = item.library
+        if item.piece:
+            out['piece'] = item.piece   # a prefab of yours with a class of its own (debris)
+        if item.links:
+            out['links'] = item.links
     out.update(_place_json(item))
     return _common_json(item, out)
 
@@ -1007,7 +963,10 @@ def lower(world: World) -> Layout:
                 script=script_for(name, item, scripted_owner)))
         else:
             for part in item.parts:
-                emit(part, (position, rotation, scale), full + '.', scripted_owner or bool(item.script))
+                # Parts of a prefab scripts drive (its script, its class, Scripts can switch
+                # it) are switchable: own collision, a tagged walkable area.
+                driven = bool(item.script) or bool(item.piece) or bool(item.start.get('switchable'))
+                emit(part, (position, rotation, scale), full + '.', scripted_owner or driven)
 
     origin = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), UNIT)
     for item in world.objects():
@@ -1015,32 +974,54 @@ def lower(world: World) -> Layout:
     return layout
 
 
+OWN_CLASSES = {'debris': 'Debris'}   # prefabs of yours with a boz class of their own, by piece
+
+
 def describe(world: World) -> list[dict]:
-    """What the Lua runtime (boz.prefabs) needs: every scripted object and every volume, with
-    its parts, script module and property values."""
+    """What the Lua runtime (boz.get) needs for every object it can hand out: game prefabs,
+    your prefabs, volumes and scripted models, each with its class, settings (the panel's and
+    its script's), script module and, for your prefabs, parts."""
+    from . import toolkit
+
     out = []
 
-    def owner_entry(full: str, item, owner):
+    def entry_of(full: str, item, owner: str) -> dict:
         entry = {'name': full, 'kind': item.kind, 'script': _module(item.script),
-                 'properties': dict(item.properties), 'owner': owner or ''}
+                 'owner': owner or ''}
+        settings: dict = {}
         if isinstance(item, Volume):
+            entry['class'] = 'Volume'
             entry.update({'volume': item.kind_of, 'who': item.who, 'once': item.once,
                           'prompt': item.prompt, 'cost': item.cost})
-        if isinstance(item, Prefab) and not item.is_game:
+        elif isinstance(item, Prefab) and item.is_game:
+            entry['class'] = toolkit.class_of(item.piece) if item.piece else 'Prefab'
+            entry['game'] = True
+            settings = toolkit.native_settings(item.piece, item.settings) if item.piece else {}
+        elif isinstance(item, Prefab):
+            entry['class'] = OWN_CLASSES.get(item.piece, 'Prefab')
             entry['parts'] = [{'name': f'{full}.{part.name}', 'part': part.name, 'kind': part.kind}
                               for part in item.parts]
             # Every entity under it (nested prefabs flattened): what hide() and friends reach.
             entry['members'] = [name for name, member in walk(item.parts, full + '.')
                                 if not (isinstance(member, Prefab) and not member.is_game)]
+        else:
+            entry['class'] = 'Object'
+        settings.update({name: {'value': value} for name, value in item.properties.items()})
+        if settings:
+            entry['settings'] = settings
         return entry
 
     def visit(items, prefix: str, owner: str):
         for item in items:
             full = f'{prefix}{item.name}'
-            if item.script or isinstance(item, Volume):
-                out.append(owner_entry(full, item, owner))
-            if isinstance(item, Prefab):
-                visit(item.parts, full + '.', full if item.script else owner)
+            if isinstance(item, (Prefab, Volume)) or item.script:
+                name = item.source if getattr(item, 'piece', '') == 'player_spawn' else full
+                out.append(entry_of(name, item, owner))
+            if isinstance(item, Prefab) and not item.is_game:
+                # Its parts' events go to the nearest prefab with a script or a class of its
+                # own (debris), else to this one (map scripts listen on any prefab).
+                driven = bool(item.script) or bool(item.piece)
+                visit(item.parts, full + '.', full if driven else (owner or full))
 
     visit(world.objects(), '', '')
     return out

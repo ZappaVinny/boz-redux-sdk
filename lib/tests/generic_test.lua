@@ -1,6 +1,6 @@
 -- boz.reflect, boz.game_events and boz.entities against a fake game:
 -- lua5.4 lib/tests/generic_test.lua (from the SDK root).
-package.path = "lib/?.lua;" .. package.path
+package.path = "lib/?.lua;lib/?/init.lua;" .. package.path
 
 local memory, strings, hooks, calls = {}, {}, {}, {}
 local symbols = {["CIsComponentTableBase::Find"] = 0x10, ["CIsSubject::Dispatch"] = 0x20,
@@ -49,7 +49,7 @@ functions[0x10] = function(t, id) return (tables[t] or {})[id] or 0 end
 functions[0x70] = function(e) return e == 0x5000 and 0x7000 or 0 end
 functions[0x80] = function(t) for i = 0, 2 do memory[t + 0x5c + 4 * i] = memory[t + 0xa8 + 4 * i] end end
 memory[0x104] = 0xdb
-functions[0x40] = function(h) return h == require("boz.hash").name("MysteryBox_Lobby") and 0x5000 or 0 end
+functions[0x40] = function(h) return h == require("boz.engine.hash").name("MysteryBox_Lobby") and 0x5000 or 0 end
 memory[0x100] = 0x5a
 local spawned
 functions[0x50] = function(manager, h, at, rot, name, parent)
@@ -58,7 +58,7 @@ functions[0x50] = function(manager, h, at, rot, name, parent)
 end
 
 -- boz.reflect
-local reflect = require("boz.reflect")
+local reflect = require("boz.engine.reflect")
 check(reflect.class("CHealth") ~= nil, "CHealth is described")
 local f = reflect.fields("CHealth")
 check(f.m_Health and f.m_MaxHealth, "its fields")
@@ -91,8 +91,8 @@ check(#looks == 2 and looks[2] == 22, "a vector")
 check(#reflect.classes() > 300, "every class")
 
 -- boz.game_events
-local game_events = require("boz.game_events")
-local hash = require("boz.hash")
+local game_events = require("boz.engine.game_events")
+local hash = require("boz.engine.hash")
 check(game_events.id("zombie_death") == hash.name("SUBJECT_ZOMBIE_DEATH"), "the SUBJECT_ prefix is optional")
 check(game_events.name(hash.name("SUBJECT_TRANSFORM_UPDATED")) == "SUBJECT_TRANSFORM_UPDATED", "engine events are named")
 check(next(hooks) == nil, "no hook while nothing listens")
@@ -121,7 +121,7 @@ check(game_events.send(0xd00, "nuke_now") and calls[#calls][1] == 0x30 and calls
       "send")
 
 -- boz.entities
-local entities = require("boz.entities")
+local entities = require("boz.engine.entities")
 check(entities.find("MysteryBox_Lobby") == 0x5000 and entities.find("nothing") == nil, "find by name")
 memory[0x7000 + 0xa8], memory[0x7000 + 0xac], memory[0x7000 + 0xb0] = 10, 20, 30
 check(entities.position(0x5000).y == 20, "position")

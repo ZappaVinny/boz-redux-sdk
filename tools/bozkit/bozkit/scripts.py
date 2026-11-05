@@ -1,15 +1,20 @@
-"""Prefab and model scripts: the properties they declare, and new scripts from a template.
+"""Object scripts: the settings they declare, and new scripts from a template.
 
-A script is a Lua file in the project's ``scripts/`` folder, usually ``scripts/prefabs/<Name>.lua``.
-It declares the properties the editor shows for each object using it, one per line::
+A script is a Lua file in the project's ``scripts/`` folder, usually ``scripts/prefabs/<Name>.lua``,
+that returns a class (``local Skull = boz.Prefab:extend("Skull") ... return Skull``). It declares
+settings the editor shows next to the object's own, one per line::
 
-    ---@property delay number 2 "Seconds before the wall opens"
-    ---@property opens prefab "" "The prefab this one opens"
+    ---@setting points int 100 "Points for shooting it"
+    ---@setting opens object "" "The prefab this one opens"
 
-``<name> <type> <default> "<description>"``. Types: number, integer, bool, string, event,
-prefab, part, weapon, sound. Defaults are Lua-style literals (``2``, ``true``, ``"text"``); the
-description is optional. The editor reads these lines without running Lua; at runtime the values
-are ``self.properties.<name>`` (boz.prefabs).
+``<name> <kind> <default> "<label>"``. Kinds: int, float, bool, seconds, text, weapon, sound,
+object, event. At runtime the values are ``self.settings.<name>``.
+
+Links to other objects show in the object's Links box (bozkit.links.OBJECT_KINDS)::
+
+    ---@link targets trap many "Traps it runs"
+
+``<name> <object kind> one|many "<label>"``; at runtime ``self:links("targets")``.
 """
 from __future__ import annotations
 
@@ -17,8 +22,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-TYPES = ('number', 'integer', 'bool', 'string', 'event', 'prefab', 'part', 'weapon', 'sound')
-_LINE = re.compile(r'^\s*---@property\s+([A-Za-z_][A-Za-z0-9_]*)\s+([a-z]+)\s*(.*)$')
+TYPES = ('int', 'float', 'bool', 'seconds', 'text', 'weapon', 'sound', 'object', 'event')
+_LINE = re.compile(r'^\s*---@setting\s+([A-Za-z_][A-Za-z0-9_]*)\s+([a-z]+)\s*(.*)$')
 _TOKEN = re.compile(r'"((?:[^"\\]|\\.)*)"|(\S+)')
 NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{0,47}$')
 
@@ -37,9 +42,9 @@ class Property:
 
 def coerce(value, type_name: str):
     """A property value as Python stores it for *type_name*."""
-    if type_name == 'number':
+    if type_name in ('float', 'seconds'):
         return float(value)
-    if type_name == 'integer':
+    if type_name == 'int':
         return int(float(value))
     if type_name == 'bool':
         if isinstance(value, str):
@@ -50,7 +55,8 @@ def coerce(value, type_name: str):
 
 def _default(text: str | None, type_name: str):
     if text is None:
-        return coerce({'number': 0, 'integer': 0, 'bool': False}.get(type_name, ''), type_name)
+        return coerce({'float': 0, 'seconds': 0, 'int': 0, 'bool': False}.get(type_name, ''),
+                      type_name)
     try:
         return coerce(text, type_name)
     except ValueError as exc:
@@ -58,18 +64,21 @@ def _default(text: str | None, type_name: str):
 
 
 def parse_properties(text: str) -> list[Property]:
-    """The properties a script declares (``---@property`` lines), in order."""
+    """The settings a script declares (``---@setting`` lines), in order."""
     out, seen = [], set()
     for number, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith('---@property'):
+            raise ScriptError(f'line {number}: ---@property is now ---@setting (kinds: '
+                              f'{", ".join(TYPES)})')
         match = _LINE.match(line)
         if not match:
             continue
         name, type_name, rest = match.groups()
         if type_name not in TYPES:
-            raise ScriptError(f'line {number}: {type_name!r} is not a property type '
+            raise ScriptError(f'line {number}: {type_name!r} is not a setting kind '
                               f'({", ".join(TYPES)})')
         if name in seen:
-            raise ScriptError(f'line {number}: property {name!r} is declared twice')
+            raise ScriptError(f'line {number}: setting {name!r} is declared twice')
         seen.add(name)
         tokens = [(quoted, plain) for quoted, plain in _TOKEN.findall(rest)]
         default_text = description = None
@@ -80,6 +89,39 @@ def parse_properties(text: str) -> list[Property]:
             description = ' '.join(q or p for q, p in tokens[1:])
         out.append(Property(name, type_name, _default(default_text, type_name), description or ''))
     return out
+
+
+_LINK_LINE = re.compile(r'^\s*---@link\s+([A-Za-z_][A-Za-z0-9_]*)\s+([a-z_]+)\s+(one|many)\s*(.*)$')
+
+
+def parse_links(text: str) -> list:
+    """The links a script declares (``---@link`` lines), as bozkit.links kinds."""
+    from . import links
+
+    out, seen = [], set()
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.lstrip().startswith('---@link'):
+            continue
+        match = _LINK_LINE.match(line)
+        if not match:
+            raise ScriptError(f'line {number}: write ---@link <name> <kind> one|many "<label>"')
+        name, kind, count, rest = match.groups()
+        if kind not in links.OBJECT_KINDS:
+            raise ScriptError(f'line {number}: {kind!r} is not an object kind '
+                              f'({", ".join(links.OBJECT_KINDS)})')
+        if name in seen or name in links.BY_NAME:
+            raise ScriptError(f'line {number}: link {name!r} is declared twice or is built in')
+        seen.add(name)
+        label = ' '.join(q or p for q, p in _TOKEN.findall(rest))
+        out.append(links.script_kind(name, kind, count == 'many', label))
+    return out
+
+
+def read_links(path: str | Path) -> list:
+    try:
+        return parse_links(Path(path).read_text(encoding='utf-8'))
+    except OSError as exc:
+        raise ScriptError(f'cannot read {path}: {exc}') from exc
 
 
 def read_properties(path: str | Path) -> list[Property]:
@@ -101,36 +143,27 @@ def values(properties: list[Property], given: dict) -> dict:
     return out
 
 
-TEMPLATE = '''-- {name}: a script. It runs for every object it is attached to, and self is that object.
--- Properties declared below show in the editor for each object; their values are
--- self.properties.<name>.
---
----@property message string "{name} was used" "What to print when it is used"
+TEMPLATE = '''-- {name}: attached to an object; returns its class. self is that object.
+local {name} = boz.Prefab:extend("{name}")
+
+---@setting message text "{name} was used" "What to print when it is used"
 
 -- The level started.
-function start()
+function {name}:start()
 end
 
--- Only volumes send these (Trigger: on_enter / on_exit, Hit: on_hit, Use: on_use); volume is
--- the volume's name in the prefab. With one volume of a kind, there is no need to check it.
-function on_enter(volume, who)       -- who.player, who.zombie
+-- Its volumes: on_enter / on_exit (Trigger), on_hit (Hit), on_use (Use, its cost already paid).
+-- volume is the volume's name in the prefab.
+function {name}:on_use(player, volume)
+    print(self.settings.message)
 end
 
-function on_exit(volume, who)
+-- boz.send(name, data) from any script, and game events (round_started, power_on, ...).
+-- Fields you set on self (self.count = 3) are kept in saves.
+function {name}:on_event(name, data)
 end
 
-function on_hit(volume, info)
-end
-
-function on_use(volume, who)         -- the player pressed use (its cost already paid)
-    print(self.properties.message)
-end
-
--- boz.send(name, data) from any script, and game events: round_started, power_on,
--- perk_bought, door_opened, zombie_killed, player_downed, player_revived.
--- Global variables (not local) are saved with the game.
-function on_event(name, data)
-end
+return {name}
 '''
 
 

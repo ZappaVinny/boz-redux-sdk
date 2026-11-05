@@ -11,7 +11,7 @@ from bpy.props import StringProperty, EnumProperty
 from bpy.types import Operator
 
 from . import convert
-from ._bozkit import blender_scene, hashing, links, toolkit
+from ._bozkit import blender_scene, hashing, links, scripts, toolkit
 
 SET_KEY = "boz_link_set"     # the links the user set: JSON {kind: [world names]}
 NAME_KEY = "boz_link_name"   # the world name links knew the object by (to follow renames)
@@ -28,13 +28,21 @@ def world_name(obj) -> str:
 
 
 def is_linkable(obj) -> bool:
-    return obj is not None and obj.boz.role == "prefab" and bool(obj.boz.source) \
-        and not obj.boz.original
+    """It can have links: a prefab, the game's or yours."""
+    return obj is not None and obj.boz.role == "prefab" and not obj.boz.original
+
+
+def is_target(obj) -> bool:
+    """It can be linked to: any object of the map (a prefab, model or volume)."""
+    return obj is not None and obj.boz.role in ("prefab", "model", "volume") \
+        and not obj.boz.original and not convert.is_helper(obj)
 
 
 def components(obj, base: str) -> list:
-    """The component names of a game prefab's entity (cached)."""
+    """The component names of a game prefab's entity (cached); [] for your own objects."""
     from . import game
+    if not obj.boz.source or obj.boz.role != "prefab":
+        return []
     key = (base, obj.boz.source, obj.boz.group)
     if key not in _components:
         if game.game_models() is None:
@@ -46,8 +54,44 @@ def components(obj, base: str) -> list:
     return _components[key]
 
 
+def object_kinds(obj, base: str) -> set:
+    """What the object is, by the palette's names (bozkit.links.OBJECT_KINDS)."""
+    if obj.boz.role == "prefab" and obj.boz.source:
+        return links.kinds_of(components(obj, base), obj.get("boz_piece", ""))
+    return links.kinds_of(role=obj.boz.role, piece=str(obj.get("boz_piece", "")))
+
+
+_declared: dict = {}   # script path -> (mtime, its ---@link kinds)
+
+
+def declared_links(obj) -> list:
+    """The links its script declares (---@link), [] without one or when it cannot be read."""
+    from . import link
+    project = link.current_project()
+    if not obj.boz.script or project is None:
+        return []
+    path = project.scripts / obj.boz.script
+    try:
+        stamp = path.stat().st_mtime
+    except OSError:
+        return []
+    cached = _declared.get(str(path))
+    if cached is None or cached[0] != stamp:
+        try:
+            cached = (stamp, scripts.read_links(path))
+        except scripts.ScriptError:
+            cached = (stamp, [])
+        _declared[str(path)] = cached
+    return cached[1]
+
+
 def kinds(obj, base: str) -> list:
-    return links.kinds_for(components(obj, base)) if is_linkable(obj) else []
+    """Its link kinds: the built-in ones for what it is, then its script's."""
+    return links.kinds_for(object_kinds(obj, base), declared_links(obj)) if is_linkable(obj) else []
+
+
+def kind_named(obj, base: str, name: str):
+    return next((kind for kind in kinds(obj, base) if kind.name == name), None)
 
 
 def set_links(obj) -> dict:
@@ -69,13 +113,13 @@ def write(obj, values: dict) -> None:
 def candidates(scene, kind) -> list:
     """The scene's objects a link of *kind* may point at, by world name."""
     base = scene.boz.base
-    return sorted((obj for obj in scene.objects if is_linkable(obj)
-                   and links.can_target(kind, components(obj, base), obj.get("boz_piece", ""))),
+    return sorted((obj for obj in scene.objects if is_target(obj)
+                   and links.can_target(kind, object_kinds(obj, base), obj.get("boz_piece", ""))),
                   key=world_name)
 
 
 def by_world_name(scene) -> dict:
-    return {world_name(obj).lower(): obj for obj in scene.objects if is_linkable(obj)}
+    return {world_name(obj).lower(): obj for obj in scene.objects if is_target(obj)}
 
 
 def follow_renames(scene) -> int:
@@ -83,7 +127,7 @@ def follow_renames(scene) -> int:
     Returns how many objects were renamed."""
     renames = {}
     for obj in scene.objects:
-        if not is_linkable(obj):
+        if not is_target(obj):
             continue
         old, new = obj.get(NAME_KEY), world_name(obj)
         if old != new:
@@ -117,13 +161,15 @@ def check(scene) -> tuple[list, list]:
         own = world_name(obj)
         values = set_links(obj)
         for kind_name, targets in values.items():
-            kind = links.BY_NAME[kind_name]
+            kind = kind_named(obj, base, kind_name)
+            if kind is None:
+                continue   # its script no longer declares it: ignored by the build too
             for target in targets:
                 other = found.get(target.lower())
                 if other is None:
                     problems.append((f"{own}: its {kind.label} link names {target}, which is not "
                                      "in the map", obj.name))
-                elif not links.can_target(kind, components(other, base), other.get("boz_piece", "")):
+                elif not links.can_target(kind, object_kinds(other, base), other.get("boz_piece", "")):
                     problems.append((f"{own}: its {kind.label} link names {target}, which cannot "
                                      "be one", obj.name))
                 elif kind_name == "spawns" and (other.matrix_world.translation
@@ -187,7 +233,7 @@ def default_lines(scene) -> list:
 
 def _changed(context, obj, kind_name, change) -> None:
     values = set_links(obj)
-    kind = links.BY_NAME[kind_name]
+    kind = kind_named(obj, context.scene.boz.base, kind_name)
     current = list(values.get(kind_name, []))
     current = change(current)
     values[kind_name] = current if kind.many else current[-1:]
@@ -206,8 +252,8 @@ _items: list = []   # Blender needs dynamic enum strings kept alive while the me
 
 def _target_items(self, context):
     global _items
-    kind = links.BY_NAME.get(self.kind)
     obj = context.object
+    kind = kind_named(obj, context.scene.boz.base, self.kind) if obj else None
     names = [world_name(other) for other in candidates(context.scene, kind)
              if other is not obj] if kind else []
     _items = [(name, name, "") for name in names] or [("", "(nothing in the map can be linked)", "")]
@@ -247,11 +293,11 @@ class BOZ_OT_prefab_link_selected(Operator):
 
     def execute(self, context):
         obj = context.object
-        kind = links.BY_NAME[self.kind]
         base = context.scene.boz.base
+        kind = kind_named(obj, base, self.kind)
         picked = [world_name(other) for other in context.selected_objects
-                  if other is not obj and is_linkable(other)
-                  and links.can_target(kind, components(other, base), other.get("boz_piece", ""))]
+                  if other is not obj and is_target(other)
+                  and links.can_target(kind, object_kinds(other, base), other.get("boz_piece", ""))]
         if not picked:
             self.report({"ERROR"}, f"Select what to link ({kind.label.lower()}), then "
                                    f"{world_name(obj)} last")

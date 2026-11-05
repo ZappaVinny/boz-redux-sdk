@@ -101,20 +101,20 @@ class SdkHomeTests(unittest.TestCase):
     def test_script_and_map_projects(self) -> None:
         script = project.create_project(self.root / 's', 'my_mod', 'My Mod', 'Me', template='round')
         self.assertEqual(script.kind, 'script')
-        self.assertIn('CWaveManager::StartWave',
+        self.assertIn('boz.on("round_started"',
                       (script.scripts / 'main.lua').read_text(encoding='utf-8'))
-        self.assertTrue((script.scripts / 'boz' / 'player.lua').is_file())
+        self.assertTrue((script.scripts / 'boz' / 'init.lua').is_file())
         self.assertTrue((script.scripts / '.luarc.json').is_file())
         self.assertFalse(script.include_standard_library)  # it carries its own copy
         built, _ = project.build_project(script)
-        self.assertTrue((built / 'scripts' / 'boz' / 'player.lua').is_file())
+        self.assertTrue((built / 'scripts' / 'boz' / 'init.lua').is_file())
         level = project.create_project(self.root / 'm', 'my-map', 'My Map', 'Me', kind='map',
-                                       template='empty')
+                                       template='new')
         self.assertEqual((level.kind, level.map_name, level.map_template),
-                         ('map', 'my_map', 'empty'))
+                         ('map', 'my_map', 'new'))
         self.assertTrue((level.root / 'source' / 'world.json').is_file())
         self.assertTrue(project.validate_project(level).ok)
-        with self.assertRaises(project.ProjectError):  # the debug arena needs the game's data
+        with self.assertRaises(project.ProjectError):  # Empty and Debug are gone: New map
             project.create_project(self.root / 'd', 'debug_map', 'D', 'Me', kind='map',
                                    template='debug')
         with self.assertRaises(project.ProjectError):  # a shipped level's name

@@ -57,7 +57,7 @@ def build_and_compile(label):
         built = sdk_project.load_project(project)
         output, _report = sdk_project.build_project(built, game=suite.palette.library.LibraryPack())
         data = (output / "scripts" / "boz" / "world_data.lua").read_text(encoding='utf-8')
-        check((output / "scripts" / "boz" / "prefabs.lua").is_file(),
+        check((output / "scripts" / "boz" / "objects" / "runtime.lua").is_file(),
               f"{label}: the map runtime is installed")
         return saved, data
     return saved, ""
@@ -741,7 +741,7 @@ def game_build_checks(label, data):
           f"{label}: boz.game gets the rules")
     check('"round_started"' in data, f"{label}: the hook is started")
     scripts = output.parent / "scripts"
-    check((scripts / "boz" / "game.lua").is_file() and (scripts / "boz" / "hooks.lua").is_file()
+    check((scripts / "boz" / "engine" / "game.lua").is_file() and (scripts / "boz" / "engine" / "hooks.lua").is_file()
           and (scripts / "hooks" / "round_started.lua").is_file(), f"{label}: boz.game, boz.hooks and the hook ship")
 
 
@@ -765,7 +765,7 @@ def effect_build_checks(label, used, data):
     check(used.spawn_hash in held, f"{label}: the map's own copy without the model and physics is built")
     check('name = "gersch"' in data and str(used.spawn_hash) in data, f"{label}: boz.effects knows it")
     scripts = output.parent / "scripts" / "boz"
-    check((scripts / "effects.lua").is_file(), f"{label}: boz.effects is installed")
+    check((scripts / "game" / "effects.lua").is_file(), f"{label}: boz.effects is installed")
 
 
 def sound_build_checks(label, target):
@@ -831,15 +831,17 @@ def prefab_checks(anchor):
     check(wall.name == "Vault › Door", f"a new part name renames its object ({wall.name})")
     wall.boz.blocks = True
     wall.boz.block_margin = 55.0
-    # A script with properties (made as New script would).
+    # A script with settings (made as New script would).
     relative = objects_ui.scripts.new_script(project / "scripts", "Vault")
     (project / "scripts" / relative).write_text(
-        '---@property delay number 2 "Seconds"\n---@property armed bool true\n'
-        'function on_hit(volume, info)\n    self:part("Door"):hide()\nend\n', encoding='utf-8')
+        'local Vault = boz.Prefab:extend("Vault")\n'
+        '---@setting delay seconds 2 "Seconds"\n---@setting armed bool true\n'
+        'function Vault:on_hit(player, volume)\n    self:part("Door"):hide()\nend\n'
+        'return Vault\n', encoding='utf-8')
     prefab.boz.script = relative
     objects_ui.sync_properties(prefab)
     check(prefab.get("boz_p:delay") == 2.0 and prefab.get("boz_p:armed") is True,
-          "the script's properties show with their defaults")
+          "the script's settings show with their defaults")
     prefab["boz_p:delay"] = 5.0
     # Scripts are edited in the Scripts tab; saving the map writes them to their files.
     text = objects_ui.show_script(bpy.context, project / "scripts" / relative)
@@ -1062,6 +1064,11 @@ if LIBRARY:
     stand_in["boz_asset_kind"] = "window"
     stand_in.location = (0.0, 900.0, 0.0)
     scene.collection.objects.link(stand_in)
+    for number in range(2):
+        stand_in = bpy.data.objects.new("Debris", None)
+        stand_in["boz_asset_kind"] = "debris"
+        stand_in.location = (600.0 + 400.0 * number, 900.0, 0.0)
+        scene.collection.objects.link(stand_in)
     palette.realize()
     check(not any("boz_asset_kind" in o for o in scene.objects), "stand-ins are gone")
     dropped = [o for o in scene.objects if o.name.startswith("dropped")]
@@ -1160,6 +1167,28 @@ if LIBRARY:
     bpy.ops.boz.spawn_type(kind="zombie_window")
     check(pieces["trap_electro"].boz.source and pieces["trap_electro"].boz.source != pieces["trap"].boz.source,
           "the Electro zapper is a trap piece of its own")
+    # Debris: doors of yours; one opens with the other (Opens with), saved with its kind.
+    debris = sorted((o for o in scene.objects if o.get("boz_piece") == "debris"), key=lambda o: o.name)
+    check(len(debris) == 2 and all(len(d.children) == 2 for d in debris),
+          f"Debris is a prefab of yours: a model and a Use volume ({[d.name for d in debris]})")
+    debris_kinds = [k.name for k in suite.prefab_links.kinds(debris[0], scene.boz.base)]
+    check(debris_kinds == ["siblings"], f"debris opens with other doors ({debris_kinds})")
+    other = suite.prefab_links.world_name(debris[1])
+    suite.prefab_links.write(debris[0], {"siblings": [other]})
+    bad, _warn = suite.prefab_links.check(scene)
+    check(not any(debris[0].name in n for _m, n in bad), f"a debris may open with another ({bad})")
+    saved_debris = [p for p in link.scene_to_world(scene, []).prefabs if p.piece == "debris"]
+    check(len(saved_debris) == 2 and saved_debris[0].links == {"siblings": [other]},
+          f"saved with its kind and links ({[(d.name, d.links) for d in saved_debris]})")
+    # A script's own links (---@link) show in its object's Links box.
+    script_path = project / "scripts" / "prefabs" / "Runner.lua"
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text('local Runner = boz.Prefab:extend("Runner")\n'
+                           '---@link exits volume many "Exits"\nreturn Runner\n', encoding="utf-8")
+    debris[1].boz.script = "prefabs/Runner.lua"
+    names = [k.name for k in suite.prefab_links.kinds(debris[1], scene.boz.base)]
+    check(names == ["siblings", "exits"], f"script links join the built-in ones ({names})")
+    debris[1].boz.script = ""
     # Check: a link to a missing object stops the build.
     write = suite.prefab_links.write
     write(switch, {"traps": ["Nothing_Here"]})

@@ -118,13 +118,30 @@ def decoded(resource):
 
 class SetLinkTests(unittest.TestCase):
     def test_table(self):
-        kinds = [kind.name for kind in links.kinds_for(['CIsTransform', 'CTrapSwitch'])]
-        self.assertEqual(kinds, ['power', 'traps'])
-        self.assertEqual([k.name for k in links.kinds_for(['CBarricade'])], ['spawns'])
-        self.assertTrue(links.can_target(links.BY_NAME['traps'], ['CTrap']))
-        self.assertFalse(links.can_target(links.BY_NAME['spawns'], ['CSpawnPoint'], 'zombie_ground'))
-        self.assertEqual(links.clean({'power': ['A', 'B'], 'traps': 'T', 'nope': ['x']}),
-                         {'power': ['A'], 'traps': ['T']})
+        switch = links.kinds_of(['CIsTransform', 'CTrapSwitch'])
+        self.assertEqual({'trap_switch', 'powered', 'any'}, switch)   # a switch is not a trap
+        self.assertEqual([kind.name for kind in links.kinds_for(switch)], ['power', 'traps'])
+        self.assertEqual([k.name for k in links.kinds_for(links.kinds_of(['CBarricade']))], ['spawns'])
+        self.assertTrue(links.can_target(links.BY_NAME['traps'], links.kinds_of(['CTrap'])))
+        self.assertFalse(links.can_target(links.BY_NAME['spawns'], links.kinds_of(['CSpawnPoint']),
+                                          'zombie_ground'))
+        # Your own objects by their editor role; debris is a door.
+        self.assertIn('door', links.kinds_of(role='prefab', piece='debris'))
+        self.assertTrue(links.can_target(links.BY_NAME['siblings'],
+                                         links.kinds_of(role='prefab', piece='debris')))
+        # Links scripts declare, by object kind.
+        from bozkit import scripts
+        (declared,) = scripts.parse_links('---@link exits volume many "Exits"')
+        self.assertEqual([k.name for k in links.kinds_for({'prefab', 'any'}, [declared])], ['exits'])
+        self.assertTrue(links.can_target(declared, links.kinds_of(role='volume')))
+        self.assertFalse(links.can_target(declared, links.kinds_of(role='model')))
+        with self.assertRaises(scripts.ScriptError):
+            scripts.parse_links('---@link exits CTrap many')
+        # Unknown names may be a script's own links: kept until its script's links are known.
+        self.assertEqual(links.clean({'power': ['A', 'B'], 'traps': 'T', 'mine': ['x']}),
+                         {'power': ['A'], 'traps': ['T'], 'mine': ['x']})
+        self.assertEqual(links.clean({'power': ['A'], 'nope': ['x'], 'exits': 'E'}, [declared]),
+                         {'power': ['A'], 'exits': ['E']})
         self.assertEqual(links.renamed({'traps': ['A', 'B']}, 'A', 'C'), {'traps': ['C', 'B']})
 
     def test_world_json_round_trip(self):

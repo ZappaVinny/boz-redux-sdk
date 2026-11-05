@@ -18,11 +18,12 @@ submodule (boz-redux-gamedef: symbols, reflection, events, console).
   in `tools/bozkit/tests` use synthetic data only. Project guide: `docs/lua-mods.md`; formats:
   `docs/how-the-game-works.md`. `bozkit.desktop` is the optional PySide6 frontend (its look: `bozkit/desktop_style.py`, brand files as package data in `bozkit/branding/`) and must call the same
   compiler rather than maintaining its own serializers.
-- `lib/boz/`: the **standard lib** (`boz.*`), the Lua abstraction layer mods use (player, fly,
-  rounds, console, pause_settings, text, iwui, frontend, and helpers). Feature generics go here;
-  mods only use them. Every public function has a `---` comment: `python3 tools/stdlib/generate_doc.py`
-  regenerates `docs/standard-library.md` from them. Mods carry a copy as `scripts/boz` (plain files, so
-  GitHub zips and Windows checkouts work); after changing `lib/boz`, copy it into the mod again.
+- `lib/boz/`: the **standard lib**, object-oriented: `require("boz")` (`init.lua`) is the surface
+  (`boz.get`, classes `boz.Door`/`boz.Perk`/... in `objects/`, `boz.Player`/`boz.Zombie` in
+  `game/`, `boz.audio`/`boz.hud`/... in `systems/`); `engine/` is the low-level layer. Scripts
+  attached to objects return a class. Comments are short (one line per function, no essays); the
+  docs are written by hand (no generated standard-library page). Builds ship the SDK's copy; the
+  Developer mod keeps one (`python3 tools/stdlib/sync.py`).
 - `mods/developer`: the reference mod (console overlay, cheats, noclip). Linked into the client's
   `mods/` for testing.
 - `docs/`: a few large pages, one per big subject (each file's `#` title is a main section of

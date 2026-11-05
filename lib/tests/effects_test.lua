@@ -1,13 +1,13 @@
 -- boz.effects against a fake game: lua5.4 lib/tests/effects_test.lua (from the SDK root).
-package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+package.path = "lib/?.lua;lib/?/init.lua;lib/tests/?.lua;" .. package.path
 local fake = require("fake_game").install({strict = true, signed = true})
 local memory, symbols, functions, hooks, calls, frames = fake.memory, fake.symbols, fake.functions, fake.hooks,
     fake.calls, fake.frames
 local address, run_hook, frame, check, called = fake.address, fake.run_hook, fake.frame, fake.check, fake.called
 
-local hash = require("boz.hash")
+local hash = require("boz.engine.hash")
 local MANAGER, PLAYER, GERSCH = 0xa000, 0x77, 0x8eae245e
-package.loaded["boz.weapons"] = {manager = function() return MANAGER end}
+package.loaded["boz.engine.weapons"] = {manager = function() return MANAGER end}
 memory[address("CSpawnManager::s_instance")] = 0x5000
 memory[address("CIsEntityDB::s_instance")] = 0x5100
 memory[address("CIwSoundManager::s_instance")] = 0x5200
@@ -80,7 +80,7 @@ functions["CIsRenderableModel::SetVisible"] = function() end
 local real_frame = frame
 frame = function(dt) game_sets_up(); real_frame(dt) end
 
-local effects = require("boz.effects")
+local effects = require("boz.game.effects")
 
 -- A one-off effect by the game's name, removed after its lifetime.
 local spark = effects.spawn("impactRayGun", {x = 1, y = 2, z = 3}, {lifetime = 0.5})
@@ -140,8 +140,8 @@ local aim, zombie = effects.aim()
 check(aim.x == 100.0 and aim.z == -40.0 and zombie, "the crosshair point")
 -- zombies.credit_kills: damage a zombie deals itself handling the event is the player's.
 do
-    local h = require("boz.hash")
-    require("boz.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")
+    local h = require("boz.engine.hash")
+    require("boz.game.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")
     memory[0x7100 + 0xd4] = 0x7000          -- the zombie controller's CHealth
     functions["CIsEntityDB::GetEntity"] = function(e) return e == PLAYER and 0x6300 or 0 end
     functions["Entity_GetNameHash"] = function(r) return r == 0x6300 and 0xabc or 0 end

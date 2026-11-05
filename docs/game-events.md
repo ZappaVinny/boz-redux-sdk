@@ -16,7 +16,7 @@ end)
 
 The handler gets `{name, id, subject, sender, a, b}`; `a` and `b` mean what the notes say
 (pointers to the game's structs where noted). Returning true from a handler stops the event.
-Most mods never need this: the [standard library](standard-library.md) already turns the common
+Most mods never need this: the [standard library](lua-mods.md) already turns the common
 events into functions such as `boz.rounds.on_start`.
 
 ## All events

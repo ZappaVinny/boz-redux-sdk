@@ -256,10 +256,8 @@ class NewProjectDialog(QDialog):
     def fill_templates(self, *_args) -> None:
         self.templates.clear()
         if self.kind == 'map':
-            entries = [('empty', 'Empty', 'A 6 m floor and the player spawns; the Colt is '
-                        'the only weapon', True),
-                       ('debug', 'Debug arena', 'A walled arena with zombie spawns, Juggernog '
-                        'and power: the quickest way to test', bool(self.maps))]
+            entries = [('new', 'New map', 'A floor, the four player spawns and the Colt: build '
+                        'your map from here', True)]
             for key, label in maps.LABELS.items():
                 entries.append((key, label, 'The whole original map to change and add to '
                                 '(a fresh copy)', key in self.maps))
@@ -968,7 +966,6 @@ class LearnPage(QWidget):
                    ('Lua mods', docs / 'lua-mods.md'),
                    ('The map editor', docs / 'map-editor.md'),
                    ('Weapons, models, effects and sounds', docs / 'weapons-and-assets.md'),
-                   ('Standard library (boz.*)', docs / 'standard-library.md'),
                    ('Console commands and variables', docs / 'console-reference.md')]
         for row, (label, path) in enumerate(entries):
             grid.addWidget(QLabel(label), row, 0)

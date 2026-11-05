@@ -8,6 +8,8 @@ the creator's values over the entity's own (bozkit.world Placement.fields).
 """
 from __future__ import annotations
 
+import re
+
 import struct
 from dataclasses import dataclass, field
 
@@ -200,6 +202,59 @@ def variant_piece(key: str, label: str = '') -> Piece:
     title, catalog, settings, description = VARIANTS[category]
     return Piece(key, label or title, catalog, category, settings=settings,
                  description=description)
+
+
+def lua_name(setting: Setting) -> str:
+    """A setting's name in scripts (self.settings.<name>): its label in lower case, words
+    joined by _, without units ('Use distance (cm)' -> use_distance)."""
+    text = re.sub(r'\(.*?\)', '', setting.label).strip().lower()
+    return re.sub(r'[^a-z0-9]+', '_', text).strip('_')
+
+
+# The boz class of a game prefab (lib/boz/objects/native.lua), by what it is.
+_CATEGORY_CLASSES = {'perk': 'Perk', 'door': 'Door', 'mystery_box': 'MysteryBox',
+                     'pack_a_punch': 'PackAPunch', 'power': 'PowerSwitch', 'wall_buy': 'WallBuy',
+                     'barricade': 'Barricade'}
+
+
+def class_of(key: str) -> str:
+    """The boz class of a placed piece ('Prefab' when it has no class of its own)."""
+    if key in SPAWN_KEYS:
+        return 'ZombieSpawn'
+    try:
+        found = piece(key)
+    except KeyError:
+        return 'Prefab'
+    if found.category == 'trap':
+        return 'TrapSwitch' if 'CTrapSwitch' in found.require else 'Trap'
+    return _CATEGORY_CLASSES.get(found.category, 'Prefab')
+
+
+def class_of_components(names) -> str:
+    """The boz class of an entity by its component names (shipped entities without a piece)."""
+    present = set(names)
+    if 'CSpawnPoint' in present:
+        return 'ZombieSpawn'
+    if 'CTrapSwitch' in present:
+        return 'TrapSwitch'
+    if 'CTrap' in present:
+        return 'Trap'
+    return _CATEGORY_CLASSES.get(scene.category_of(list(present)), 'Prefab')
+
+
+def native_settings(key: str, values: dict) -> dict:
+    """A placed piece's settings for scripts: {lua name: {value, kind, field}} (field: the
+    game field it is, for settings scripts can change while the game runs)."""
+    try:
+        found = piece(key)
+    except KeyError:
+        return {}
+    out = {}
+    for setting in found.settings:
+        field = setting.key if re.fullmatch(r'C\w+\.\w+', setting.key) else None
+        value = values.get(setting.key, setting.default)
+        out[lua_name(setting)] = {'value': value, 'kind': setting.kind, 'field': field}
+    return out
 
 
 def piece(key: str) -> Piece:

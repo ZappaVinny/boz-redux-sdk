@@ -11,7 +11,7 @@ import struct
 from . import group, levels, maps, spec_fields
 from .hashing import iw_hash
 from .world import (BLOCK_MARGIN, CHALK_FIELD, COLLISION_PARTS, HIT_SOURCE, INGAME, Instance,
-                    Layout, Mesh, Model, PLAYER_RADIUS, Placement, TRIGGER_SIZE, TRIGGER_SOURCE, Texture, UNIT,
+                    Layout, Mesh, Model, PLAYER_RADIUS, Placement, Prefab, TRIGGER_SIZE, TRIGGER_SOURCE, Texture, UNIT,
                     USE_SOURCE, WEAPON_FIELD, World, WorldError, describe, lower, object_names,
                     script_of, validate, validate_layout, walk)
 
@@ -29,8 +29,28 @@ def compile_world(pack, name: str, world: World,
         raise WorldError('; '.join(problems))
     layout = lower(world)
     layout.weapons = list(weapons)
+    # Prefabs of yours that links may name: debris counts as a door for "Opens with".
+    from . import links as links_module
+    own = {full.lower(): (full, item) for full, item in walk(world.objects())
+           if isinstance(item, Prefab) and not item.is_game}
+    layout.own_objects = {key: links_module.kinds_of(role='prefab', piece=item.piece)
+                          for key, (_full, item) in own.items()}
     files = _compile_layout(pack, name, layout, fixed)
     files.runtime['objects'] = describe(world)
+    # Your prefabs' links (only scripts and the runtime read them): every target must exist.
+    known = {n.lower() for n in object_names(world)}
+    for key, (full, item) in own.items():
+        for kind_name, targets in links_module.clean(item.links).items():
+            missing = [t for t in targets if t.lower() not in known]
+            if missing:
+                raise WorldError(f'{full}: its {kind_name} link names {missing[0]}, which is not '
+                                 'in the map')
+            files.runtime.setdefault('links', {}).setdefault(full, {})[kind_name] = list(targets)
+    # Game prefabs placed without a piece (shipped entities) get their class from what they are.
+    classes = files.runtime.pop('classes', {})
+    for entry in files.runtime['objects']:
+        if entry.get('game') and entry['class'] == 'Prefab':
+            entry['class'] = classes.get(entry['name'].lower(), 'Prefab')
     files.runtime['names'] = sorted(set(object_names(world)) |
                                     set(files.runtime.get('aliases', {}).values()))
     return files
@@ -558,10 +578,13 @@ class _Level:
 
     def _remember_links(self, entity: Placement, key: int, spec, resource) -> None:
         """Remember a placed entity for links: by its world name, and its links if set."""
+        from . import toolkit
         from .blender_scene import component_names
 
         name = script_of(entity).get('name') or entity.source
         self.named[name.lower()] = (key, component_names(spec), entity.piece, name)
+        self.runtime.setdefault('classes', {})[name.lower()] = toolkit.class_of_components(
+            component_names(spec))
         if entity.links:
             self.link_requests.append((resource, entity))
 
@@ -1255,22 +1278,30 @@ class _Level:
         object, is an error: the game would look for it by name and find nothing."""
         from . import links, reflect, resources, toolkit
 
+        runtime_only: dict = {}
         for resource, entity in self.link_requests:
             spec = resources.decode_entity_spec(resource.body)
             own = script_of(entity).get('name') or entity.source
             components = self.named[own.lower()][1]
             changed = False
+            object_kinds = links.kinds_of(components, entity.piece)
             for kind_name, targets in links.clean(entity.links).items():
-                kind = links.BY_NAME[kind_name]
-                if not kind.on & set(components):
+                kind = links.BY_NAME.get(kind_name)
+                if kind is None:
+                    continue   # a link the object's script declares: only scripts read it
+                if not kind.on & object_kinds:
                     raise WorldError(f'{own} has no {kind.label} link')
                 values = []
                 for target in targets:
                     found = self.named.get(target.lower())
+                    own_kinds = getattr(self, 'own_objects', {}).get(target.lower())
+                    if found is None and own_kinds is not None and links.can_target(kind, own_kinds):
+                        runtime_only.setdefault(own, {}).setdefault(kind_name, []).append(target)
+                        continue   # a prefab of yours (debris): the runtime opens it
                     if found is None:
                         raise WorldError(f'{own}: its {kind.label} link names {target}, which is '
                                          'not in the map')
-                    if not links.can_target(kind, found[1], found[2]):
+                    if not links.can_target(kind, links.kinds_of(found[1], found[2]), found[2]):
                         raise WorldError(f'{own}: its {kind.label} link names {target}, which '
                                          f'cannot be one')
                     values.append(found[0])
@@ -1293,6 +1324,7 @@ class _Level:
                         changed = True
             if changed:
                 resource.body = resources.encode_entity_spec(spec)
+        self.runtime_only = runtime_only
         # A trap switch with no trap does nothing when bought: say so rather than guess one.
         for resource in self.added:
             spec = resources.decode_entity_spec(resource.body)
@@ -1334,6 +1366,8 @@ class _Level:
                     out.setdefault(own, {})[kind.name] = targets
             if own in self.barricade_spawns:
                 out.setdefault(own, {})['spawns'] = list(self.barricade_spawns[own])
+            for kind_name, targets in getattr(self, 'runtime_only', {}).get(own, {}).items():
+                out.setdefault(own, {}).setdefault(kind_name, []).extend(targets)
         if out:
             self.runtime['links'] = out
 
@@ -1441,6 +1475,7 @@ def _compile_layout(pack, name: str, world: Layout,
     statics = levels.read_group_at(pack, f'levels/{base}/{base}_statics')
     levels.rename_level_resource(statics, base, name)
     level = _Level(pack, name, base, statics)
+    level.own_objects = getattr(world, 'own_objects', {})
     level.groups = files.groups
     _apply_weapons(pack, files, name, base, level, world.weapons)
     by_class = level.by_class
@@ -1527,6 +1562,7 @@ def _compile_inherited(pack, name: str, world: Layout, fixed) -> levels.LevelFil
     files = levels.clone_level(pack, name, base, fixed)
     statics = files.groups[f'{name}_statics.group.bin']
     level = _Level(pack, name, base, statics)
+    level.own_objects = getattr(world, 'own_objects', {})
     level.groups = files.groups
     _apply_weapons(pack, files, name, base, level, world.weapons)
     level.inherited = True

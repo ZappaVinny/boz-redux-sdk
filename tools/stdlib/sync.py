@@ -21,10 +21,14 @@ MODS = [ROOT / 'mods' / 'developer']
 GENERATED_PER_MOD = {'world_data.lua'}
 
 
+def _files(folder: Path) -> set[str]:
+    return {p.relative_to(folder).as_posix() for p in folder.rglob('*.lua')} if folder.is_dir() else set()
+
+
 def differences(mod: Path) -> list[str]:
     copy = mod / 'scripts' / 'boz'
-    wanted = {p.name for p in LIB.glob('*.lua')}
-    present = {p.name for p in copy.glob('*.lua')} - GENERATED_PER_MOD if copy.is_dir() else set()
+    wanted = _files(LIB)
+    present = _files(copy) - GENERATED_PER_MOD
     out = [f'missing {name}' for name in sorted(wanted - present)]
     out += [f'extra {name}' for name in sorted(present - wanted)]
     out += [f'differs {name}' for name in sorted(wanted & present)
@@ -35,11 +39,11 @@ def differences(mod: Path) -> list[str]:
 def sync(mod: Path) -> None:
     copy = mod / 'scripts' / 'boz'
     copy.mkdir(parents=True, exist_ok=True)
-    for stale in copy.glob('*.lua'):
-        if stale.name not in GENERATED_PER_MOD and not (LIB / stale.name).exists():
-            stale.unlink()
-    for source in LIB.glob('*.lua'):
-        shutil.copyfile(source, copy / source.name)
+    for name in _files(copy) - _files(LIB) - GENERATED_PER_MOD:
+        (copy / name).unlink()
+    for name in _files(LIB):
+        (copy / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(LIB / name, copy / name)
 
 
 def main() -> int:

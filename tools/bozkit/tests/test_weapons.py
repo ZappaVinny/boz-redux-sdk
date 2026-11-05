@@ -151,7 +151,7 @@ class WeaponTests(unittest.TestCase):
         self.assertEqual({w.name for w in listed}, {'colt45', 'mp40'})
         mp40 = next(w for w in listed if w.name == 'mp40')
         self.assertEqual((mp40.values['m_clipSize'], mp40.values['autoROF']), (32, 0))
-        self.assertEqual(weapons.default_index(listed, 'empty'), ['colt45'])
+        self.assertEqual(weapons.default_index(listed, 'new'), ['colt45'])
         self.assertEqual(sorted(weapons.default_index(listed, 'kino')), ['colt45', 'mp40'])
 
     def test_new_weapon_and_changes(self):

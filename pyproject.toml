@@ -29,3 +29,7 @@ bozkit = ["branding/*.png", "branding/*.svg", "branding/*.ico", "branding/icons/
 
 [tool.setuptools.data-files]
 "share/boz-redux-sdk/lib/boz" = ["lib/boz/*.lua"]
+"share/boz-redux-sdk/lib/boz/objects" = ["lib/boz/objects/*.lua"]
+"share/boz-redux-sdk/lib/boz/game" = ["lib/boz/game/*.lua"]
+"share/boz-redux-sdk/lib/boz/systems" = ["lib/boz/systems/*.lua"]
+"share/boz-redux-sdk/lib/boz/engine" = ["lib/boz/engine/*.lua"]

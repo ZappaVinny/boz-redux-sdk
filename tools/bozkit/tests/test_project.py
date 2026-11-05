@@ -80,7 +80,7 @@ class ProjectTests(unittest.TestCase):
         (loaded.assets / 'made-by-test.txt').write_text('asset\n', encoding='utf-8')
         output, report = project.build_project(loaded)
         self.assertTrue((output / 'scripts' / 'main.lua').is_file())
-        self.assertTrue((output / 'scripts' / 'boz' / 'player.lua').is_file())
+        self.assertTrue((output / 'scripts' / 'boz' / 'init.lua').is_file())
         self.assertEqual((output / 'assets' / 'made-by-test.txt').read_text(encoding='utf-8'),
                          'asset\n')
         built = json.loads((output / project.BUILD_REPORT).read_text(encoding='utf-8'))

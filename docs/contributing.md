@@ -58,8 +58,7 @@ CI fails when one is out of date.
 
 | File | Source | Generator |
 | --- | --- | --- |
-| `docs/standard-library.md` | The `---` comments in `lib/boz/*.lua` | `python3 tools/stdlib/generate_doc.py` |
-| `lib/boz/*_data.lua` | The game definition | `python3 tools/stdlib/generate_data.py` |
+| `lib/boz/engine/*_data.lua` | The game definition | `python3 tools/stdlib/generate_data.py` |
 | `docs/game-events.md` | The game definition and `tools/symbols/event_notes.toml` | `python3 tools/docgen/events_doc.py` |
 | The weapon field tables in `docs/weapons-and-assets.md` | `bozkit.weapons.FIELDS` | `python3 tools/docgen/weapons_doc.py` |
 | `docs/console-reference.md` | The game definition and `tools/symbols/console_notes.toml` | `python3 tools/symbols/symbols.py console-doc gamedef/console/boz-1.0.11.toml tools/symbols/console_notes.toml docs/console-reference.md` |

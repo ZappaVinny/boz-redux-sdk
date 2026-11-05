@@ -620,8 +620,13 @@ def prefab_object(prefab: "world.Prefab", base: str, scene, meshes: dict, parent
     obj.boz.role = "prefab"
     if prefab.library:
         obj["boz_library"] = prefab.library
+    if prefab.piece:
+        obj["boz_piece"] = prefab.piece   # a prefab of yours with a class of its own (debris)
     _place(obj, prefab, scene, parent)
     set_common(obj, prefab)
+    if prefab.links:
+        from . import prefab_links
+        prefab_links.write(obj, prefab.links)
     for part in prefab.parts:
         child = object_for(part, base, scene, meshes, obj)
         child.boz.part_name = part.name
@@ -660,11 +665,15 @@ def set_common(obj, item) -> None:
 
 
 def is_scripted(obj) -> bool:
-    """It, or a prefab holding it, has a script (scripts can switch it)."""
+    """It, or a prefab holding it, has a script or a class of its own (debris), or is set to
+    Scripts can switch it: scripts can switch it."""
+    first = True
     while obj is not None:
-        if obj.boz.script:
+        if obj.boz.script or (not first and obj.boz.switchable):
             return True
-        obj = obj.parent
+        if obj.boz.role == "prefab" and not obj.boz.source and obj.get("boz_piece"):
+            return True
+        obj, first = obj.parent, False
     return False
 
 
@@ -1125,7 +1134,8 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
                                    if child.boz.role in ("model", "volume", "prefab")
                                    and not child.boz.original) if part is not None]
         return world.Prefab(name, position, rotation, scale, parts=parts, start=start_of(obj),
-                            library=obj.get("boz_library", ""), **common)
+                            library=obj.get("boz_library", ""), links=prefab_links.set_links(obj),
+                            piece=str(obj.get("boz_piece", "")), **common)
 
     for obj in scene.objects:
         if is_helper(obj):

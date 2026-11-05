@@ -130,6 +130,15 @@ def main() -> None:
              ("native",))
     icon(obj, ICON_COLOURS.get("Barricades", (120, 120, 120)))
     count += 1
+    # Debris: a door of yours (boz.Debris): any model and a Use volume; bought, it vanishes.
+    obj = bpy.data.objects.new("Debris", None)
+    obj.empty_display_type = "PLAIN_AXES"
+    obj["boz_asset_kind"] = "debris"
+    collection.objects.link(obj)
+    describe(obj, "Game prefabs/Doors", "Debris: a door of yours. Any model and a Use volume; "
+             "bought, it vanishes. Opens with other doors (Links)")
+    icon(obj, ICON_COLOURS.get("Doors", (120, 120, 120)))
+    count += 1
     for kind, label, description in VOLUMES:
         obj = bpy.data.objects.new(label, None)
         obj.empty_display_type = "CUBE"

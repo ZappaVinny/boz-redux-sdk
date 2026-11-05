@@ -44,6 +44,8 @@ def kind_label(obj) -> tuple[str, str]:
             except KeyError:
                 label = settings.source
             return f"Game prefab (native): {label}", "TOOL_SETTINGS"
+        if obj.get("boz_piece") == "debris":
+            return "Debris (a door of yours)", "OUTLINER_OB_EMPTY"
         return "Your prefab", "OUTLINER_OB_EMPTY"
     return "Not part of the map", "QUESTION"
 
@@ -311,8 +313,8 @@ class BOZ_OT_script_clear(Operator):
 
 class BOZ_OT_script_reload(Operator):
     bl_idname = "boz.script_reload"
-    bl_label = "Reload properties"
-    bl_description = "Read the script's properties again (after editing it)"
+    bl_label = "Reload settings"
+    bl_description = "Read the script's settings again (after editing it)"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -638,17 +640,28 @@ class BOZ_OT_spawn_type(Operator):
         return {"FINISHED"}
 
 
-def _draw_game_settings(layout, obj) -> None:
-    """A game prefab's settings (cost, needs power, weapon, chalk, ...)."""
-    key = obj.get("boz_piece")
+def _draw_settings(layout, obj) -> None:
+    """One Settings box: a game prefab's own (cost, needs power, weapon, ...) and its script's
+    (---@setting), the same in scripts as self.settings.<name>."""
+    key = obj.get("boz_piece") if obj.boz.source else None
     try:
         piece = toolkit.piece(key) if key else None
     except KeyError:
         piece = None
-    if piece is None:
+    declared_settings = declared(obj)
+    if piece is None and not declared_settings:
         return
     box = layout.box()
     box.label(text="Settings", icon="TOOL_SETTINGS")
+    for setting in declared_settings:
+        name = convert.PROPERTY_PREFIX + setting.name
+        label = setting.description or setting.name.replace("_", " ").capitalize()
+        if name in obj:
+            box.prop(obj, f'["{name}"]', text=label)
+        else:
+            box.label(text=f"{label}: press Reload in Script", icon="ERROR")
+    if piece is None:
+        return
     if key in toolkit.SPAWN_KEYS:
         label = next(label for k, label, *_rest in toolkit.SPAWN_TYPES if k == key)
         row = box.row()
@@ -699,15 +712,12 @@ def _draw_script(layout, obj) -> None:
     row.operator(BOZ_OT_script_open.bl_idname, text="", icon="URL").external = True
     row.operator(BOZ_OT_script_reload.bl_idname, text="", icon="FILE_REFRESH")
     row.operator(BOZ_OT_script_clear.bl_idname, text="", icon="X")
-    props = declared(obj)
-    if not props:
-        box.label(text="It declares no properties (---@property lines)")
-    for prop in props:
-        key = convert.PROPERTY_PREFIX + prop.name
-        if key in obj:
-            box.prop(obj, f'["{key}"]', text=prop.name.replace("_", " ").capitalize())
-        else:
-            box.label(text=f"{prop.name}: press Reload properties", icon="ERROR")
+    folder = scripts_dir()
+    if folder is not None:
+        try:
+            scripts.read_properties(folder / obj.boz.script)
+        except scripts.ScriptError as exc:
+            box.label(text=str(exc), icon="ERROR")
 
 
 class BOZ_PT_object(Panel):
@@ -770,6 +780,7 @@ class BOZ_PT_object(Panel):
             row.operator(BOZ_OT_ungroup_prefab.bl_idname, icon="X")
             if obj.get("boz_library"):
                 layout.label(text=f"Placed from the library: {obj['boz_library']}")
+            prefab_links.draw(layout, obj, context)
         else:
             if settings.original:
                 box = layout.box()
@@ -780,7 +791,6 @@ class BOZ_PT_object(Panel):
                           else "As the level has it")
                 box.label(text="Delete (X) takes it out of the map; Shift+D adds a copy")
                 box.operator(link.BOZ_OT_reset_base.bl_idname, icon="LOOP_BACK")
-            _draw_game_settings(layout, obj)
             prefab_links.draw(layout, obj, context)
             if obj.get("boz_custom_model") or obj.get("boz_game_model"):
                 box = layout.box()
@@ -793,6 +803,7 @@ class BOZ_PT_object(Panel):
 
         if settings.role in ("model", "prefab"):
             _draw_in_game(layout, obj, context)
+        _draw_settings(layout, obj)
         _draw_script(layout, obj)
 
 

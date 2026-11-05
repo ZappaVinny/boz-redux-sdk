@@ -7,21 +7,16 @@
 -- Game access goes through the standard library in scripts/boz: console, player, camera, fly,
 -- levels, rounds, zombies, weapons, score, pickups, pieces, effects, map, spawns, deadops.
 
-local console = require("boz.console")
-local player = require("boz.player")
-local camera = require("boz.camera")
-local fly = require("boz.fly")
-local rounds = require("boz.rounds")
-local levels = require("boz.levels")
-local zombies = require("boz.zombies")
-local weapons = require("boz.weapons")
-local score = require("boz.score")
-local pickups = require("boz.pickups")
-local pieces = require("boz.pieces")
-local effects = require("boz.effects")
-local map = require("boz.map")
-local deadops = require("boz.deadops")
-local spawns = require("boz.spawns")
+local boz = require("boz")
+local console, camera, fly, rounds = boz.console, boz.camera, boz.fly, boz.rounds
+local weapons, pickups, effects, map, deadops = boz.weapons, boz.pickups, boz.effects, boz.map, boz.deadops
+-- The low-level layer for what a developer tool reaches past the main surface.
+local player = require("boz.engine.player")
+local levels = require("boz.engine.levels")
+local zombies = require("boz.game.zombies")
+local score = require("boz.engine.score")
+local pieces = require("boz.engine.pieces")
+local spawns = require("boz.engine.spawns")
 
 -- The Developer mod is the default test runner: the editor's Build & Run asks it to start the
 -- level just saved, once.

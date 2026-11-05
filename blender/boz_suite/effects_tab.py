@@ -54,7 +54,7 @@ def setup(item) -> str:
     """Lua a script needs once before spawning *item*: a black hole's kills count as the player's
     only when the script asks (boz.zombies.credit_kills)."""
     if item.kind == "projectile" and item.behaviour == 6:
-        return 'require("boz.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")\n'
+        return 'require("boz.game.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")\n'
     return ""
 
 
@@ -273,7 +273,7 @@ class BOZ_OT_effect_copy(Operator):
         item = selected(scene.boz_effects_used, scene.boz_effect_used_index)
         if item is None:
             return {"CANCELLED"}
-        context.window_manager.clipboard = 'local effects = require("boz.effects")\n' + setup(item) + snippet(item)
+        context.window_manager.clipboard = 'local effects = require("boz.game.effects")\n' + setup(item) + snippet(item)
         self.report({"INFO"}, "Copied")
         return {"FINISHED"}
 

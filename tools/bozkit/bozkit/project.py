@@ -20,7 +20,7 @@ PROJECT_FILE = 'boz-project.toml'
 PROJECT_SCHEMA = 2
 SUPPORTED_SCHEMAS = (1, 2)
 KINDS = ('script', 'map')
-MAP_TEMPLATES = ('empty', 'debug') + maps.SHIPPED
+MAP_TEMPLATES = ('new',) + maps.SHIPPED   # a new map, or a remix of a shipped one
 GAME_VERSION = '1.0.11'
 BUILD_REPORT = 'boz-build.json'
 ID_RE = re.compile(r'^[a-z][a-z0-9_-]*$')
@@ -150,23 +150,20 @@ def _script_template(template: str, mod_id: str) -> str:
     """The starting main.lua for a script template."""
     if template == 'round':
         return f'''-- {mod_id}: runs code at the start of every round.
+local boz = require("boz")
 
-hook.add("CWaveManager::StartWave", {{after = function(call)
-    local manager = call:arg(1)
-    local round = game.read("u32", manager + 0x78)  -- CWaveManager round number
-    log("round " .. round .. " started")
-end}})
+boz.on("round_started", function(data)
+    log("round " .. data.round .. " started")
+end)
 
 log("{mod_id} loaded")
 '''
     if template == 'hotkey':
         return f'''-- {mod_id}: press F5 to run a console line (here: turn the power on).
--- Every console command is listed in the console reference.
-
-local console = require("boz.console")
+local boz = require("boz")
 
 input.bind("F5", function()
-    local output, err = console.exec("SwitchPowerOn")
+    local output, err = boz.console.exec("SwitchPowerOn")
     log(output or err)
 end)
 
@@ -174,10 +171,9 @@ log("{mod_id} loaded")
 '''
     if template == 'settings':
         return f'''-- {mod_id}: settings in the game's own pause menu (pause > Settings), saved with the mod.
+local boz = require("boz")
 
-local pause_settings = require("boz.pause_settings")
-
-pause_settings.add_slider{{
+boz.menu.add_slider{{
     id = "speed",
     label = "Game speed",
     min = 50,
@@ -186,11 +182,11 @@ pause_settings.add_slider{{
     get = function() return settings.get("speed", 100) end,
     set = function(value)
         settings.set("speed", value)
-        require("boz.map").set_time_scale(value / 100)
+        boz.map.set_time_scale(value / 100)
     end,
 }}
 
-pause_settings.add_checkbox{{
+boz.menu.add_checkbox{{
     id = "greeting",
     label = "Log a greeting",
     get = function() return settings.get("greeting", true) end,
@@ -199,19 +195,12 @@ pause_settings.add_checkbox{{
 
 log("{mod_id} loaded")
 '''
-    return f'''-- {mod_id}: runs once when the game starts, before the first frame.
--- Set things up here: event handlers, key bindings, hooks and settings.
--- The standard library (scripts/boz) wraps common game features; see its docs.
+    return f'''-- {mod_id}: runs once when the game starts. Set up event handlers here.
+local boz = require("boz")
 
--- local player = require("boz.player")
-
--- events.on("frame", function(dt)
---     -- runs every frame
--- end)
-
--- input.bind("F5", function()
---     log("F5 pressed")
--- end)
+-- boz.on("round_started", function(data) log("round " .. data.round) end)
+-- boz.get("Front_Door"):on("opened", function(door, player) player:give_points(500) end)
+-- input.bind("F5", function() boz.player():give_perk("Juggernog") end)
 
 log("{mod_id} loaded")
 '''
@@ -288,7 +277,7 @@ def create_project(path: str | Path, mod_id: str, name: str, author: str,
         raise ProjectError('mod name, author and version are required')
     if kind not in KINDS:
         raise ProjectError(f'unknown project kind {kind!r}; expected script or map')
-    template = template or ('blank' if kind == 'script' else 'empty')
+    template = template or ('blank' if kind == 'script' else 'new')
     if template not in (SCRIPT_TEMPLATES if kind == 'script' else MAP_TEMPLATES):
         raise ProjectError(f'unknown {kind} template {template!r}')
     starting_world = None
@@ -434,7 +423,7 @@ def standard_library_path() -> Path:
         Path(sys.prefix) / 'share' / 'boz-redux-sdk' / 'lib' / 'boz',
     )
     for candidate in candidates:
-        if (candidate / 'player.lua').is_file():
+        if (candidate / 'init.lua').is_file():
             return candidate
     raise ProjectError('BOZ standard library is missing from this SDK installation')
 
@@ -493,7 +482,7 @@ def compile_map(project: Project, game, fixed=None):
     return files
 
 
-MAP_RUNTIME = 'require("boz.world").start()'
+MAP_RUNTIME = 'require("boz.game.world").start()'
 
 
 
@@ -562,8 +551,7 @@ def _map_runtime(scripts: Path, runtime: dict | None = None) -> None:
     runtime['hooks'] = sorted(p.stem for p in (scripts / 'hooks').glob('*.lua')) \
         if (scripts / 'hooks').is_dir() else []
     # The whole standard library (the map's own copy may predate modules its scripts use).
-    for module in sorted(standard_library_path().glob('*.lua')):
-        shutil.copyfile(module, scripts / 'boz' / module.name)
+    _copy_tree(standard_library_path(), scripts / 'boz')
     (scripts / 'boz' / 'world_data.lua').write_text(world_data_lua(runtime),
                                                      encoding='utf-8', newline='\n')
     main = scripts / 'main.lua'
@@ -612,8 +600,10 @@ def build_project(project: Project, output: str | Path | None = None,
         from . import assets as assets_module
         sources = {d.name for d in assets_module.list_defs(project.root / 'source')}
     _copy_tree(project.assets, target / 'assets', sources)
-    if project.include_standard_library:
-        _copy_tree(standard_library_path(), target / 'scripts' / 'boz')
+    # The standard library is always the SDK's own: a project's scripts/boz is a copy for
+    # reading, and an old copy would not match the classes scripts are written against.
+    shutil.rmtree(target / 'scripts' / 'boz', ignore_errors=True)
+    _copy_tree(standard_library_path(), target / 'scripts' / 'boz')
     if level_files is not None:
         level_files.write(target / 'assets')
         _map_runtime(target / 'scripts', level_files.runtime)

@@ -1,11 +1,11 @@
--- boz.prefabs against a fake game: lua5.4 lib/tests/prefabs_test.lua (from the SDK root).
-package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+-- boz (objects as classes, scripts, events) against a fake game: lua5.4 lib/tests/prefabs_test.lua.
+package.path = "lib/?.lua;lib/?/init.lua;lib/?/init.lua;lib/tests/?.lua;" .. package.path
 local fake = require("fake_game").install({strict = true})
 local memory, symbols, functions, hooks, calls, frames = fake.memory, fake.symbols, fake.functions, fake.hooks,
     fake.calls, fake.frames
 local address, run_hook, frame, check, called = fake.address, fake.run_hook, fake.frame, fake.check, fake.called
 
-local hash = require("boz.hash")
+local hash = require("boz.engine.hash")
 local LEVEL, PLAYER, SCORE = 0x8000, 0x8100, 0x9100
 local entities = {}
 local next_entity, next_id = 0x20000, 10
@@ -75,73 +75,134 @@ end
 stats, hits, used, events_seen, plain_log = {started = 0}, {}, {}, {}, {}
 event_data = {}
 write("Vault", [[
-function start() stats.started = stats.started + 1 end
-function on_hit(volume, info) table.insert(hits, volume); self:part("Door"):hide() end
-function on_use(volume) table.insert(used, volume) end
-function on_event(name, data) table.insert(events_seen, name); event_data[name] = data end
+local Vault = boz.Prefab:extend("Vault")
+function Vault:start() stats.started = stats.started + 1 end
+function Vault:on_hit(player, volume) table.insert(hits, volume); self:part("Door"):hide() end
+function Vault:on_use(player, volume) table.insert(used, volume) end
+function Vault:on_event(name, data) table.insert(events_seen, name); event_data[name] = data end
+return Vault
 ]])
 write("Counter", [[
-skulls = 0
-progress = {found = {}}
-local not_saved = 5
-function start() stats.counter_start = skulls end
-function on_hit() skulls = skulls + 1 end
-function bump() skulls = skulls + 1; not_saved = not_saved + 1; progress.found.altar = true end
-function say() print("50% done", 2) end
-]])
--- A script as written now: plain functions, self already set, top-level state per object.
-write("Plain", [[
-local count = 0
-function on_enter(volume, who)
-    count = count + 1
-    table.insert(plain_log, self.name .. ":" .. volume .. ":" .. count .. ":" .. self.properties.tag)
+local Counter = boz.Prefab:extend("Counter")
+function Counter:init(name, entry)
+    boz.Prefab.init(self, name, entry)
+    self.skulls, self.progress = 0, {found = {}}
 end
-function on_exit(volume, who) table.insert(plain_log, self.name .. ":exit") end
-function open() return self.name .. " opened" end
+function Counter:start() stats.counter_start = self.skulls end
+function Counter:bump() self.skulls = self.skulls + 1; self.progress.found.altar = true end
+function Counter:say() print("50% done", 2) end
+return Counter
+]])
+-- State per object lives on self; each object runs its own copy of the class.
+write("Plain", [[
+local Plain = boz.Prefab:extend("Plain")
+function Plain:on_enter(who, volume)
+    self.count = (self.count or 0) + 1
+    table.insert(plain_log, self.name .. ":" .. volume .. ":" .. self.count .. ":" .. self.settings.tag)
+end
+function Plain:on_exit(who, volume) table.insert(plain_log, self.name .. ":exit") end
+function Plain:open() return self.name .. " opened" end
+return Plain
 ]])
 write("Broken", "this is not lua")
+write("NoClass", "local x = 1")
+-- A door with its own rules: shut until a saved value is set, then the game's own door.
+write("Sealed", [[
+local Sealed = boz.Door:extend("Sealed")
+function Sealed:on_use(player)
+    table.insert(sealed_log, "asked")
+    if not boz.saved.egg_done then return end
+    table.insert(sealed_log, "opened")
+    boz.Door.on_use(self, player)
+end
+return Sealed
+]])
+sealed_log = {}
 
-local prefabs = require("boz.prefabs")
+local prefabs = require("boz.objects.runtime")
+local boz = require("boz")
+
+-- Classes: extend, parent calls, is_a.
+local Base = boz.class:extend("Base")
+function Base:init(n) self.n = n end
+function Base:twice() return self.n * 2 end
+local Child = Base:extend("Child")
+function Child:twice() return Base.twice(self) + 1 end
+local c = Child:new(4)
+check(c:twice() == 9 and c:is_a(Base) and c:is_a(Child) and not Base:new(1):is_a(Child),
+      "classes: extend, parent calls, is_a")
+check(boz.Door:new("x"):is_a(boz.Prefab) and boz.Door:new("x"):class_name() == "Door", "native classes")
 
 local bus = {}
-prefabs.on("Vault_1.Skull.hit", function(data, name) table.insert(bus, name) end)
+local names = {"Vault_1", "Vault_1.Door", "Vault_1.Skull", "Vault_1.Button", "Room", "Statue.Rock",
+               "Statue.Pickup.Gun", "Statue.Pickup.Stand", "Statue.Shrine.Altar", "Front_Door", "Back_Door"}
 prefabs.start({
-    {name = "Vault_1", kind = "prefab", script = "prefabs.Vault", properties = {delay = 5.0},
+    {name = "Vault_1", kind = "prefab", class = "Prefab", script = "prefabs.Vault",
+     settings = {delay = {value = 5.0}},
      parts = {{name = "Vault_1.Door", part = "Door"}, {name = "Vault_1.Skull", part = "Skull"},
               {name = "Vault_1.Button", part = "Button"}},
      members = {"Vault_1.Door", "Vault_1.Skull", "Vault_1.Button"}},
-    {name = "Vault_1.Skull", kind = "volume", volume = "hit", who = "players", once = true,
-     owner = "Vault_1", script = ""},
-    {name = "Vault_1.Button", kind = "volume", volume = "use", who = "players", once = false,
-     prompt = "Open", cost = 600, owner = "Vault_1", script = ""},
-    {name = "Room", kind = "volume", volume = "trigger", who = "anyone", owner = "", script = ""},
-    {name = "Bad", kind = "model", script = "prefabs.Broken"},
-    {name = "Gate_A", kind = "prefab", script = "prefabs.Plain", properties = {tag = "a"},
-     parts = {{name = "Gate_A.Zone", part = "Zone"}}, members = {"Gate_A.Zone"}},
-    {name = "Gate_A.Zone", kind = "volume", volume = "trigger", who = "anyone", owner = "Gate_A", script = ""},
-    {name = "Gate_B", kind = "prefab", script = "prefabs.Plain", properties = {tag = "b"},
-     parts = {{name = "Gate_B.Zone", part = "Zone"}}, members = {"Gate_B.Zone"}},
-    {name = "Gate_B.Zone", kind = "volume", volume = "trigger", who = "anyone", owner = "Gate_B", script = ""},
+    {name = "Vault_1.Skull", kind = "volume", class = "Volume", volume = "hit", who = "players",
+     once = true, owner = "Vault_1", script = ""},
+    {name = "Vault_1.Button", kind = "volume", class = "Volume", volume = "use", who = "players",
+     once = false, prompt = "Open", cost = 600, owner = "Vault_1", script = ""},
+    {name = "Room", kind = "volume", class = "Volume", volume = "trigger", who = "anyone", owner = "",
+     script = ""},
+    {name = "Bad", kind = "model", class = "Object", script = "prefabs.Broken"},
+    {name = "Lost", kind = "model", class = "Object", script = "prefabs.NoClass"},
+    {name = "Gate_A", kind = "prefab", class = "Prefab", script = "prefabs.Plain",
+     settings = {tag = {value = "a"}}, parts = {{name = "Gate_A.Zone", part = "Zone"}},
+     members = {"Gate_A.Zone"}},
+    {name = "Gate_A.Zone", kind = "volume", class = "Volume", volume = "trigger", who = "anyone",
+     owner = "Gate_A", script = ""},
+    {name = "Gate_B", kind = "prefab", class = "Prefab", script = "prefabs.Plain",
+     settings = {tag = {value = "b"}}, parts = {{name = "Gate_B.Zone", part = "Zone"}},
+     members = {"Gate_B.Zone"}},
+    {name = "Gate_B.Zone", kind = "volume", class = "Volume", volume = "trigger", who = "anyone",
+     owner = "Gate_B", script = ""},
     -- Prefabs inside prefabs: one without a script of its own, one with one.
-    {name = "Statue", kind = "prefab", script = "prefabs.Plain", properties = {tag = "s"},
+    {name = "Statue", kind = "prefab", class = "Prefab", script = "prefabs.Plain",
+     settings = {tag = {value = "s"}},
      parts = {{name = "Statue.Pickup", part = "Pickup"}, {name = "Statue.Shrine", part = "Shrine"},
               {name = "Statue.Rock", part = "Rock"}},
      members = {"Statue.Pickup.Gun", "Statue.Pickup.Stand", "Statue.Shrine.Altar", "Statue.Rock"}},
-    {name = "Statue.Shrine", kind = "prefab", script = "prefabs.Plain", properties = {tag = "n"},
-     owner = "Statue", parts = {{name = "Statue.Shrine.Altar", part = "Altar"}},
-     members = {"Statue.Shrine.Altar"}},
-})
+    {name = "Statue.Pickup", kind = "prefab", class = "Prefab", script = "", owner = "Statue",
+     parts = {{name = "Statue.Pickup.Gun", part = "Gun"}, {name = "Statue.Pickup.Stand", part = "Stand"}},
+     members = {"Statue.Pickup.Gun", "Statue.Pickup.Stand"}},
+    {name = "Statue.Shrine", kind = "prefab", class = "Prefab", script = "prefabs.Plain",
+     settings = {tag = {value = "n"}}, owner = "Statue",
+     parts = {{name = "Statue.Shrine.Altar", part = "Altar"}}, members = {"Statue.Shrine.Altar"}},
+    -- The game's doors: one whose script changes what a use does, one as the game has it.
+    {name = "Front_Door", kind = "prefab", class = "Door", game = true, script = "prefabs.Sealed",
+     settings = {cost = {value = 750, kind = "int", field = "CDoor.m_Cost"}}},
+    {name = "Back_Door", kind = "prefab", class = "Door", game = true, script = ""},
+    -- Debris: doors of yours; Rubble opens with Rubble_2.
+    {name = "Rubble", kind = "prefab", class = "Debris", script = "",
+     parts = {{name = "Rubble.Use", part = "Use"}}, members = {"Rubble.Use"}},
+    {name = "Rubble.Use", kind = "volume", class = "Volume", volume = "use", who = "players",
+     once = false, prompt = "Clear", cost = 100, owner = "Rubble", script = ""},
+    {name = "Rubble_2", kind = "prefab", class = "Debris", script = "", parts = {}, members = {}},
+}, names)
 check(stats.started == 1, "start() runs once per scripted object")
-local vault = prefabs.find("vault_1")
-check(vault and vault.properties.delay == 5.0, "instances carry their property values")
+local vault = boz.get("vault_1")
+check(vault and vault:is_a(boz.Prefab) and vault.settings.delay == 5.0, "objects carry their settings")
 check(vault:part("Door").name == "Vault_1.Door", "parts by name")
+check(boz.get("Lost") == nil or not boz.get("Lost").on_use, "a script that returns no class is reported")
+check(boz.get("Back_Door"):is_a(boz.Door) and boz.get("Back_Door"):class_name() == "Door",
+      "an object without a script is its game class")
+check(boz.get("Front_Door"):class_name() == "Sealed" and boz.get("Front_Door"):is_a(boz.Door),
+      "a scripted object is its script's class")
+check(boz.get("Nowhere") == nil, "a name the map does not have is nil")
+check(#boz.all(boz.Door) == 4, "every object of a class (debris are doors)")
+boz.get("Vault_1.Skull"):on("hit", function(object, player) table.insert(bus, object.name) end)
+boz.get("Vault_1"):on("hit", function(object, player, volume) table.insert(bus, volume) end)
 
 -- Shooting the skull: reported to the prefab, the game's easter egg handling skipped, once only.
 check(run_hook("CEasterEgg::OnEvent", {SKULL_EGG}) == true, "the game's easter egg handling is skipped")
 check(#hits == 1 and hits[1] == "Skull", "on_hit gets the part name")
 check(#called("CIsRenderableModel::SetVisible") == 1, "the script hid the door")
-check(#bus == 1, "the bus hears Vault_1.Skull.hit")
-check(events_seen[#events_seen] ~= "Vault_1.Skull.hit", "on_event does not get the volume's own events")
+check(table.concat(bus, " ") == "Skull Vault_1.Skull", "map scripts hear it on the prefab and the volume")
+check(events_seen[#events_seen] ~= "hit", "on_event does not get the volume's own events")
 run_hook("CEasterEgg::OnEvent", {SKULL_EGG})
 check(#hits == 1, "a once-only volume fires once")
 
@@ -180,23 +241,58 @@ memory[0x6000 + 0x78] = 7
 run_hook("CWaveManager::StartWave", {0x6000}, "after")
 check(events_seen[#events_seen] == "round_started", "round_started from the game")
 
+-- A door whose script changes on_use: the game's use is stopped until the script lets it run.
+local opened_heard = {}
+boz.get("Front_Door"):on("use", function() table.insert(opened_heard, "front") end)
+boz.get("Back_Door"):on("use", function() table.insert(opened_heard, "back") end)
+memory[LEVEL + 0x214] = entity("Front_Door")
+local real_hash = functions["Entity_GetNameHash"]
+functions["Entity_GetNameHash"] = function(record)
+    if record == memory[LEVEL + 0x214] + 0x10000000 then return hash.name(record_name) end
+    return real_hash(record)
+end
+record_name = "Front_Door"
+check(run_hook("Poi_SendUse", {}) == true and table.concat(sealed_log, " ") == "asked",
+      "the script decides: shut, the game's use is stopped")
+boz.saved.egg_done = true
+run_hook("Poi_SendUse", {})
+check(table.concat(sealed_log, " ") == "asked asked opened", "then it calls the game's door")
+memory[LEVEL + 0x214] = entity("Back_Door")
+record_name = "Back_Door"
+check(not run_hook("Poi_SendUse", {}), "a door without a script keeps the game's use")
+check(table.concat(opened_heard, " ") == "front front back", "map scripts hear every use")
+memory[LEVEL + 0x214] = BUTTON
+functions["Entity_GetNameHash"] = real_hash
+boz.saved.egg_done = nil
+check(boz.get("Front_Door").settings.cost == 750, "a native setting by its panel name")
+
+-- Debris: bought at its Use volume, it opens, and so do the doors it opens with.
+package.loaded["boz.world_data"] = {links = {Rubble = {siblings = {"Rubble_2"}}}}
+local debris_heard = {}
+boz.get("Rubble_2"):on("opened", function(door) table.insert(debris_heard, door.name) end)
+check(boz.get("Rubble"):is_a(boz.Door) and not boz.get("Rubble"):is_open(), "debris is a door, shut")
+boz.get("Rubble"):_emit("use", boz.player(), "Use")
+check(boz.get("Rubble"):is_open() and boz.get("Rubble_2"):is_open(), "bought, it opens and so does Rubble_2")
+check(table.concat(debris_heard, " ") == "Rubble_2", "opened reaches map scripts")
+check(not boz.get("Rubble"):open(), "an open debris does not open again")
+
 -- A prefab's hide() reaches every member.
 local before = #called("CIsRenderableModel::SetVisible")
 vault:hide()
 check(#called("CIsRenderableModel::SetVisible") == before + 1, "hide reaches the members that draw")
 -- Hidden survives only until the level starts again (a restart shows everything).
-local objects_module = require("boz.objects")
+local objects_module = require("boz.engine.objects")
 objects_module.get("Vault_1.Skull"):hide()
 check(objects_module.is_hidden("Vault_1.Skull"), "hidden until the level starts again")
 
 -- A part that is a prefab is that prefab: hide() reaches all of its parts.
-local statue = prefabs.find("Statue")
+local statue = boz.get("Statue")
 local pickup = statue:part("Pickup")
 check(pickup.name == "Statue.Pickup" and #pickup._members == 2, "a nested prefab part groups its parts")
 before = #called("CIsRenderableModel::SetVisible")
-pickup:hide():set_collision(false):open_navmesh()
+pickup:hide():set_stops_bullets(false):set_blocks_walking(false)
 check(#called("CIsRenderableModel::SetVisible") == before + 2, "hiding a nested prefab hides both its parts")
-check(statue:part("Shrine") == prefabs.find("Statue.Shrine"), "a nested prefab with a script is its instance")
+check(statue:part("Shrine") == boz.get("Statue.Shrine"), "a nested prefab with a script is its object")
 check(statue:part("Rock").name == "Statue.Rock", "a plain part is still its object")
 -- Plain scripts: one run per object, each with its own self and its own top-level variables.
 local ZONE_A, ZONE_B = entity("Gate_A.Zone"), entity("Gate_B.Zone")
@@ -220,11 +316,11 @@ run_hook("CIsCollisionObject::OnCollisionEnter", {0xc000, 0xc200})
 run_hook("CIsCollisionObject::OnCollisionEnter", {0xc100, 0xc200})
 check(table.concat(plain_log, " ") == "Gate_A:Zone:1:a Gate_A:exit Gate_A:Zone:2:a Gate_B:Zone:1:b",
       "plain scripts: self and state per object (" .. table.concat(plain_log, " ") .. ")")
-check(prefabs.find("Gate_B"):open() == "Gate_B opened", "other scripts call a plain script's functions")
+check(boz.get("Gate_B"):open() == "Gate_B opened", "other scripts call an object's methods")
 -- Timers run on game time: frames in which the player's fixed step ran.
 local fired, ticks = {}, 0
-prefabs.after(1.0, function() table.insert(fired, "after") end)
-local every = prefabs.every(0.5, function() ticks = ticks + 1 end)
+boz.after(1.0, function() table.insert(fired, "after") end)
+local every = boz.every(0.5, function() ticks = ticks + 1 end)
 -- The game simulates 30 steps a second (the physics step), none while paused, and draws any
 -- number of frames: here three steps and `drawn` frames per tenth of a second.
 local function play(seconds, paused, drawn)
@@ -246,7 +342,7 @@ play(1.0)
 check(#fired == 1 and ticks == 2, "a cancelled timer stops")
 -- Game time follows the simulation, not the frame rate: 4 s pass in 4 s at any frame rate.
 local late = {}
-prefabs.after(4, function() table.insert(late, "fired") end)
+boz.after(4, function() table.insert(late, "fired") end)
 play(3.9, false, 6)   -- six frames drawn per tenth of a second (a fast PC drawing between steps)
 check(#late == 0, "not before its time")
 play(0.2, false, 6)
@@ -266,7 +362,7 @@ check(events_seen[#events_seen] == "perk_bought" and event_data.perk_bought.perk
 local DOOR_C = 0xa100
 memory[DOOR_C + 0xc] = DOOR
 memory[DOOR_C + 0x9c] = 0
-local components = require("boz.components")
+local components = require("boz.engine.components")
 local real_each = components.each
 components.each = function(tbl)
     if tbl == "CDoor" or tbl == address("CDoor::s_table") then
@@ -320,32 +416,33 @@ check(events_seen[#events_seen] == "player_revived", "player_revived")
 
 -- Saved globals: written when the game saves, back before start() when the save is continued.
 local counter_level = {
-    {name = "Altar", kind = "prefab", script = "prefabs.Counter", properties = {}, parts = {}, members = {}},
+    {name = "Altar", kind = "prefab", class = "Prefab", script = "prefabs.Counter", parts = {}, members = {}},
 }
-require("boz.objects").forget_hidden()   -- what boz.world does when a level (re)starts
-check(not require("boz.objects").is_hidden("Vault_1.Skull"), "forgotten when a level starts again")
+require("boz.engine.objects").forget_hidden()   -- what boz.world does when a level (re)starts
+check(not require("boz.engine.objects").is_hidden("Vault_1.Skull"), "forgotten when a level starts again")
 prefabs.start(counter_level)
-local altar = prefabs.find("Altar")
+local altar = boz.get("Altar")
 altar:bump(); altar:bump()
-prefabs.globals.eggs = {done = 2, names = {"a", "b\nc"}}
+boz.saved.eggs = {done = 2, names = {"a", "b\nc"}}
 run_hook("CSaveManager::SaveGame", {})
 check((saved_settings["globals.testlevel.count"] or 0) >= 1, "the save writes the globals")
 memory[LEVEL + 0x298] = 1           -- continuing that save
 stats.counter_start = nil
 prefabs.start(counter_level)
 check(stats.counter_start == nil, "start() waits for the save to load")
-check(prefabs.globals.eggs == nil, "a new level starts with empty globals")
+check(boz.saved.eggs == nil, "a new level starts with empty saved values")
 run_hook("CSaveManager::NotifyLoad", {}, "before")
 run_hook("CSaveManager::NotifyLoad", {}, "after")
-check(stats.counter_start == 2, "start() sees the saved globals (" .. tostring(stats.counter_start) .. ")")
-check(prefabs.globals.eggs.done == 2 and prefabs.globals.eggs.names[2] == "b\nc", "boz.globals come back")
+check(stats.counter_start == 2, "start() sees the object's saved fields (" .. tostring(stats.counter_start) .. ")")
+check(boz.get("Altar").progress.found.altar == true, "tables on self come back too")
+check(boz.saved.eggs.done == 2 and boz.saved.eggs.names[2] == "b\nc", "boz.saved comes back")
 memory[LEVEL + 0x298] = 0
 
 -- print reaches the game console (the Developer console shows it), "%" escaped for its format.
 local console_lines = {}
 memory[address("g_console")] = 0xb000
 functions["Console_Print"] = function(_, text) table.insert(console_lines, text) end
-prefabs.find("Altar"):say()
+boz.get("Altar"):say()
 check(console_lines[1] == "50%% done\t2", "print goes to the game console (" .. tostring(console_lines[1]) .. ")")
 -- A weapon's in-game name answers the wall buy prompt's string id "<weapon>_S_WEAPON".
 prefabs.start({}, {}, {{name = "idgun", script = "", display = "Apothicon Servant"}})
@@ -366,5 +463,29 @@ local function localise(id)
 end
 check(localise(hash.name("idgun_S_WEAPON")) == "Apothicon Servant", "the in-game name is the prompt's")
 check(localise(hash.name("thundergun_S_WEAPON")) == nil, "other weapons keep the game's names")
+-- A perk machine hears "bought" only when the player used it: not for a perk a script gave.
+local real_hash_perk = functions["Entity_GetNameHash"]
+local machines = {{name = "Jugg_A", class = "Perk", game = true, script = "", kind = "prefab"},
+                  {name = "Jugg_B", class = "Perk", game = true, script = "", kind = "prefab"}}
+prefabs.start(machines, {"Jugg_A", "Jugg_B"})
+local sold = {}
+boz.get("Jugg_A"):on("bought", function(m) table.insert(sold, m.name) end)
+boz.get("Jugg_B"):on("bought", function(m) table.insert(sold, m.name) end)
+memory[PERKS + 0x58] = 0
+run_hook("CPerkManager::GainPerk", {PERKS, 5, 1})
+check(#sold == 0, "a perk nobody bought at a machine reaches no machine")
+memory[PERKS + 0x58] = 0
+local JUGG_B = entity("Jugg_B")
+memory[LEVEL + 0x214] = JUGG_B
+functions["Entity_GetNameHash"] = function(record)
+    if record == JUGG_B + 0x10000000 then return hash.name("Jugg_B") end
+    return real_hash_perk(record)
+end
+run_hook("Poi_SendUse", {})
+run_hook("CPerkManager::GainPerk", {PERKS, 5, 1})
+check(table.concat(sold, " ") == "Jugg_B", "bought reaches the machine the player used")
+functions["Entity_GetNameHash"] = real_hash_perk
+memory[LEVEL + 0x214] = BUTTON
+
 os.execute("rm -rf " .. dir)
 print("prefabs_test: OK")

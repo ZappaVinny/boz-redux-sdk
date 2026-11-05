@@ -1,5 +1,5 @@
 -- boz.objects against a fake game: lua5.4 lib/tests/objects_test.lua (from the SDK root).
-package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+package.path = "lib/?.lua;lib/?/init.lua;lib/tests/?.lua;" .. package.path
 local fake = require("fake_game").install({strict = true})
 local memory, symbols, functions, hooks, calls, frames = fake.memory, fake.symbols, fake.functions, fake.hooks,
     fake.calls, fake.frames
@@ -13,7 +13,7 @@ memory[LEVEL + 0x290] = 0x9000
 for entity, id in pairs({[PLAYER] = 1, [WALL] = 2, [WALL_PART] = 3, [TRIGGER] = 4}) do
     memory[entity + 4] = id
 end
-local hash = require("boz.hash")
+local hash = require("boz.engine.hash")
 local entities = {[hash.name("Secret_Wall")] = WALL, [hash.name("Secret_Trigger")] = TRIGGER}
 local components = {   -- table -> entity id -> component
     ["CIsRenderableModel::s_table"] = {[2] = 0xa200, [3] = 0xa300},
@@ -43,7 +43,7 @@ for _, name in ipairs({"CIsRenderableModel::SetVisible", "CIsCollisionObject::En
     functions[name] = function() return 0 end
 end
 
-local objects = require("boz.objects")
+local objects = require("boz.engine.objects")
 local function check(condition, message)
     if not condition then
         error("FAILED: " .. message, 2)

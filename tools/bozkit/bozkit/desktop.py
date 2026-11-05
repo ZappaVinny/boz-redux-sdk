@@ -46,7 +46,7 @@ def check() -> int:
     items = {
         'SDK folder': root,
         'game definition': schema.gamedef_file('symbols'),
-        'standard library': root / 'lib' / 'boz' / 'player.lua',
+        'standard library': root / 'lib' / 'boz' / 'init.lua',
         'editor': sdkhome.suite_dir() / 'scripts' / 'startup' / 'bl_app_templates_user'
                   / 'boz_suite',
         'branding': Path(__file__).resolve().parent / 'branding' / 'boz-redux-sdk.ico',

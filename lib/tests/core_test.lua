@@ -1,13 +1,13 @@
 -- boz.core, boz.map, boz.score and boz.pieces against a fake game: lua5.4 lib/tests/core_test.lua.
-package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+package.path = "lib/?.lua;lib/?/init.lua;lib/tests/?.lua;" .. package.path
 local fake = require("fake_game").install()
 local memory, functions, check, last = fake.memory, fake.functions, fake.check, fake.last
 
 -- core.sym: the client's name first, then the standard library's own table of offsets.
-local symbol_data = require("boz.symbol_data")
+local symbol_data = require("boz.engine.symbol_data")
 local real_symbol = game.symbol
 game.symbol = function(name) if name == "CHealth::Damage" then return nil end return real_symbol(name) end
-local core = require("boz.core")
+local core = require("boz.engine.core")
 check(core.sym("CHealth::Damage") == game.base() + symbol_data.functions["CHealth::Damage"], "a name the client lacks")
 check(core.sym("CHealth::Damage") & 1 == 1, "Thumb functions carry bit 0")
 game.symbol = real_symbol
@@ -32,7 +32,7 @@ check(memory[0x100] == 0.9 and memory[0x104] == 0.1 and memory[0x10c] == 0.3, "s
 check(core.scratch("a", 8) == core.scratch("a", 8) and core.scratch("a", 8) ~= core.scratch("b", 8), "scratch buffers per key")
 
 -- boz.map: the level manager's data, and level starts once per level.
-local map = require("boz.map")
+local map = require("boz.engine.map")
 local LEVEL, PLAYER = 0x6000, 0x5000
 check(map.player() == nil and not map.playing(), "no level")
 memory[fake.address("CLevelManager::s_instance")] = LEVEL
@@ -52,7 +52,7 @@ fake.frame()
 check(starts == 2, "the next level starts again")
 
 -- boz.game_events: dedupe.
-local game_events = require("boz.game_events")
+local game_events = require("boz.engine.game_events")
 local seen = 0
 game_events.on("SUBJECT_ZOMBIE_DEATH", function() seen = seen + 1 end, {dedupe_frames = 1})
 local function dispatch(a, b)
@@ -66,9 +66,9 @@ check(seen == 2, "the same event later is a new one")
 
 -- boz.score.free_purchases: UnlimitedScore on for a while, then back as it was.
 local cvars = {UnlimitedScore = "false"}
-package.loaded["boz.console"] = {get = function(n) return cvars[n] end,
+package.loaded["boz.systems.console"] = {get = function(n) return cvars[n] end,
                                  register = function(n, v) cvars[n] = v return v end}
-local score = require("boz.score")
+local score = require("boz.engine.score")
 score.free_purchases(1)
 check(cvars.UnlimitedScore == "true", "purchases are free")
 for _ = 1, 30 do fake.frame(0.05) end
@@ -83,7 +83,7 @@ functions["CScoreManager::GetLocalScore"] = function() return points end
 functions["CScoreManager::AddScore"] = function(_, who, delta)
     if who == 0xabc then points = points + (delta >= 0x80000000 and delta - 0x100000000 or delta) end
 end
-local pieces = require("boz.pieces")
+local pieces = require("boz.engine.pieces")
 local DOOR, DOOR_C = 0x7000, 0x7100
 memory[DOOR + 4] = 9
 functions["CIsComponentTableBase::Find"] = function(tbl, id)
@@ -92,7 +92,7 @@ end
 local used_at = nil
 functions["Poi_SendUse"] = function() used_at = map.nearest_poi() end
 local door = pieces.of(DOOR, "CDoor")
-require("boz.reflect").set(DOOR_C, "CDoor", "m_Cost", 750)
+require("boz.engine.reflect").set(DOOR_C, "CDoor", "m_Cost", 750)
 check(door and door:cost() == 750, "a door's cost")
 check(door:use_free() and points == 850, "the cost is credited first")
 fake.frame()

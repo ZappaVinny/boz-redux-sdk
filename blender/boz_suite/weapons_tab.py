@@ -84,7 +84,7 @@ def project_index(context) -> list[str]:
     except wp.WeaponError:
         index = None
     if index is None:
-        template = "kino" if link.map_scene().boz.inherit else "empty"
+        template = "kino" if link.map_scene().boz.inherit else "new"
         index = wp.default_index(level_weapons(base_level(context)), template)
         if level_weapons(base_level(context)):
             wp.save_index(source, index)

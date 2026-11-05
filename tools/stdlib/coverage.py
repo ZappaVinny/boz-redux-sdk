@@ -33,7 +33,7 @@ def area(name: str) -> str:
 
 
 def main() -> int:
-    source = '\n'.join(p.read_text(encoding='utf-8') for p in sorted(LIB.glob('*.lua')) if p.name not in GENERATED)
+    source = '\n'.join(p.read_text(encoding='utf-8') for p in sorted(LIB.rglob('*.lua')) if p.name not in GENERATED)
     words = set(re.findall(r'[A-Za-z_][A-Za-z0-9_]*', source))
     reflection = tomllib.loads(gamedef_file('reflection').read_text(encoding='utf-8'))['class']
     events = tomllib.loads(gamedef_file('events').read_text(encoding='utf-8'))['event']

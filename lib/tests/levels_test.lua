@@ -1,5 +1,5 @@
 -- boz.levels against a fake game: lua5.4 lib/tests/levels_test.lua (from the SDK root).
-package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+package.path = "lib/?.lua;lib/?/init.lua;lib/tests/?.lua;" .. package.path
 
 local stored = {autostart_level = "apothicon_reborn", autostart_mode = "coop"}
 settings = {
@@ -13,7 +13,7 @@ settings = {
 }
 local fake = require("fake_game").install({strict = true})
 local executed = {}
-package.loaded["boz.console"] = {
+package.loaded["boz.systems.console"] = {
     ready = function() return true end,
     register = function() return true end,
     exec = function(line) table.insert(executed, line) return "" end,
@@ -25,7 +25,7 @@ for _, name in ipairs({"strcpy", "FrontEnd_SetMapVote", "FrontEnd_SetLobbyLevel"
     fake.functions[name] = function() return 0 end
 end
 
-local levels = require("boz.levels")
+local levels = require("boz.engine.levels")
 local check = fake.check
 
 -- The launcher's co-op request: read once, then the room opens after the menu settles.

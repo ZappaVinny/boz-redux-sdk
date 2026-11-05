@@ -23,9 +23,9 @@ def main() -> int:
     build_suite.build(blender)
     from bozkit import library, sdkhome
     real_home = sdkhome.data_dir()
-    runs = [('empty', None)]
+    runs = [('new', None)]
     if (real_home / 'library' / library.GAME_VERSION / 'index.sqlite').is_file():
-        runs.append(('debug', real_home))   # the user's own asset library, read only
+        runs.append(('new', real_home))   # the user's own asset library, read only
         runs.append(('kino', real_home))
     for template, home in runs:
         with tempfile.TemporaryDirectory() as temp:

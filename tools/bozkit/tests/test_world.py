@@ -215,7 +215,7 @@ class WorldTests(unittest.TestCase):
             world.save_prefab(self.source, world.Prefab('bad name'), meshes)
 
     def test_templates_need_the_game(self):
-        for template in ('kino', 'debug'):
+        for template in ('kino',):
             with self.assertRaises(world.WorldError):
                 world.template_world(template)
         with self.assertRaises(world.WorldError):

@@ -1,5 +1,5 @@
 -- boz.game and boz.hooks against a fake game: lua5.4 lib/tests/game_test.lua (from the SDK root).
-package.path = "lib/?.lua;" .. package.path
+package.path = "lib/?.lua;lib/?/init.lua;" .. package.path
 
 local memory, hooks_added, frames, cvars, executed = {}, {}, {}, {}, {}
 local level_name = "mymap"
@@ -18,19 +18,19 @@ game = {
 hook = {add = function(target, h) hooks_added[target] = h end}
 events = {on = function(name, fn) if name == "frame" then table.insert(frames, fn) end end}
 function log(message) print("log: " .. message) end
-package.loaded["boz.console"] = {
+package.loaded["boz.systems.console"] = {
     get = function(name) return cvars[name] end,
     register = function(name, value) cvars[name] = value end,
     exec = function(line) table.insert(executed, line) return "" end,
 }
 local listeners = {}
-package.loaded["boz.prefabs"] = {on = function(name, fn) listeners[name] = fn end}
+package.loaded["boz.objects.runtime"] = {on = function(name, fn) listeners[name] = fn end}
 
 local function check(condition, message)
     if not condition then error("FAILED: " .. message, 2) end
 end
 
-local rules = require("boz.game")
+local rules = require("boz.engine.game")
 cvars.StartingScore = "500"
 rules.start({level = "mymap", cvars = {StartingScore = 2000, ScoreConfigName = "boz_score_mymap"},
              power_on = true, grow_health = true, behaves_like = "callofthedead"})
@@ -76,7 +76,7 @@ package.preload["hooks.round_started"] = function()
     return function(data) result = data.round end
 end
 package.preload["hooks.broken"] = function() return 42 end
-local count = require("boz.hooks").start({"round_started", "broken"})
+local count = require("boz.engine.hooks").start({"round_started", "broken"})
 check(count == 1, "one hook started, the broken one skipped")
 listeners.round_started({round = 7})
 check(result == 7, "the hook gets the event's data")

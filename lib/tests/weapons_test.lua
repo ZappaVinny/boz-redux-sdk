@@ -1,12 +1,12 @@
 -- boz.weapons and weapon scripts against a fake game: lua5.4 lib/tests/weapons_test.lua (from the
 -- SDK root).
-package.path = "lib/?.lua;lib/tests/?.lua;" .. package.path
+package.path = "lib/?.lua;lib/?/init.lua;lib/tests/?.lua;" .. package.path
 local fake = require("fake_game").install({strict = true})
 local memory, symbols, functions, hooks, calls, frames = fake.memory, fake.symbols, fake.functions, fake.hooks,
     fake.calls, fake.frames
 local address, run_hook, frame, check, called = fake.address, fake.run_hook, fake.frame, fake.check, fake.called
 
-local hash = require("boz.hash")
+local hash = require("boz.engine.hash")
 local LEVEL, PLAYER, MANAGER = 0x8000, 0x8100, 0xa000
 local MP40, HEAVY = 0xb000, 0xb400
 memory[address("CLevelManager::s_instance")] = LEVEL
@@ -18,7 +18,7 @@ memory[MP40 + 0x5c], memory[HEAVY + 0x5c] = hash.name("mp40"), hash.name("mp40_h
 memory[MP40 + 0x2c], memory[MP40 + 0x30], memory[MP40 + 0x80] = 12, 64, 32
 memory[MP40 + 0x20c + 4] = 400
 
-local components = require("boz.components")
+local components = require("boz.engine.components")
 components.each = function(tbl)
     local done = false
     return function()
@@ -33,7 +33,7 @@ functions["CWeaponManager::GiveWeapon"] = function(manager, h)
 end
 functions["CIsComponentTableBase::Find"] = function() return 0 end
 
-local weapons = require("boz.weapons")
+local weapons = require("boz.engine.weapons")
 weapons.know({"mp40", "mp40_heavy"})
 local gun = weapons.current()
 check(gun and gun.name == "mp40" and gun:clip() == 12 and gun:reserve() == 64, "the weapon in hand")
@@ -57,24 +57,25 @@ memory[MANAGER + 0x1e4] = HEAVY
 check(weapons.take("mp40") and weapons.current().name == "mp40_heavy" and memory[MANAGER + 0x1e4] == 0, "take: the other gun comes up")
 memory[MANAGER + 0x1e0] = MP40
 
--- Weapon scripts through boz.prefabs.
+-- Weapon scripts: a class extending boz.Weapon.
 local dir = os.tmpname()
 os.remove(dir)
 os.execute("mkdir -p " .. dir .. "/weapons")
 local file = assert(io.open(dir .. "/weapons/Heavy.lua", "w"))
 file:write([[
-shots = 0
-function on_fire(data) shots = shots + 1; seen.fire = data.clip end
-function on_equip() seen.equip = self.name .. ":" .. self:clip() end
-function on_given() seen.given = true end
-function on_reload() seen.reload = true end
+local Heavy = boz.Weapon:extend("Heavy")
+function Heavy:on_fire(data) seen.fire = data.clip end
+function Heavy:on_equip() seen.equip = self.name .. ":" .. self:clip() end
+function Heavy:on_given() seen.given = true end
+function Heavy:on_reload() seen.reload = true end
+return Heavy
 ]])
 file:close()
 function loadscript(name, env)
     return assert(loadfile(dir .. "/" .. name:gsub("%.", "/") .. ".lua", "t", env))
 end
 seen = {}
-local prefabs = require("boz.prefabs")
+local prefabs = require("boz.objects.runtime")
 local bus = {}
 prefabs.on("weapon_fired", function(data) table.insert(bus, "fired:" .. data.weapon) end)
 prefabs.on("weapon_equipped", function(data) table.insert(bus, "equipped:" .. data.weapon) end)
@@ -99,10 +100,10 @@ os.execute("rm -rf " .. dir)
 
 -- The starting weapon: set right before the game gives it, on this map only.
 local registered = {}
-package.loaded["boz.console"] = {register = function(name, value) registered[name] = value end}
+package.loaded["boz.systems.console"] = {register = function(name, value) registered[name] = value end}
 package.loaded["boz.world_data"] = {start_weapon = {name = "mp40", reserve = 99, level = "my_map"}}
 functions["CPerk::Init"] = function() return 0 end
-require("boz.world").start()
+require("boz.game.world").start()
 memory[LEVEL + 0x55] = "my_map"
 run_hook("WeaponManager_GiveStartWeapons", {MANAGER})
 check(registered.PlayerStartWeapon == "mp40" and registered.PlayerStartAmmo == "99",

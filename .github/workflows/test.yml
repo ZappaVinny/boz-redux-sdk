@@ -35,7 +35,6 @@ jobs:
       - name: Generated files are current
         run: |
           python3 tools/stdlib/generate_data.py
-          python3 tools/stdlib/generate_doc.py
           python3 tools/docgen/events_doc.py
           python3 tools/docgen/weapons_doc.py
           python3 tools/stdlib/sync.py --check

@@ -168,6 +168,8 @@ def realize() -> None:
                 label = made.name
         elif kind == "window":
             made = _place_window(scene, position, rotation)
+        elif kind == "debris":
+            made = _place_debris(scene, position, rotation)
         elif kind == "volume":
             made = convert.volume_object(world.Volume(label, obj.get("boz_volume", "trigger"),
                                                       position, rotation), scene)
@@ -266,6 +268,21 @@ def _place_window(scene, position, rotation):
         return None
     barricade.name, spawn.name = "Barricade", "Spawn"
     return objects.group_into_prefab(parts, "Window")
+
+
+def _place_debris(scene, position, rotation):
+    """Debris (boz.Debris, a door of yours): a model that blocks walking and a Use volume,
+    grouped into a prefab of yours. Swap the model for any of your own."""
+    from . import objects, shapes
+    model = convert.model_object(world.Model("Rubble", position, rotation, collision="solid",
+                                             shape="box"), scene,
+                                 data=shapes.shape_mesh("wall", "debris"))
+    model.boz.role = "model"
+    use = convert.volume_object(world.Volume("Use", "use", position, rotation, who="players",
+                                             prompt="Clear the debris", cost=750), scene)
+    prefab = objects.group_into_prefab([model, use], "Debris")
+    prefab["boz_piece"] = "debris"
+    return prefab
 
 
 def _realize_timer():

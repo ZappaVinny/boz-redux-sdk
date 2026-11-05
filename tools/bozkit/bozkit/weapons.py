@@ -491,8 +491,8 @@ def delete_def(source: Path, name: str) -> None:
 
 
 def default_index(game_weapons: list[GameWeapon], template: str) -> list[str]:
-    """The weapons a new project lists: the Colt for an empty map, else every gun of its base."""
-    if template in ('empty', ''):
+    """The weapons a new project lists: the Colt for a new map, else every gun of its base."""
+    if template in ('new', ''):
         return [DEFAULT_START]
     return [w.name for w in game_weapons if is_gun(w)]
 
