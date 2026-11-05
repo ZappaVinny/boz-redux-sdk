@@ -309,13 +309,13 @@ Invisible boxes that send events to scripts. `size` is in centimetres.
 ## Compatibility
 
 Which versions of the game, the client and the SDK's formats work together. BOZ Redux is in
-development: there is no public SDK release yet, and formats can still change. When one of the
+development, and formats can still change. When one of the
 formats below changes, its version number goes up and these notes say what to do.
 
 | Component | Current version | Notes |
 | --- | --- | --- |
 | Game | Android 1.0.11 (versionCode 1045111) | The only supported version. A mod's `game` must be `1.0.11`. |
-| Client | v0.1.1 development line | Reads game definition schema 1, mod folders with `mod.toml`, and the `maps` list. |
+| Client | v0.3.1 or newer | SDK 0.2.0 needs it to load the standard library. Reads game definition schema 1, mod folders with `mod.toml`, and the `maps` list. |
 | Game definition | Schema 1, target `boz-1.0.11` | `gamedef/gamedef.toml`; the client and the SDK check it before loading. |
 | Projects | Schema 2 (`boz-project.toml`) | Schema 1 projects still load and are saved as schema 2. |
 | Map worlds | Format 3 (`source/world.json`) | Older formats are refused. |
