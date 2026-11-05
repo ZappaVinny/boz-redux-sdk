@@ -11,6 +11,9 @@ local reflect = {}
 
 local classes = require("boz.engine.reflection_data")
 
+-- A field the game's reflection leaves out (CTrapSwitch's cost: read by its use and its prompt).
+classes.CTrapSwitch.fields.m_Cost = {0x88, 4, "unsigned int"}
+
 local SCALAR = {
     ["unsigned int"] = "u32", int = "i32", short = "i16", ["unsigned short"] = "u16",
     char = "i8", ["unsigned char"] = "u8", float = "f32", CIsTimer = "u32",
@@ -41,6 +44,14 @@ local function find_field(class_name, field, base_offset, seen)
     end
     seen[class_name] = true
     local own = info.fields[field]
+    if not own then      -- the game's hashes ignore case: m_Cost is CWeaponChalkOutline's m_cost
+        for name, entry in pairs(info.fields) do
+            if name:lower() == field:lower() then
+                own = entry
+                break
+            end
+        end
+    end
     if own then
         return base_offset + own[1], own[2], own[3]
     end

@@ -20,13 +20,13 @@ def main() -> int:
     notes = tomllib.loads((ROOT / 'tools/symbols/event_notes.toml').read_text(encoding='utf-8'))
     known = {e['name'] for e in events}
     rows = list(events) + [{'name': n} for n in runtime.get('events', {}).get('names', []) if n not in known]
-    lines = ['# Game events', '',
+    lines = ['# Low-level events', '',
              'The game\'s systems talk to each other with events named `SUBJECT_*` (see',
              '[How the game works](how-the-game-works.md#events)). This page lists every one, with the',
              'classes that send and handle it and, where known, what its two arguments mean.', '',
              '## Following an event', '',
              '```lua',
-             'local game_events = require("boz.game_events")',
+             'local game_events = require("boz.engine.game_events")',
              '',
              'game_events.on("SUBJECT_ADD_SCORE", function(event)',
              '    log("points earned: " .. event.a)',
@@ -34,8 +34,7 @@ def main() -> int:
              '```', '',
              'The handler gets `{name, id, subject, sender, a, b}`; `a` and `b` mean what the notes say',
              "(pointers to the game's structs where noted). Returning true from a handler stops the event.",
-             'Most mods never need this: the [standard library](lua-mods.md) already turns the common',
-             'events into functions such as `boz.rounds.on_start`.', '',
+             'Most mods never need this: [Events](events.md) lists what the common ones become.', '',
              '## All events', '',
              f'{len(rows)} events; {sum(1 for r in rows if r["name"] in notes)} with notes on their arguments.',
              'This list is generated from the game definition by `tools/docgen/events_doc.py`.', '',

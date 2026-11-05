@@ -231,6 +231,8 @@ HOOK_EVENTS = [
     ('nuke', 'A nuke went off', '{}'),
     ('carpenter', 'A carpenter rebuilt the barricades', '{}'),
     ('trap_activated', 'A trap was switched on', '{}'),
+    ('trap_cooled', 'A trap is ready again', '{trap = name}'),
+    ('barricade_repaired', 'A board went back on a barricade', '{}'),
     ('teleporter_activated', 'A teleporter was used', '{}'),
 ]
 

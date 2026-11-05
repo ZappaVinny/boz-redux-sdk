@@ -35,6 +35,8 @@ function Player:set_god(on) return engine.set_god(on) end
 
 --- Gives a perk by name ("Juggernog", "Quick Revive", ...).
 function Player:give_perk(name) return engine.give_perk(name) end
+--- Takes a perk away.
+function Player:take_perk(name) return engine.take_perk(name) end
 --- True when the player has the perk.
 function Player:has_perk(name) return (engine.perks() or {})[name] == true end
 --- The perks the player has ({["Juggernog"] = true, ...}).

@@ -430,7 +430,7 @@ def dump_console_doc(db, notes):
         "Every console variable (cvar) and developer command in *Call of Duty: Black Ops Zombies*",
         "1.0.11. Variables are the game's settings and cheats (`WalkSpeed`, `UnlimitedHealth`);",
         "commands do things (`SwitchPowerOn`, `RestartLevel`). Mods use them through",
-        "[`boz.console`](lua-mods.md), and players through the Developer mod's console.",
+        "[`boz.console`](scripting.md), and players through the Developer mod's console.",
         "",
         "This page is generated from the game definition (`gamedef/console/boz-1.0.11.toml`) and the",
         "notes in `tools/symbols/console_notes.toml`; see",

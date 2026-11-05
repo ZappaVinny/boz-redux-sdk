@@ -38,6 +38,30 @@ class ScriptTests(unittest.TestCase):
             with self.assertRaises(scripts.ScriptError):
                 scripts.parse_properties(text)
 
+    def test_templates(self):
+        self.assertEqual(scripts.stub('Bare', 'empty', 'Door'),
+                         'local Bare = boz.Door:extend("Bare")\n\nreturn Bare\n')
+        luac = shutil.which('luac')
+        for class_name, _label, _hooks in scripts.OBJECT_CLASSES:
+            with tempfile.TemporaryDirectory() as temp:
+                relative = scripts.new_script(temp, 'Thing', 'object', class_name)
+                text = (Path(temp) / relative).read_text(encoding='utf-8')
+                self.assertIn(f'local Thing = boz.{class_name}:extend("Thing")', text)
+                self.assertTrue(text.endswith('return Thing\n'))
+                if luac:
+                    self.assertEqual(subprocess.run([luac, '-p', str(Path(temp) / relative)]).returncode, 0)
+        with self.assertRaises(scripts.ScriptError):
+            scripts.stub('Thing', 'object', 'Nope')
+        self.assertIn('boz.Debris.start(self)', scripts.stub('Rubble', 'object', 'Debris'))
+        self.assertNotIn('.start(self)', scripts.stub('Vault', 'object', 'Door'))
+
+    def test_new_script_keeps_a_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            relative = scripts.new_script(temp, 'Mine', 'empty')
+            (Path(temp) / relative).write_text('-- mine\n', encoding='utf-8')
+            scripts.new_script(temp, 'Mine', 'object', 'Door')
+            self.assertEqual((Path(temp) / relative).read_text(encoding='utf-8'), '-- mine\n')
+
     def test_stub(self):
         with tempfile.TemporaryDirectory() as temp:
             relative = scripts.new_script(temp, 'vault')

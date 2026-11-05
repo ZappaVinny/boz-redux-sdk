@@ -57,14 +57,39 @@ function Prefab:set_visible(visible)
 end
 
 function Prefab:set_blocks_walking(blocks)
+    self.walking_blocked = blocks
     engine.set_navmesh(self.name, not blocks)
     each(self, function(handle) handle:set_blocks_walking(blocks) end)
     return self
 end
 
 function Prefab:set_stops_bullets(stops)
+    self.bullets_stopped = stops
     each(self, function(handle) handle:set_stops_bullets(stops) end)
     return self
+end
+
+-- True when the map or a script says so of it, or of any of its parts.
+local function any_part(self, method, own)
+    if own ~= nil or #self._members == 0 then
+        return Object[method](self)
+    end
+    for _, name in ipairs(self._members) do
+        local part = require("boz.objects.runtime").get(name)
+        if part and part[method](part) then
+            return true
+        end
+    end
+    return Object[method](self)
+end
+
+function Prefab:blocks_walking() return any_part(self, "blocks_walking", self.walking_blocked) end
+function Prefab:stops_bullets() return any_part(self, "stops_bullets", self.bullets_stopped) end
+
+--- Its rotation, or its first part's when it has none of its own.
+function Prefab:rotation()
+    local name = self._members[1]
+    return Object.rotation(self) or (name and Object.rotation({_handle = engine.get(name)})) or nil
 end
 
 --- The middle of its parts, or nil when none is in the level.

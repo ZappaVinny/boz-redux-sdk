@@ -15,7 +15,7 @@ submodule (boz-redux-gamedef: symbols, reflection, events, console).
   `events`, `console`) and back (`to-json`).
 - `tools/bozkit/`: shared Python SDK compiler and asset toolkit (`new`, `inspect`, `validate`,
   `build`, `install`, `package`, `extract`, plus `dump`, `set`, `save`, `settings`, `names`). Tests
-  in `tools/bozkit/tests` use synthetic data only. Project guide: `docs/lua-mods.md`; formats:
+  in `tools/bozkit/tests` use synthetic data only. Project guide: `docs/script-mods.md`; formats:
   `docs/how-the-game-works.md`. `bozkit.desktop` is the optional PySide6 frontend (its look: `bozkit/desktop_style.py`, brand files as package data in `bozkit/branding/`) and must call the same
   compiler rather than maintaining its own serializers.
 - `lib/boz/`: the **standard lib**, object-oriented: `require("boz")` (`init.lua`) is the surface
@@ -26,12 +26,11 @@ submodule (boz-redux-gamedef: symbols, reflection, events, console).
   Developer mod keeps one (`python3 tools/stdlib/sync.py`).
 - `mods/developer`: the reference mod (console overlay, cheats, noclip). Linked into the client's
   `mods/` for testing.
-- `docs/`: a few large pages, one per big subject (each file's `#` title is a main section of
-  the docs website; `##`/`###` headings split it). Add to an existing page unless the subject is
-  really different. `docs/README.md` is the introduction and page list. Generated pages and their
+- `docs/`: a copy of the website's docs (`boz-redux-site/docs` is the master), written by hand for
+  a new modder. Each file's `#` title is a page of the site; `##`/`###` headings split it. `docs/README.md` is the introduction and page list. Generated pages and their
   generators are listed in `docs/contributing.md`. `docs/internal/` is gitignored notes.
 - `tools/navmesh/`: `boz-navmesh`, the native Recast helper bozkit runs to rebuild navmesh tiles
-  (CMake; `tools/navmesh/third_party/recast` is the recastnavigation 1.6.0 submodule). Guide: `docs/map-editor.md, Navigation meshes`.
+  (CMake; `tools/navmesh/third_party/recast` is the recastnavigation 1.6.0 submodule). Guide: `docs/map-internals.md, Navigation meshes`.
 - `tools/destin/`: submodule for `dade` (`uv tool install dade`). Always pass `--no-delete` to
   `dade marmalade extract-dz`; it deletes the source archive by default.
 - `re/` (gitignored): converted ELF, Ghidra project `re/ghidra/BOZ`, generated reports. Contains

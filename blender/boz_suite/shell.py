@@ -107,9 +107,13 @@ class BOZ_MT_help(Menu):
         from pathlib import Path
         import os
         docs = Path(os.environ.get("BOZ_SDK_ROOT", "")) / "docs"
-        for label, name in (("The map editor", "map-editor.md"),
+        for label, name in (("The editor", "editor.md"),
+                            ("How a map works", "how-a-map-works.md"),
+                            ("Prefabs", "prefabs.md"),
+                            ("Game prefabs", "game-prefabs.md"),
+                            ("Events", "events.md"),
+                            ("Scripting reference", "scripting.md"),
                             ("Weapons, models, effects and sounds", "weapons-and-assets.md"),
-                            ("Standard library", "standard-library.md"),
                             ("All documentation", "README.md")):
             layout.operator("boz.open_doc", text=label, icon="HELP").filepath = str(docs / name)
 

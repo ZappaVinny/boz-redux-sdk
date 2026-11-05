@@ -90,6 +90,18 @@ local function round()
     return require("boz.game.rounds").current() or 0
 end
 
+local TRAP_SUBJECT = 8    -- CTrap: its CIsSubject
+
+-- The name of the trap this subject is.
+local function trap_of(subject)
+    local reflect = require("boz.engine.reflect")
+    for trap in require("boz.engine.pieces").each("CTrap") do
+        if reflect.object(trap.component, "CTrap") + TRAP_SUBJECT == subject then
+            return (name_of(trap.entity))
+        end
+    end
+end
+
 local function relay(event, name, data_of, options)
     require("boz.engine.game_events").on(event, function(e)
         emit(name, data_of and data_of(e) or {})
@@ -138,6 +150,9 @@ local function start()
     relay("SUBJECT_NUKE_NOW", "nuke")
     relay("SUBJECT_CARPENTER_ACTIVATED", "carpenter")
     relay("SUBJECT_ON_TRAP_ACTIVATED", "trap_activated")
+    relay("SUBJECT_BARRICADE_FIX", "barricade_repaired")
+    relay("SUBJECT_ON_TRAP_IDLE", "trap_cooled", function(e) return {trap = trap_of(e.subject)} end,
+          {dedupe_frames = 0})
     relay("SUBJECT_ON_TELEPORTER_ACTIVATED", "teleporter_activated")
     hook.add(core.sym("CScoreManager::AddScore"), {before = function(call)
         local delta = call:arg(3) & 0xffffffff

@@ -1,7 +1,7 @@
 # Blender: the BOZ Redux editor (code)
 
 `boz_suite/` is the BOZ Redux editor, a Blender 5.2 LTS application template. How to use it is in
-the documentation: [The map editor](../docs/map-editor.md) and [Weapons, models, effects and sounds](../docs/weapons-and-assets.md). This file is
+the documentation: [The editor](../docs/editor.md) and [Weapons, models, effects and sounds](../docs/weapons-and-assets.md). This file is
 a map of the code.
 
 `tools/build_suite.py` assembles the editor with the bozkit modules into `build/suite/` (a Blender

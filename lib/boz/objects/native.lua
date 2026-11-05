@@ -91,12 +91,17 @@ local PowerSwitch = define("PowerSwitch", "CPowerSwitch")
 --- Turns the power on.
 function PowerSwitch:turn_on() return self:use_free() end
 
---- Trap switch. Events: activated.
+--- Trap switch. Events: activated, cooled.
 local TrapSwitch = define("TrapSwitch", "CTrapSwitch")
 --- Runs its traps without paying.
 function TrapSwitch:activate() return self:use_free() end
+--- True while one of its traps runs or cools down (a use then does nothing and costs nothing).
+function TrapSwitch:busy()
+    local entity = self._handle:entity_pointer()
+    return pieces.trap_switch_busy(entity)
+end
 
---- Trap. Events: activated.
+--- Trap. Events: cooled.
 local Trap = define("Trap", "CTrap")
 --- Runs the trap for seconds (default: its own time).
 function Trap:activate(seconds)
@@ -112,7 +117,7 @@ function Trap:activate(seconds)
     return true
 end
 
---- Wall buy. Events: bought.
+--- Wall buy. Events: bought (a weapon or its ammo).
 define("WallBuy", "CWeaponChalkOutline")
 
 --- Window barricade. Events: repaired.

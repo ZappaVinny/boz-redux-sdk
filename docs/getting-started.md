@@ -1,8 +1,7 @@
 # Getting started
 
-This page takes you from nothing to a working mod and a playable map. First you install the
-client, the SDK and the editor, then you meet the SDK app, and then you make a small script mod
-and a small map, step by step.
+This page takes you from nothing to a playable map with your own scripted object. Install the
+tools, build a small room, play it, then make something in it react to you.
 
 ## Installation
 
@@ -27,39 +26,160 @@ wrong). The SDK asks for this folder the first time it starts.
 
 ### 2. The SDK
 
-Download the SDK from the [SDK releases](https://github.com/ZappaVinny/boz-redux-sdk/releases)
-and unzip it anywhere.
+The SDK needs Python 3.11 or newer and Git.
 
-- **Windows:** run `boz-sdk.exe`.
-- **Linux:** the SDK needs Python 3.11 or newer. In the unzipped folder run
-  `python3 -m pip install -e '.[desktop]'` once, then start it with `./boz-sdk` (or `boz-sdk`).
-  `boz-sdk --add-to-menu` adds it, with its icon, to your desktop's application menu.
+```bash
+git clone --recurse-submodules https://github.com/ZappaVinny/boz-redux-sdk.git
+cd boz-redux-sdk
+python3 -m pip install -e '.[desktop]'
+```
 
-The release already contains the map editor and the navmesh helper (which rebuilds where
-players and zombies can walk after you change a map's walls or floors).
+This installs two commands:
 
-The `bozkit` [command line](sdk-reference.md#bozkit-command-line) comes with a Python install
-(`pip install -e .` in the SDK folder): build, install and package projects, and read or edit
-game files.
+- `boz-sdk` starts [the SDK app](#the-sdk-app): your projects, the asset library and the editor.
+- `bozkit` is the [command line](sdk-reference.md#bozkit-command-line): build, install and package projects,
+  and read or edit game files.
 
-### 3. Blender (maps only)
+You can also run the app without installing, from the checkout: `./boz-sdk`. On Linux,
+`boz-sdk --add-to-menu` adds it, with its icon, to your desktop's application menu. Leave out
+`[desktop]` if you only want the command line.
 
-The map editor runs in Blender 5.2 LTS: install it from
-[blender.org](https://www.blender.org/download/lts/). The SDK app finds it on your system;
-**Settings** in the app can point at another Blender.
+### 3. The map editor (maps only)
 
-### From source
+The map editor is Blender 5.2 LTS with the SDK's editor add-on. Install Blender 5.2 LTS from
+[blender.org](https://www.blender.org/download/lts/), or put it in the SDK's `blender/` folder.
+The SDK app finds it there or on your `PATH`; **Settings** in the app can point at another
+Blender. The app prepares the editor itself the first time you open a map.
 
-To work on the SDK itself, clone it with its submodules, install it with
-`python3 -m pip install -e '.[desktop]'` and build the navmesh helper with CMake
-(`tools/navmesh`); see [Contributing](contributing.md#working-on-the-sdk).
+#### The navmesh helper
+
+When you change a map's walls or floors, the SDK rebuilds where players and zombies can walk
+with a small native helper. Build it once (needs CMake and a C++ compiler):
+
+```bash
+git submodule update --init tools/navmesh/third_party/recast
+cmake -S tools/navmesh -B tools/navmesh/build -DCMAKE_BUILD_TYPE=Release
+cmake --build tools/navmesh/build -j
+```
+
+Without it everything still works, but edits that change collision keep the old walkable area
+(the editor tells you so when you save). See [Navigation meshes](map-internals.md#navigation-meshes).
 
 ### Check that it works
 
-1. Run `boz-sdk.exe` (Linux: `./boz-sdk`), and choose your client folder when it asks.
+1. Run `boz-sdk`, and choose your client folder when it asks.
 2. The **Client** page should say the game data is installed.
 3. The **Library** page builds the asset library from your game files the first time (about
    half a minute). When it shows previews of the game's models, you are ready.
+
+## Your first map
+
+You need the tools above, and the asset library built once (the **Library** page in the SDK app).
+
+### 1. Make a new map
+
+In the SDK app, click **New project**, choose **Map**, pick **New map** and name it `my_arena`. The
+name becomes the level's name, so it can't be one of the game's own maps.
+
+Click **Open in Editor**. The editor opens on the **World** tab. You start with a floor and four
+player spawns, and players start with the Colt. On the left is the asset browser.
+
+### 2. Add a wall, a perk and some zombies
+
+1. Click **Shapes** in the World header and add a **Wall**. Move it to the edge of the floor with
+   G. Shapes are ready to use: a wall blocks walking and stops bullets.
+2. In the asset browser, open **Game prefabs → Machines** and drag **Juggernog** onto the floor.
+3. From the same group, drag in the **Power switch**. Perk machines wait for the power.
+4. From **Level markers → Spawns**, drag a **Zombie spawn** onto the floor and set its **Type** to
+   **Ground**.
+
+Select the perk machine. Its **Settings** box in the **Game** panel shows its **Cost**. Set it to
+1000.
+
+Move objects with G, turn them with R. One Blender unit is one game centimetre.
+
+### 3. Build & Run
+
+Click **Build & Run** at the right of the top bar. The editor saves the map, builds it into a mod,
+and starts the game straight into your map. Turn on the power, buy the perk, and shoot some
+zombies.
+
+If something stops the build, the **Problems** panel in the sidebar lists it, with a button that
+selects the object at fault.
+
+### 4. Your first script
+
+Now make something of your own: a skull that pays out when you shoot it.
+
+1. Drag a small model from **Models** onto the floor.
+2. From **Volumes**, drag a **Hit** volume over it and scale it to cover the model.
+3. Select both and press **Ctrl+G**. They're now a prefab. Name it `Skull`.
+4. In the **Script** box of the **Game** panel, click **New**, choose **Basic prefab** and click OK.
+   The **Scripts** tab opens.
+5. Replace what is there with this:
+
+```lua
+local Skull = boz.Prefab:extend("Skull")
+
+function Skull:on_hit(player)
+    self:hide()
+    player:give_points(500)
+    player:message("Skull found")
+end
+
+return Skull
+```
+
+Click **Build & Run** and shoot the skull. It vanishes, and you get 500 points.
+
+That's the whole idea: **a prefab is parts plus a script, and hooks like `on_hit` say what it does
+when things happen.** Everything else builds on this.
+
+### 5. Play it from the client
+
+Your map is now a mod in the client. In the client's launcher, press **PLAY** and it's in the list.
+**PLAY SOLO** starts it. **CO-OP ROOM** joins a friend's room on the same map, or hosts one
+(everyone needs the map's mod).
+
+### Where next
+
+- [How a map works](how-a-map-works.md): the model behind all of this, in one page.
+- [Prefabs](prefabs.md): everything a prefab can do, with recipes to copy.
+- [Game prefabs](game-prefabs.md): change perk machines, doors and the rest.
+
+## Your first mod
+
+A script mod changes the game without a map. This one gives you points with a key.
+
+In the SDK app, click **New project**, choose **Script-only mod** and the **Blank** template, and
+name it `hello`. Click **Open folder** and replace `scripts/main.lua` with:
+
+```lua
+local boz = require("boz")
+
+log("Hello from my first mod")
+
+input.bind("F5", function()
+    boz.player():give_points(1000)
+end)
+
+boz.on("round_started", function(data)
+    boz.player():message("Round " .. data.round)
+end)
+```
+
+Click **Run in game**, start a match and press F5.
+
+Everything your mod logs goes to `boz-log.txt` in the client folder, and errors show there too,
+with the line they happened on:
+
+```text
+[lua] hello: Hello from my first mod
+```
+
+An error never crashes the game: the part that failed is switched off until you restart.
+
+More in [Script mods](script-mods.md).
 
 ## The SDK app
 
@@ -73,7 +193,7 @@ is installed. Without game data, script mods still work, but maps cannot be buil
 ### Projects
 
 The project list, with search and sorting. A **project** is the source of one mod (see
-[Projects and packaging](lua-mods.md#projects-and-packaging)).
+[Projects and packaging](script-mods.md#projects-and-packaging)).
 
 - **New project** makes a map or a script mod from a template. Projects go in `~/BOZ Projects`
   unless you choose another folder in **Settings**.
@@ -88,7 +208,7 @@ The project list, with search and sorting. A **project** is the source of one mo
   starts the game.
 - **Build & Run** (maps) builds the map, installs it into the client last in the load order, and
   starts the game straight into the map once the main menu is up.
-- **Open in Editor** (maps) opens the map in [the map editor](map-editor.md), which has its
+- **Open in Editor** (maps) opens the map in [the editor](editor.md), which has its
   own Build & Run with start options (unlimited health or points, starting points).
 - The game's log, filtered to your mod and to errors.
 
@@ -136,153 +256,3 @@ Settings, the project list and the asset library live in the SDK data folder:
 | `library/1.0.11/stamp.json` | The game files and library version the library was built from |
 
 Tools can read the library with `bozkit.library.Library`.
-
-## Your first mod
-
-In ten minutes you will make a mod that switches unlimited ammo on and off with F5 and shows a
-label while it is on. It needs no reverse engineering, only a text editor.
-
-### 1. Create the project
-
-In the SDK app, click **New project**, choose **Script-only mod** and the **Hotkey** template, and
-name it `hello`. Or from a terminal:
-
-```bash
-bozkit new hello --id hello --name Hello --author you --template hotkey
-```
-
-You get a folder like this:
-
-```text
-hello/
-  boz-project.toml     the mod's name, version and author
-  scripts/
-    main.lua           your code
-    boz/               the standard library, a copy the mod carries
-```
-
-### 2. Write the script
-
-Open `scripts/main.lua` (**Open folder** in the app opens it in VS Code) and replace what is
-there with:
-
-```lua
-local console = require("boz.console")
-
-log("Hello from my first mod")
-
-local ammo = false
-
-input.bind("F5", function()
-    ammo = not ammo
-    console.set("WeaponsUnlimitedAmmo", ammo)
-end)
-
-events.on("frame", function()
-    if ammo then
-        ui.window("hello", {x = 20, y = 20, auto_size = true, no_title = true, no_inputs = true}, function()
-            ui.text("Unlimited ammo")
-        end)
-    end
-end)
-```
-
-What it does:
-
-- `require("boz.console")` loads the standard library's console module. `WeaponsUnlimitedAmmo`
-  is one of the game's own console variables; the
-  [console reference](console-reference.md) lists all of them.
-- `input.bind` runs a function when a key is pressed.
-- `events.on("frame", ...)` runs every frame. `ui.window` draws a small window over the game
-  for as long as you keep calling it.
-
-### 3. Run it
-
-Click **Run in game** on the project's page in the SDK app. It installs the mod into the client
-and starts the game. From a terminal, the same is:
-
-```bash
-bozkit install hello --client path/to/boz-redux --force
-```
-
-then start the game from the client's launcher. Start a match and press F5.
-
-### 4. Read the log
-
-Everything your mod prints goes to `boz-log.txt` in the client folder:
-
-```text
-[lua] hello: Hello from my first mod
-```
-
-Errors show up there too, with the line they happened on. An error never crashes the game: the
-part of the mod that failed is switched off until you restart.
-
-Next, [Lua mods](lua-mods.md) explains how scripts run and has recipes for settings,
-pause-menu options, overlays and hooks; the [standard library](standard-library.md) lists
-everything `boz.*` can do.
-
-## Your first map
-
-This walk-through makes a small playable map: the debug arena with a perk machine and a wall buy
-you place yourself. You will use the SDK app, the map editor and the client.
-
-You need Blender set up ([Installation](#3-the-map-editor-maps-only)), and the SDK app's asset
-library built once (the **Library** page).
-
-### 1. Create a map project
-
-In the SDK app, click **New project**, choose **Map**, and pick a template:
-
-| Template | What you start with |
-| --- | --- |
-| **Empty** | A 6 m floor and the four player spawns. No zombies; the Colt is the only weapon. |
-| **Debug arena** | A walled 24 m square with zombie spawns, Juggernog and the power switch. The quickest way to test. |
-| **Kino der Toten**, **Call of the Dead**, **Ascension**, **Tutorial** | The whole original map, to change and add to. |
-
-Pick **Debug arena** and name the map `my_arena`. The name becomes the level's name in the game,
-so it cannot be one of the game's own maps.
-
-### 2. Open it in the editor
-
-Click **Open in Editor**. The editor opens on the **World** tab with the arena in the viewport.
-On the left is the asset browser with the game's objects, grouped as **Game prefabs** (perk
-machines, wall buys, doors, ...), **Level markers** (spawns, jump points), **Volumes** and
-**Models**.
-
-### 3. Add things
-
-1. In the asset browser, open **Game prefabs → Machines** and drag **Speed Cola** into the
-   arena.
-2. A wall buy sells one of the map's weapons, and the debug arena starts with the Colt alone.
-   Switch to the **Weapons** tab, click **Import from game** and pick the MP40. Then go back to
-   the **World** tab.
-3. Open **Game prefabs → Buying** and drag a **Wall buy** onto one of the walls. In the
-   Properties editor's **Game** panel, click **Choose…** and pick the MP40.
-4. Select the perk machine. Its **Game** panel shows its settings: set **Cost** to 1000.
-
-Move objects with G, turn them with R, as anywhere in Blender. One Blender unit is one game
-centimetre.
-
-### 4. Build & Run
-
-Click **Build & Run** at the right of the top bar. The editor saves the map, builds it into a mod
-in your client, and starts the game. Once the main menu is up, the game goes straight into your
-map. Buy the perk, buy the MP40, and play a few rounds.
-
-If something stops the build, the **Problems** tab in the sidebar lists it, with a button that
-selects the object at fault. The build output and the game's log are in the editor's **Log**
-areas.
-
-### 5. Play it from the client
-
-Your map is now a mod in the client, and the client knows it is a map. In the client's launcher,
-press **PLAY**: it lists every map from your enabled mods (yours shows your mod's name). **PLAY
-SOLO** starts the game straight into it. **CO-OP ROOM** takes you straight into the game's Wi-Fi
-co-op room for that map: it joins a friend's room on the same map when it finds one, or hosts one
-(everyone needs the map's mod). **MAIN MENU** starts the game normally. No scripting is needed
-for this; every map built by the SDK can be started this way.
-
-Next, [The map editor](map-editor.md) explains every tab and tool, and
-[Weapons, models, effects and sounds](weapons-and-assets.md) covers your own guns, models and
-audio.

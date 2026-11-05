@@ -30,6 +30,7 @@ local COMPONENT_ENTITY = 0xc
 local ENTITY_ID = 4
 local HIERARCHY_CHILDREN = 0x24
 local TRANSFORM_POSITION = 0x5c
+local TRANSFORM_AXES = 0x38      -- its world matrix: three rows, then the position
 
 local function find_component(class_name, entity)
     if entity == 0 then
@@ -204,6 +205,16 @@ local function map_state()
     return start_state
 end
 
+--- True when the map gave the object collision (scripted objects; bullets hit it).
+function objects.starts_solid(name)
+    return map_state().solid[string.lower(name)] == true
+end
+
+--- True when the map gave the object a blocking walkable area.
+function objects.starts_blocking(name)
+    return map_state().blocking[string.lower(name)] == true
+end
+
 --- Shows or hides the object. Visible is the master switch: a hidden object is seen by nobody,
 --- stops no bullets and blocks no walking (and, as a volume, sends no events and shows no
 --- prompt); shown again, it gets back the collision and blocking the map gave it. Returns the
@@ -337,6 +348,27 @@ end
 function objects.position_of(entity)
     local transform = find_component("CIsTransform", entity or 0)
     return transform and objects.transform_position(transform)
+end
+
+--- True when a position is inside its collision box (a Trigger volume's), turned as it is.
+function Object:contains(point)
+    local entity = self:entity_pointer()
+    local box = find_component("CIsCollisionBox", entity)
+    local transform = find_component("CIsTransform", entity)
+    if not box or not transform or not point then
+        return false
+    end
+    local reflect = require("boz.engine.reflect")
+    local half = reflect.get(reflect.object(box, "CIsCollisionBox"), "CIsCollisionBox", "m_halfAxis")
+    local centre = objects.transform_position(transform)
+    local dx, dy, dz = point.x - centre.x, point.y - centre.y, point.z - centre.z
+    for i, limit in ipairs({half.x, half.y, half.z}) do
+        local axis = core.read_vec3(transform + TRANSFORM_AXES + (i - 1) * 12)
+        if math.abs(dx * axis.x + dy * axis.y + dz * axis.z) > limit then
+            return false
+        end
+    end
+    return true
 end
 
 local function point_of(target)

@@ -34,6 +34,7 @@ zombies.KINDS = {zombie = "CAIControllerZombie", dog = "CAIControllerHellhound",
 
 local Zombie = require("boz.class"):extend("Zombie")   -- boz.Zombie
 zombies.Zombie = Zombie
+Zombie.zombie = true      -- tells it from a player in a volume's hooks
 
 local function make(entity, controller, class_name)
     class_name = class_name or "CAIControllerZombie"

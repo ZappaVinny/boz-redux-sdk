@@ -15,8 +15,8 @@ This was created with a human steered Generative AI (LLM) setup, minimal human v
 ## Documentation
 
 Start at the [introduction](docs/README.md), or go straight to
-[Getting started](docs/getting-started.md), [Lua mods](docs/lua-mods.md),
-[The map editor](docs/map-editor.md) or the [standard library](docs/standard-library.md).
+[Getting started](docs/getting-started.md), [How a map works](docs/how-a-map-works.md),
+[Prefabs](docs/prefabs.md) or the [Scripting reference](docs/scripting.md).
 Maintainers: [Contributing](docs/contributing.md).
 
 ## Getting started

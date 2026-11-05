@@ -25,6 +25,7 @@ for name, class in pairs(native) do
     end
 end
 boz.Debris = require("boz.objects.debris")
+boz.Volume = require("boz.objects.volume")
 boz.Player = require("boz.game.player")
 boz.Weapon = require("boz.game.weapon")
 

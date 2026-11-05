@@ -6,9 +6,9 @@ stores its data in files.
 
 ## The game's systems
 
-This section covers the systems you will meet, what they do, and where to change them. Function and event names are the ones in the game definition
-(`gamedef/`), so you can hook them or look up their notes. When the standard lib already covers
-something, that is the easier way; see the [standard library](standard-library.md).
+Function and event names are the ones in the game definition (`gamedef/`), so you can hook them
+or look up their notes. When the standard lib already covers
+something, that is the easier way; see the [Scripting reference](scripting.md).
 
 ### The big picture
 
@@ -32,8 +32,8 @@ about Zombies.
 
 Systems announce things with events named `SUBJECT_*`: `SUBJECT_NEW_WAVE`, `SUBJECT_ZOMBIE_DEATH`,
 `SUBJECT_ADD_SCORE`, `SUBJECT_ON_PERK_GAINED`, ... A system sends an event; everything that
-subscribed to it gets it in its `OnEvent`. `gamedef/events/boz-1.0.11.toml` lists all 337 events
-with the classes that send and handle them.
+subscribed to it gets it in its `OnEvent`. `gamedef/events/boz-1.0.11.toml` lists every event with
+the classes that send and handle them, and [Game events](game-events.md) shows the same list.
 
 For a mod, events are the natural place to react: hook the handler of the event you care about.
 
@@ -271,9 +271,8 @@ client feature for adding groups at startup would remove the conflict.
 
 ### A level with its own geometry
 
-The **Debug arena** template (`world.template_world("debug")`, compiled by
-`world_compile.compile_world` like every map project) is a walled 24 m square built from scratch.
-It loads and plays: rounds, zombies, power, and a perk to buy.
+A **New map** (compiled by `world_compile.compile_world` like every map project) is built from
+scratch. It loads and plays: rounds, zombies, power, and whatever machines you place.
 
 | Part | Where it comes from |
 |------|---------------------|
@@ -306,7 +305,8 @@ Positions are signed 16-bit centimetres. UVs are in 1/4096 units, and 4096 means
 ## Asset formats
 
 How Call of Duty: Black Ops Zombies 1.0.11 stores its data, and how `tools/bozkit` reads and
-writes it. Everything here was worked out from the game's own code. No game data is included in this repository.
+writes it. Everything here was worked out from the game's own code. No game data is included in
+the BOZ Redux repositories.
 
 ### Where the files are
 
@@ -356,7 +356,7 @@ The 1.0.11 ETC pack uses 63 resource classes. By size, most are `CIwTexture` (ab
 `CIwModel`. `tools/destin` (dade) provides extraction and read-side conversions; `bozkit` owns
 BOZ-specific lossless writing and editing.
 
-### Writable-format status
+### Format details
 
 #### Material rendering (GLES1 path)
 
@@ -378,6 +378,9 @@ pipeline. Its flags word (runtime `+0x10`) selects:
   using mode 0 and 1,024 using mode 5 (×2).
 - **Alpha test:** blend mode 5 additionally enables `GL_ALPHA_TEST GREATER 0.75` when the primary
   texture's runtime flags (`+0x34`) contain bit 3.
+
+`CIwModelBlockCols` stores either four component planes or one compact grayscale byte per render
+vertex; the latter expands to opaque RGBA at load.
 
 Models without a lightmap carry real baked lighting in their vertex colours. A preview that shows
 only the primary texture is far too bright.
@@ -404,10 +407,11 @@ HUD's `hud_icons` atlas shows its grey weapon icons in game only read this way).
 that are ETC1 in `blackops_etc.dz` and `0x0a` in `blackops_gles1.dz` match pixel for pixel in
 R, G, B order; a texture written as B, G, R, A showed red and blue swapped in the game; and the
 tutorial's graffiti sign, `0x0e` in one level and `0x05` in another, has the same alpha-0
-background in both (`00 00 ff 00` and `0x0f00`, blue). bozkit before 2026-10-10 read these as
-B, G, R, A, which swapped red and blue in previews and in re-encoded textures.
-Most alpha-tested and blended map art uses these formats, so reading `0x05` as RGB565 turns
-red art green and shows transparent areas as solid colour.
+background in both (`00 00 ff 00` and `0x0f00`, blue). Reading them as B, G, R, A swaps red and
+blue, both in previews and in re-encoded textures (bozkit builds before 2026-10-10 made this
+mistake; re-export anything they wrote). Most alpha-tested and blended map art uses these
+formats, so reading `0x05` as RGB565 turns red art green and shows transparent areas as solid
+colour.
 
 Layout (`CIwTexture::Serialise`, then `CIwImage::Serialise`), in every shipped raw texture:
 
@@ -418,10 +422,10 @@ Layout (`CIwTexture::Serialise`, then `CIwImage::Serialise`), in every shipped r
 | 23 | texels: pitch × height bytes |
 | end − 1 | u8 "has mipmaps", always 0 |
 
-The image flags' bits 1 and 2 (a palette, or no texels) never occur. The last byte is easy to
-mistake for texel data. Before 2026-10-09, bozkit read the texels from offset 24, one byte late,
-which shifted the colour channels. It also wrote textures without the final byte. The game then
-read a texel byte as "has mipmaps", which can crash it.
+The image flags' bits 1 and 2 (a palette, or no texels) never occur. The texels start at offset
+23: reading them from 24, one byte late, shifts the colour channels. The last byte is easy to
+mistake for texel data, but a texture written without it makes the game read a texel byte as
+"has mipmaps", which can crash it. (bozkit builds before 2026-10-09 made both mistakes.)
 
 #### Cooked texture payloads
 
@@ -430,11 +434,10 @@ count, followed by width and height at 39 and 43. The size table starts at 47
 and reserves twelve u32 slots, with one populated size per mip. Native constructor
 `0x4a24c7b4` allocates a fixed `0x48`-byte platform header and copies the first mip
 immediately after it. That header starts at body offset 23, so base-level blocks
-start at **95**, not 79 or immediately after the populated size entries. The decoder checks the
-base block size and complete mip payload bounds. Synthetic tests exercise 7,
-8, 9 and 11 levels in both formats; these differing table lengths also occur
-in the private tutorial group. The old incorrect offset decoded table words as
-image blocks and rejected its seven-level texture altogether.
+start at **95**, not 79 or immediately after the populated size entries. Starting at 79 decodes
+table words as image blocks and rejects seven-level textures altogether. The decoder checks the
+base block size and complete mip payload bounds. bozkit's synthetic tests cover 7, 8, 9 and 11
+levels in both formats, and the tutorial group itself mixes different mip counts.
 
 #### Resource coverage
 
@@ -451,18 +454,18 @@ image blocks and rejected its seven-level texture altogether.
 | Collision triangle meshes | Complete for Zombies maps | Vertices, indices, per-triangle materials, glTF; the embedded Bullet shape is updated to match |
 | `CIsNavMeshConnection` | Complete | Endpoints, rotation, and raw offset-named settings |
 
-Run `bozkit corpus` on private extracted groups for exact machine-readable counts. A corpus report
-contains filenames, counts, capabilities, and SHA-256 hashes, never resource bodies. Excluding
-out-of-scope Dead Ops paths, all 128 Zombies groups and 25,415 resources currently round-trip
-byte-identically across 57 resource classes. Structured codec coverage is full for all 7,097
-materials, 3,268 entity specs, 198 portals, 8 navigation connections, 5 collision meshes, and 4
-navmeshes. All 3,562 model bodies are preserved byte-identically. Static model export was visually
-validated with the named `colt45` resource, including its planar center-offset positions,
-render-vertex remap, UVs, and all material-indexed triangle lists. `CIwModelBlockCols` stores either
-four component planes or one compact grayscale byte per render vertex; the latter expands to opaque
-RGBA at load. 32-bit texture export was visually
-validated with the named `main_menu_logo` resource. ETC1 and DXT1 decoding was visually validated
-against the same tutorial floor material from the corresponding platform archives.
+Run `bozkit corpus` on your own extracted groups for exact machine-readable counts. A corpus
+report contains filenames, counts, capabilities, and SHA-256 hashes, never resource bodies.
+
+**Verification.** Dead Ops content is out of scope; all 128 Zombies groups and 25,415 resources
+round-trip byte-identically across 57 resource classes. Structured codec coverage is full for all
+7,097 materials, 3,268 entity specs, 198 portals, 8 navigation connections, 5 collision meshes,
+and 4 navmeshes. All 3,562 model bodies are preserved byte-identically. Static model export was
+visually validated with the named `colt45` resource, including its planar center-offset
+positions, render-vertex remap, UVs, and all material-indexed triangle lists. 32-bit texture
+export was visually validated with the named `main_menu_logo` resource. ETC1 and DXT1 decoding
+was visually validated against the same tutorial floor material from the corresponding platform
+archives.
 
 ### Hashes
 
@@ -519,7 +522,7 @@ Zombie pathing uses Recast/Detour.
 - **Layout:** each `CIsNavMesh` body begins with an 80-byte Recast build configuration and a
   40-byte Detour mesh-set header. Each tile then has an 8-byte reference/size header followed by
   Detour version 7 tile data (`DNAV`) with BOZ's widened 40-byte polygons and off-mesh
-  connections (see [Navigation meshes](map-editor.md#navigation-meshes)). The settings begin with cell size, cell height,
+  connections (see [Navigation meshes](map-internals.md#navigation-meshes)). The settings begin with cell size, cell height,
   agent height, agent radius, max climb and max slope; Zombies maps commonly use
   0.1 / 0.15 / 1.5 / 0.4 / 0.4 / 50°.
 - **Where:** Zombies map `*_statics` groups hold one or more tiles.
@@ -528,7 +531,8 @@ Zombie pathing uses Recast/Detour.
 - **Agents:** a zombie moves as a crowd agent (`CIsCrowdAgent`: `m_maxSpeed`,
   `m_maxAcceleration`, `m_separationWeight`, `m_obstacleAvoidanceQuality`, `m_canClimbBarricades`).
 
-Existing Recast/Detour tools can read the tile data, which matters for map editing later.
+Existing Recast/Detour tools can read the tile data, which is what lets the SDK rebuild navmesh
+tiles with Recast when a map changes ([How the rebuild works](map-internals.md#how-the-rebuild-works)).
 
 `CIsNavMeshConnection::Serialise` at `0x4a0a4e95` confirms its packed 55-byte field order:
 
@@ -578,8 +582,8 @@ In every shipped map the two copies are identical. Neither one stops the player 
 `CPlayerController::FixedStep` moves the player on the Detour navmesh (`Player_MoveOnNavMesh`,
 `Nav_FindNearestPoly` with extents 0.1 × 3 × 0.1 m, `Nav_MoveAlongSurface`, `Nav_GetPolyHeight`;
 world positions are divided by 100). Collision edits therefore change what bullets and other ray
-casts hit, while walkable space and floor height follow the navmesh. A test with a raised collision
-floor confirmed this: shots hit it and the player walked through it.
+casts hit, while walkable space and floor height follow the navmesh: a raised collision floor
+stops shots, but the player walks straight through it until the navmesh is rebuilt.
 
 The Bullet file's chunks are:
 
@@ -690,9 +694,9 @@ groups are loaded. So a map can use anything from any map, provided its own grou
   and the last in `CIsRenderableGFXEmitter::Init`; boz.effects removes a spawned spec without a
   transform at once.
 
-Verified in the game: every one of the 228 effects and projectiles of every map spawns on a map
-built from Kino (Call of the Dead's draw there too); no reference of another map's effect is
-missing from the built map.
+**Verification.** In the game, every one of the 228 effects and projectiles of every map spawns
+on a map built from Kino (Call of the Dead's draw there too), and no reference of another map's
+effect is missing from the built map.
 
 ### Saves (`.i3d`)
 

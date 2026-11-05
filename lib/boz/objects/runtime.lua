@@ -14,6 +14,7 @@ local weapons = require("boz.engine.weapons")
 local timers = require("boz.engine.timers")
 local saved_store = require("boz.engine.saved")
 local match_events = require("boz.engine.match_events")
+local pieces = require("boz.engine.pieces")
 local Object = require("boz.objects.object")
 local Prefab = require("boz.objects.prefab")
 local native = require("boz.objects.native")
@@ -34,7 +35,7 @@ end
 
 local Debris = require("boz.objects.debris")
 
-local CLASSES = {Object = Object, Prefab = Prefab, Volume = Object, Debris = Debris}
+local CLASSES = {Object = Object, Prefab = Prefab, Volume = require("boz.objects.volume"), Debris = Debris}
 for name, class in pairs(native) do
     if name ~= "Native" then
         CLASSES[name] = class
@@ -75,6 +76,11 @@ function runtime.get(name)
     object = class:new((entry and entry.name) or name, entry)
     objects[key] = object
     return object
+end
+
+--- A volume's entry by name (boz.Volume reads and changes it), or nil.
+function runtime.volume(name)
+    return volumes[lower(name)]
 end
 
 --- The object whose entity this is (a pointer), or nil.
@@ -197,6 +203,9 @@ local function volume_event(event, handle, info)
     if not entry or engine.is_hidden(entry.name) or not allowed(entry, info) then
         return
     end
+    if info and info.zombie then      -- check_zombies has them
+        return
+    end
     if entry.volume == "trigger" then
         local entity = info and info.entity or 0
         if event == "enter" then
@@ -217,6 +226,53 @@ local function volume_event(event, handle, info)
         end
     end
     fire_volume(event, entry, info)
+end
+
+-- Zombies have no body a volume can feel (theirs is for bullets), so the volumes they may set
+-- off look for them. A zombie that dies inside leaves.
+local ZOMBIE_CHECK = 0.1     -- seconds between looks
+local ZOMBIE_CHEST = 100     -- centimetres above its feet: a volume in the air still sees it
+
+local zombie_volumes, zombie_wait = {}, 0
+
+local function zombies_alive()
+    local alive = {}
+    for zombie in require("boz.game.zombies").each("all") do
+        if (zombie:health() or 0) > 0 then
+            alive[zombie.entity] = zombie
+        end
+    end
+    return alive
+end
+
+local function zombie_in(volume, zombie)
+    local p = zombie:position()
+    return p ~= nil and (volume:contains(p) or volume:contains({x = p.x, y = p.y + ZOMBIE_CHEST, z = p.z}))
+end
+
+local function check_zombies(dt)
+    zombie_wait = zombie_wait - dt
+    if zombie_wait > 0 or #zombie_volumes == 0 then
+        return
+    end
+    zombie_wait = ZOMBIE_CHECK
+    local alive = zombies_alive()
+    for _, entry in ipairs(zombie_volumes) do
+        local volume = engine.get(entry.name)
+        local open = volume:exists() and not engine.is_hidden(entry.name)
+        for entity, zombie in pairs(entry._zombies) do
+            if not (open and alive[entity] and zombie_in(volume, zombie)) then
+                entry._zombies[entity] = nil
+                fire_volume("exit", entry, zombie)
+            end
+        end
+        for entity, zombie in pairs(open and alive or {}) do
+            if not entry._zombies[entity] and zombie_in(volume, zombie) then
+                entry._zombies[entity] = zombie
+                fire_volume("enter", entry, zombie)
+            end
+        end
+    end
 end
 
 local function check_leaving(dt)
@@ -266,7 +322,9 @@ end
 -- Uses of the game's own prefabs: a class that changes on_use decides; others only tell their
 -- listeners. pass_use lets the parent's on_use run the game's purchase without coming back here.
 local passing = false
-local REMEMBERED = {native.Perk, native.MysteryBox, native.PackAPunch, native.TrapSwitch}
+local REMEMBERED = {native.Perk, native.MysteryBox, native.PackAPunch, native.TrapSwitch,
+                    native.WallBuy, native.Barricade}
+local IN_USE = 3                 -- seconds
 local USE_MEMORY = 20            -- seconds a use counts (a perk's drink, the box's spin)
 local used = {}                  -- class -> {object, at}: what the player used last
 local clock = 0
@@ -282,6 +340,10 @@ function runtime.pass_use(fn)
 end
 
 local function on_game_use(info)
+    if pieces.trap_switch_busy(map.nearest_poi()) then
+        info:skip()
+        return
+    end
     local object = runtime.of_entity(map.nearest_poi())
     if not object or not object:is_a(native.Native) then
         return
@@ -386,6 +448,12 @@ local function just_used(class)
     return use and clock - use.at <= USE_MEMORY and use.object or nil
 end
 
+-- What the player used a moment ago: for what follows a use at once, and may not (no points).
+local function in_use(class)
+    local use = used[class]
+    return use and clock - use.at <= IN_USE and use.object or nil
+end
+
 local function route(name, data)
     local player = runtime.player()
     if name == "door_opened" then
@@ -401,7 +469,22 @@ local function route(name, data)
         if perk then perk:_emit("bought", player, data and data.perk) end
     elseif name == "box_weapon" then
         local box = just_used(native.MysteryBox)
-        if box then box:_emit("weapon", player, data and data.weapon) end
+        if box then
+            box:_emit("spun", player)
+            box:_emit("weapon", player, data and data.weapon)
+        end
+    elseif name == "points_spent" then
+        local wall = in_use(native.WallBuy)
+        if wall then
+            used[native.WallBuy] = nil
+            wall:_emit("bought", player, wall.settings.weapon)
+        end
+    elseif name == "barricade_repaired" then
+        local barricade = in_use(native.Barricade)     -- stays: a hold repairs board after board
+        if barricade then
+            used[native.Barricade].at = clock
+            barricade:_emit("repaired", player)
+        end
     elseif name == "pack_a_punch" then
         local machine = just_used(native.PackAPunch)
         if machine then machine:_emit("upgraded", player, data and data.weapon) end
@@ -412,6 +495,14 @@ local function route(name, data)
     elseif name == "trap_activated" then
         local switch = just_used(native.TrapSwitch)
         if switch then switch:_emit("activated", player) end
+    elseif name == "trap_cooled" then
+        local trap = data and data.trap and runtime.get(data.trap)
+        if trap then
+            trap:_emit("cooled")
+            for _, switch in ipairs(trap:linked_from("traps")) do
+                switch:_emit("cooled")
+            end
+        end
     end
 end
 
@@ -457,6 +548,7 @@ local function bridge()
     events.on("frame", function(dt)
         clock = clock + (dt or 0)
         check_leaving(dt or 0)
+        check_zombies(dt or 0)
         if starting.pending then
             starting.waited = starting.waited + (dt or 0)
             if starting.waited > LOAD_WAIT then
@@ -510,7 +602,7 @@ end
 function runtime.start(list, all_names, weapon_list)
     objects, entries, volumes, leaving, weapon_objects, by_hash = {}, {}, {}, {}, {}, {}
     runtime._player = nil
-    used = {}
+    used, zombie_volumes = {}, {}
     started = true
     Object.forget_level_listeners()
     Object._in_level = true
@@ -549,6 +641,11 @@ function runtime.start(list, all_names, weapon_list)
                                           once = entry.once, prompt = entry.prompt or "",
                                           cost = entry.cost or 0, owner = entry.owner or ""}
             watch_volume(entry)
+            if entry.volume == "trigger" and entry.who ~= "players" then
+                local volume = volumes[lower(entry.name)]
+                volume._zombies = {}
+                table.insert(zombie_volumes, volume)
+            end
         end
         if entry.script and entry.script ~= "" then
             local class = load_class(entry.script)

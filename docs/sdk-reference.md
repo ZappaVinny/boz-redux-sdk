@@ -43,7 +43,7 @@ file bozkit does not understand are kept byte for byte.
 | `portal` | Show or change a visibility portal |
 
 `bozkit <command> --help` lists each command's options. Projects are explained in
-[Projects and packaging](lua-mods.md#projects-and-packaging); the file formats in
+[Projects and packaging](script-mods.md#projects-and-packaging); the file formats in
 [Asset formats](how-the-game-works.md#asset-formats).
 
 ### Getting the game's files
@@ -56,7 +56,7 @@ bozkit extract path/to/boz-redux/original/obb/blackops_etc.dz ~/boz-etc --kind d
 ```
 
 The examples below use `~/boz-etc` and write their results to `~/boz-edits`. To change a map in
-the editor instead, see [Editing shipped map files](map-editor.md#editing-shipped-map-files).
+the editor instead, see [Editing shipped map files](map-internals.md#editing-shipped-map-files).
 
 ### Models and glTF
 
@@ -149,7 +149,7 @@ it at load (see [collision meshes](how-the-game-works.md#collision-meshes)).
 
 ### Texture commands
 
-Export the recognizable red main-menu logo:
+Export the main menu's red logo:
 
 ```bash
 bozkit texture-export \
@@ -162,7 +162,7 @@ textures, which make up most map textures, decode for previews (Blender) but can
 Other layouts fail rather than producing a plausible-looking corrupt image.
 
 Edited groups go in a project's `assets/` folder, and the build puts them in the mod (see
-[Projects and packaging](lua-mods.md#game-files-in-a-mod)).
+[Projects and packaging](script-mods.md#game-files-in-a-mod)).
 
 ## Project files
 
@@ -196,7 +196,7 @@ scripts/                     Lua: main.lua, prefab scripts, weapon scripts, hook
 
 The other files are described with their tools: [Weapons](weapons-and-assets.md#weapon-project-files),
 [Your own models](weapons-and-assets.md#model-project-files), [Sounds](weapons-and-assets.md#sound-project-files),
-[Effects and projectiles](weapons-and-assets.md#effects-and-projectiles) and [Game rules](map-editor.md#game-rules).
+[Effects and projectiles](weapons-and-assets.md#effects-and-projectiles) and [Game rules](editor.md#game-rules).
 
 ### world.json
 
@@ -239,9 +239,9 @@ The other files are described with their tools: [Weapons](weapons-and-assets.md#
 - `position` is in centimetres, `rotation` an `x, y, z, w` quaternion, `scale` optional.
 - `start` sets how an object starts: `visible`, `collision`, and `blocks` (the navmesh under it
   is shut until a script opens it). An object a script may change gets its own collision entity
-  (`<name>_collision`) so `boz.objects` can switch it.
+  (`<name>_collision`) so scripts can switch it.
 - `script` is a Lua file in the project's `scripts/` folder, and `properties` the values of the
-  `---@property` lines it declares ([Map scripting](map-editor.md#map-scripting)).
+  `---@setting` lines it declares ([Settings](prefabs.md#settings)).
 
 #### Meshes and models
 
@@ -298,9 +298,9 @@ Invisible boxes that send events to scripts. `size` is in centimetres.
 - **Doors:** the floor under a door's collision box is cut out as its own navmesh polygons,
   tagged with the door's name, so players and zombies pass only once the door is bought. Copies
   get names of their own; doors in generated maps unlock no areas.
-- **Scripts:** the build adds `require("boz.world").start()` to `main.lua`, the standard
+- **Scripts:** the build adds `require("boz.game.world").start()` to `main.lua`, the standard
   library, and a generated `boz/world_data.lua` (start state, scripted objects, volumes).
-  `boz.world` applies the start state when the level starts, starts the scripts, powers perk
+  The runtime applies the start state when the level starts, starts the scripts, powers perk
   machines whose power switch is `boz_no_power` (the editor's **Needs power** off), and starts
   the map when the launcher or Build & Run asks for it.
 - **The manifest:** the mod's `mod.toml` gets `maps = ["<level name>"]`, which is how the
@@ -319,6 +319,6 @@ formats below changes, its version number goes up and these notes say what to do
 | Game definition | Schema 1, target `boz-1.0.11` | `gamedef/gamedef.toml`; the client and the SDK check it before loading. |
 | Projects | Schema 2 (`boz-project.toml`) | Schema 1 projects still load and are saved as schema 2. |
 | Map worlds | Format 3 (`source/world.json`) | Older formats are refused. |
-| Lua | 5.4 | The client's [Lua API](lua-mods.md#client-lua-api) and the [standard library](standard-library.md). |
+| Lua | 5.4 | The client's [Lua API](script-mods.md#client-lua-api) and the [standard library](scripting.md). |
 | Editor | Blender 5.2 LTS | |
 | Python | 3.11 or newer | For `bozkit`, the SDK app and the symbol tools. |

@@ -2,7 +2,7 @@
 
 The parts of a map that go beyond its level: the weapons players use, your own models, the
 game's effects and projectiles, and sounds. Each has its own tab in
-[the map editor](map-editor.md), and all of them are saved in the map project and built into
+[the editor](editor.md), and all of them are saved in the map project and built into
 the map's mod. The weapon field reference at the end of the weapons section lists every value
 a weapon has.
 
@@ -60,7 +60,7 @@ Wall buys pick from the project's list (World tab → the wall buy's **Choose…
 ### A weapon with your own model
 
 A weapon can show one of your **Weapon** assets (made in the Assets tab, see
-[assets.md](#your-own-models)) instead of its stock gun. It keeps the rest of the gun it is made from:
+[Your own models](#your-own-models)) instead of its stock gun. It keeps the rest of the gun it is made from:
 the arms' animations, sounds and effects. Make a **New weapon** from a stock gun whose
 animations suit your model (a big two-handed one: the Thundergun), then in its **Model** panel
 pick your asset.
@@ -117,28 +117,30 @@ than the stock one still has its events at the stock times.
 
 ### Weapon scripts
 
-A weapon script runs with `self` as the weapon: `self.name`, and the live weapon's methods.
+A weapon script is a class, like a [prefab's](prefabs.md#the-shape-of-a-script): it extends
+`boz.Weapon`, and `self` is the weapon.
 
 ```lua
 -- weapons/mp40_heavy.lua
-shots = 0                       -- saved with the game, like any script global
+local Heavy = boz.Weapon:extend("Heavy")
 
-function on_fire(data)          -- every shot (data.clip: rounds before it)
-    shots = shots + 1
-    if shots % 10 == 0 then self:set_ammo(nil, self:reserve() + 5) end
+function Heavy:on_fire(data)    -- every shot (data.clip: rounds before it)
+    self.shots = (self.shots or 0) + 1     -- saved with the game, like any field
+    if self.shots % 10 == 0 then
+        self:set_ammo(nil, self:reserve() + 5)
+    end
 end
 
-function on_equip() end         -- taken in hand
-function on_given() end         -- bought, rolled from the box, or given by a script
-function on_reload() end        -- a reload started
+function Heavy:on_equip() end   -- taken in hand
+function Heavy:on_given() end   -- bought, rolled from the box, or given by a script
+function Heavy:on_reload() end  -- a reload started
+
+return Heavy
 ```
 
-Any script can use `boz.weapons` (require("boz.weapons")): `current()`, `get(name)`,
-`give(name)`, and on a weapon `clip()`, `reserve()`, `set_ammo(clip, reserve)`, `clip_size()`,
-`damage()`, `set_damage(head, torso, limbs)`, `fire_rate()`, `set_fire_rate(rpm)`, `in_hand()`.
-These change the weapon for the match; the Weapons tab changes it for good. Game events on the
-bus: `weapon_given`, `weapon_equipped`, `weapon_reloaded` (`data.weapon`); `weapon_fired` reaches
-`boz.on` listeners only (every shot).
+Hooks and methods are listed under [Weapon](game-prefabs.md#weapon). Script changes last for the
+match; the Weapons tab changes a weapon for good. Any other script can follow weapons with the
+`weapon_*` [game events](events.md#weapons), and use `boz.weapons` to give, take and upgrade them.
 
 ### Weapon project files
 
@@ -155,7 +157,7 @@ this map's own), `display` its **In-game name** (Properties). The game names wea
 prompts from its own text: a wall buy asks for the string id `<weapon>_S_WEAPON`
 (CIngameStatePlaying::UpdatePoiPrompt hashes the weapon's name on with `_S_WEAPON`). A new
 weapon has no entry there, so the prompt shows ">>Unknown Hash<<" until you give it an in-game
-name; boz.prefabs adds that text (boz.text) when the level starts. Empty keeps the game's own name.
+name; the map adds that text (`boz.text`) when the level starts. Empty keeps the game's own name.
 `sounds` maps sound fields to the weapon's own sounds (`{"reloadSoundSequence": "my_reload"}`,
 the Audio tab's saved sounds): the build gives the field a sound of the weapon's own and points
 the field at it ([Sounds](#a-weapons-own-sounds)).
@@ -171,6 +173,10 @@ lasts as long as its animation (the bullet and the end of a reload are events in
 so those two come with the animation tools, not this form.
 
 ### Field reference
+
+*Likely (from the shipped weapons)* marks a meaning worked out from the values the game's own
+weapons use but not yet proven in the game's code (the `*` in the editor's Properties list, and
+the `likely` confidence level of the [game definition](contributing.md#conventions)).
 
 <!-- fields:start -->
 #### Firing fields
@@ -409,7 +415,8 @@ switches, and the build gives the map its own copy of it without what they leave
 ### boz.effects
 
 ```lua
-local effects = require("boz.effects")
+local boz = require("boz")
+local effects = boz.effects
 
 -- A one-off effect, removed after two seconds.
 effects.spawn("impactRayGun", effects.aim(), {lifetime = 2})
@@ -457,28 +464,32 @@ opens it at once and `lifetime` sets how long it stays open.
 
 The game kills the zombies a black hole takes without naming who killed them, so they do not
 count as the player's kills (stats, achievements). A script that wants them counted asks once:
-`require("boz.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")`. The Effects tab's **Copy
+`require("boz.game.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")`. The Effects tab's **Copy
 script line** adds that line for a black hole.
 
-### Example: the idgun opens a black hole where it fires
+### Example: a gun that opens a black hole where it fires
 
-In the Effects tab, name Ascension's `bh_bomb projectile` `gersch` and tick **Hide its model** and
-**Stays where spawned**. In the Weapons tab, set the
-weapon's **Fire mode** to **Single shot** (a Thundergun-based weapon would otherwise still fire its
+This example makes `idgun`, a new weapon copied from the Thundergun (**New weapon** in the
+Weapons tab), whose shots open black holes. In the Effects tab, name Ascension's
+`bh_bomb projectile` `gersch` and tick **Hide its model** and **Stays where spawned**. In the
+Weapons tab, set `idgun`'s **Fire mode** to **Single shot** (a Thundergun-based weapon would otherwise still fire its
 own blast; the Thundergun's bullets do no damage, so the black hole does the killing), and give it
 a script (**Add script**):
 
 ```lua
-local effects = require("boz.effects")
-require("boz.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")   -- its kills are the player's
+local IdGun = boz.Weapon:extend("IdGun")
+
+require("boz.game.zombies").credit_kills("SUBJECT_ZOMBIE_GERSCH_DEATH")   -- its kills are the player's
 
 -- Every shot: a black hole where the shot lands, for six seconds.
-function on_fire(data)
-    local where = effects.aim()
+function IdGun:on_fire(data)
+    local where = boz.effects.aim()
     if where then
-        effects.projectile("gersch", where, {trigger = "open", lifetime = 6, raise = 200})
+        boz.effects.projectile("gersch", where, {trigger = "open", lifetime = 6, raise = 200})
     end
 end
+
+return IdGun
 ```
 
 ### How effects work
@@ -515,7 +526,7 @@ Only saved sounds go in slots. Changing a saved sound's settings asks you to Sav
 slots using it play the new version from the next build.
 
 Every saved sound is also built into the map under its own name, so scripts play it with
-`audio.play("my_sound")` (`local audio = require("boz.audio")`). A name the game already uses
+`boz.audio.play("my_sound")`. A name the game already uses
 for one of its sounds stays the game's: importing a recording called `fire` names it
 `imported_fire`, and a saved sound of yours with such a name plays as `imported_<name>`. Its
 details in **Your sounds** say so.
@@ -573,8 +584,9 @@ sound** picks one of your saved sounds. The build gives sequence fields a new se
 direct-play fields a new sound spec (with the volume and pitch of the sound it replaces), so:
 
 - one recording can replace a reload the game plays in four parts, with nothing left over;
-- the weapon it is made from keeps its own sounds (the idgun's reload leaves the Thundergun's
-  alone).
+- the weapon it is made from keeps its own sounds (a new reload sound on `idgun`, from the
+  [black hole example](#example-a-gun-that-opens-a-black-hole-where-it-fires), leaves the
+  Thundergun's alone).
 
 **Equip / pickup** plays when the weapon is equipped, including after a wall buy, but also on
 ordinary weapon switches. **Bought (player)** is the buyer's sound on a wall purchase. The
@@ -583,13 +595,13 @@ do not cover every way a weapon can be acquired. For a grant-only sound, assign 
 **Bought (player)**, then call its generated spec from the weapon script's `on_given()` callback:
 
 ```lua
-function on_given()
-    require("boz.audio").play(self.name .. "_playerBuySound")
+function MyGun:on_given()
+    boz.audio.play(self.name .. "_playerBuySound")
 end
 ```
 
 That callback runs for `CWeaponManager::GiveWeapon` (wall buy, mystery box, and
-`boz.weapons.give`). A wall purchase may also play the native **Bought (player)** field, so
+`player:give_weapon`). A wall purchase may also play the native **Bought (player)** field, so
 this example can play the sound twice on that path; use it only when that trade-off is acceptable.
 
 Your recording carries its own timing: line it up with the weapon's reload animation (the wave

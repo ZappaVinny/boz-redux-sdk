@@ -71,7 +71,7 @@ end
 -- The fields that hold what using a piece costs (all zeroed for a free use).
 local COSTS = {CDoor = {"m_Cost"}, CMysteryBox = {"m_Cost", "m_FireSaleCost"}, CPackAPunch = {"m_Cost"},
                CPerk = {"m_perkSinglePCost", "m_perkMultiPCost"}, CTurret = {"m_Cost"},
-               CLunarLander = {"m_Cost"}, CWeaponChalkOutline = {"m_cost", "m_ammoCost", "m_upgradedAmmoCost"}}
+               CLunarLander = {"m_Cost"}, CTrapSwitch = {"m_Cost"}, CWeaponChalkOutline = {"m_cost", "m_ammoCost", "m_upgradedAmmoCost"}}
 
 --- What using it costs (points), or nil for a piece without a cost.
 function Piece:cost()
@@ -115,6 +115,29 @@ function Piece:use_free()
         events.on("frame", run_pending)
     end
     return true
+end
+
+local SWITCH_TRAPS, SWITCH_TRAPS_END, TRAP_MACHINE = 0x98, 0x9c, 0x6c   -- CTrapSwitch, CTrap
+local TRAP_RUNNING, TRAP_COOLING = 1, 2
+
+--- True while a trap of the trap switch (its entity) runs or cools down. The game only takes the
+--- prompt's use button away then; its own check lets a single trap through.
+function pieces.trap_switch_busy(entity)
+    local component = entity ~= 0 and reflect.component(entity, "CTrapSwitch")
+    if not component then
+        return false
+    end
+    local switch = reflect.object(component, "CTrapSwitch")
+    local at, stop = game.read("ptr", switch + SWITCH_TRAPS), game.read("ptr", switch + SWITCH_TRAPS_END)
+    while at < stop do
+        local trap = game.read("ptr", at)
+        local state = trap ~= 0 and core.call("CIsStateMachine::GetState", trap + TRAP_MACHINE)
+        if state == TRAP_RUNNING or state == TRAP_COOLING then
+            return true
+        end
+        at = at + 4
+    end
+    return false
 end
 
 --- Sends the piece's entity an event (boz.entities.send): "SUBJECT_MB_SPAWN", ...

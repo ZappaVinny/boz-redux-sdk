@@ -831,6 +831,18 @@ def prefab_checks(anchor):
     check(wall.name == "Vault › Door", f"a new part name renames its object ({wall.name})")
     wall.boz.blocks = True
     wall.boz.block_margin = 55.0
+    # New script: the popup's three templates.
+    bpy.ops.boz.script_new(name="BareVault", template="empty")
+    text = (project / "scripts" / prefab.boz.script).read_text(encoding="utf-8")
+    check('boz.Prefab:extend("BareVault")' in text and "function" not in text, "Empty is just the class")
+    bpy.ops.boz.script_new(name="BasicVault", template="prefab")
+    text = (project / "scripts" / prefab.boz.script).read_text(encoding="utf-8")
+    check("BasicVault:on_use" in text and "@setting" in text, "Basic prefab has hooks and a setting")
+    bpy.ops.boz.script_new(name="DoorVault", template="object", object_class="Door")
+    text = (project / "scripts" / prefab.boz.script).read_text(encoding="utf-8")
+    check('boz.Door:extend("DoorVault")' in text and "boz.Door.on_use(self, player)" in text,
+          "Object extends the class chosen in the dropdown")
+    check(objects_ui.script_class(prefab, scene.boz.base) == "Prefab", "your prefab's own class")
     # A script with settings (made as New script would).
     relative = objects_ui.scripts.new_script(project / "scripts", "Vault")
     (project / "scripts" / relative).write_text(

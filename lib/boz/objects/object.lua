@@ -18,6 +18,7 @@ Object._in_level = false   -- true while the level's objects run their code (boz
 --- Sets up the object called name (entry: what the map knows about it).
 function Object:init(name, entry)
     self.name = name
+    self.kind = (entry or {}).kind or "model"      -- "model", "volume" or "prefab"
     self._entry = entry or {}
     self._handle = engine.get(name)
 end
@@ -38,14 +39,51 @@ end
 
 --- Walking: true, players and zombies cannot walk through it (needs Walking: Blocks).
 function Object:set_blocks_walking(blocks)
+    self.walking_blocked = blocks
     self._handle:set_blocks_walking(blocks)
     return self
 end
 
 --- Stops bullets: false, shots pass through it.
 function Object:set_stops_bullets(stops)
+    self.bullets_stopped = stops
     self._handle:set_stops_bullets(stops)
     return self
+end
+
+--- True while players and zombies cannot walk through it (hidden, nothing is blocked).
+function Object:blocks_walking()
+    local blocks = self.walking_blocked
+    if blocks == nil then
+        blocks = engine.starts_blocking(self.name)
+    end
+    return blocks and self:visible()
+end
+
+--- True while shots hit it (hidden, nothing is hit).
+function Object:stops_bullets()
+    local stops = self.bullets_stopped
+    if stops == nil then
+        stops = engine.starts_solid(self.name)
+    end
+    return stops and self:visible()
+end
+
+--- Its name in the prefab it is part of ("Door" of "Vault.Door"), or nil.
+function Object:part_name()
+    return self.name:match("%.([^.]+)$")
+end
+
+--- The prefab it is part of, or nil.
+function Object:parent()
+    local name = self.name:match("^(.+)%.[^.]+$")
+    return name and require("boz.objects.runtime").get(name) or nil
+end
+
+--- Its rotation {x, y, z, w} (a quaternion), or nil when it is not in the level.
+function Object:rotation()
+    local entity = self._handle:entity_pointer()
+    return entity ~= 0 and require("boz.engine.entities").rotation(entity) or nil
 end
 
 --- Its position {x, y, z} (centimetres, y up), or nil when it is not in the level.
@@ -72,6 +110,16 @@ function Object:links(kind)
     local out = {}
     for _, target in ipairs(engine.links(self.name, kind)) do
         out[#out + 1] = get(target.name)
+    end
+    return out
+end
+
+--- The objects that link to it by the link kind.
+function Object:linked_from(kind)
+    local get = require("boz.objects.runtime").get
+    local out = {}
+    for _, source in ipairs(engine.linked_from(self.name, kind)) do
+        out[#out + 1] = get(source.name)
     end
     return out
 end

@@ -205,21 +205,57 @@ def sync_all(scene) -> None:
             sync_properties(obj)
 
 
+def script_class(obj, base: str) -> str:
+    """The boz class the object is: what a script on it should extend."""
+    if obj.boz.role == "volume":
+        return "Volume"
+    if obj.boz.role != "prefab":
+        return "Prefab"
+    piece = obj.get("boz_piece", "")
+    if piece == "debris":
+        return "Debris"
+    if piece:
+        return toolkit.class_of(piece)
+    return toolkit.class_of_components(prefab_links.components(obj, base))
+
+
 class BOZ_OT_script_new(Operator):
     bl_idname = "boz.script_new"
     bl_label = "New script"
-    bl_description = "Make a script for this object from the template and open it"
+    bl_description = "Make a script for this object and open it"
     bl_options = {"REGISTER", "UNDO"}
 
     name: StringProperty(name="Script name", description="The name scripts know it by")
+    template: EnumProperty(name="Template", default="prefab", items=[
+        ("empty", "Empty", "Just the class, for you to fill in"),
+        ("prefab", "Basic prefab", "A prefab with its hooks and a setting"),
+        ("object", "Object", "Extends one of the game's objects, with its hooks"),
+    ])
+    object_class: EnumProperty(name="Extends", items=[
+        (name, label, f"Extends boz.{name}") for name, label, _hooks in scripts.OBJECT_CLASSES])
 
     @classmethod
     def poll(cls, context):
         return context.object is not None and context.object.boz.role in KINDS
 
     def invoke(self, context, event):
-        self.name = convert.clean_name(context.object.boz.part_name or context.object.name)
+        obj = context.object
+        self.name = convert.clean_name(obj.boz.part_name or obj.name)
+        own = script_class(obj, context.scene.boz.base)
+        self.template = "prefab" if own == "Prefab" else "object"
+        if own != "Prefab":
+            self.object_class = own
         return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "name")
+        layout.row().prop(self, "template", expand=True)
+        if self.template == "object":
+            layout.prop(self, "object_class")
+        folder = scripts_dir()
+        if folder is not None and (folder / scripts.script_path(self.name)).exists():
+            layout.label(text="That script exists: it will be attached as it is", icon="INFO")
 
     def execute(self, context):
         folder = scripts_dir()
@@ -227,7 +263,9 @@ class BOZ_OT_script_new(Operator):
             self.report({"ERROR"}, "Open this map from the SDK launcher first")
             return {"CANCELLED"}
         try:
-            relative = scripts.new_script(folder, self.name)
+            own = script_class(context.object, context.scene.boz.base)
+            relative = scripts.new_script(folder, self.name, self.template,
+                                          self.object_class if self.template == "object" else own)
         except scripts.ScriptError as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}

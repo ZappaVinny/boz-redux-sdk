@@ -963,8 +963,13 @@ class LearnPage(QWidget):
         docs = sdkhome.sdk_root() / 'docs'
         entries = [('Introduction', docs / 'README.md'),
                    ('Getting started', docs / 'getting-started.md'),
-                   ('Lua mods', docs / 'lua-mods.md'),
-                   ('The map editor', docs / 'map-editor.md'),
+                   ('How a map works', docs / 'how-a-map-works.md'),
+                   ('Prefabs', docs / 'prefabs.md'),
+                   ('Game prefabs', docs / 'game-prefabs.md'),
+                   ('Events', docs / 'events.md'),
+                   ('Scripting reference', docs / 'scripting.md'),
+                   ('Script mods', docs / 'script-mods.md'),
+                   ('The editor', docs / 'editor.md'),
                    ('Weapons, models, effects and sounds', docs / 'weapons-and-assets.md'),
                    ('Console commands and variables', docs / 'console-reference.md')]
         for row, (label, path) in enumerate(entries):

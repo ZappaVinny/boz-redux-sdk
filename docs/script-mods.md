@@ -1,16 +1,11 @@
-# Lua mods
+# Script mods
 
-A Lua mod changes the game with scripts: new rules, cheats, settings in the pause menu, windows
-over the game, or your own code running inside any game function. This page explains how mod
-scripts run and walks through the things most mods do, then how a project becomes a mod you can
-share, and ends with the reference of everything the client gives Lua. If you have not made a
-mod yet, start with [Your first mod](getting-started.md#your-first-mod).
+A script mod has no map. It changes the game for every map: new rules, cheats, settings in the pause
+menu, windows over the game, or your own code inside any game function. If you haven't made one
+yet, start with [Your first mod](getting-started.md#your-first-mod).
 
-Two other pages go with it:
-
-- [Standard library](standard-library.md): the `boz.*` modules most mods are built from. Start
-  there when looking for something.
-- [Console reference](console-reference.md): every console variable and command in the game.
+The same functions work in map scripts. The [Scripting reference](scripting.md) lists the common
+ones.
 
 ## Writing a mod
 
@@ -18,17 +13,9 @@ Two other pages go with it:
 
 | Layer | What it is | You |
 | --- | --- | --- |
-| **Client** | The program that runs the game: emulator, window, sound, controls, file loading, and the Lua runtime with its low-level functions (`game`, `hook`, `events`, `ui`, ...). | use it |
-| **Standard library** (`boz.*`) | Lua modules that turn the game's internals into plain functions: `camera.set_fov(90)`, `pause_settings.add_slider{...}`, `console.set(...)`. | use it |
-| **Your mod** | A folder with a manifest, scripts and optional replacement files. | write it |
-
-Two habits keep mods working:
-
-- **Use names, not addresses.** Standard library functions and the game definition's names
-  (`"CScoreManager::AddScore"`) keep working when the game definition is updated; raw addresses
-  do not.
-- **Prefer the standard library.** If something you need is missing, it probably belongs in the
-  standard library rather than in your mod.
+| **Client** | The program that runs the game, and low-level Lua functions (`game`, `hook`, `events`, `ui`, ...) | use it |
+| **Standard library** (`boz`) | Plain functions and classes over the game's internals: `boz.player():give_perk("Juggernog")` | use it |
+| **Your mod** | A folder with a manifest, scripts and optional replacement files | write it |
 
 ### The mod folder
 
@@ -57,57 +44,25 @@ the same file, the later one wins.
 
 ### How your script runs
 
-- `main.lua` runs **once, before the game starts**. Use it to register things: event handlers,
-  key bindings, hooks, settings rows, file patches. The game is not running yet, so do not read
-  game state here.
-- After that your code runs only from **events** and **hooks**:
+- `main.lua` runs **once, before the game starts**. Use it to set things up: event listeners, key
+  bindings, hooks, settings rows. The game isn't running yet, so don't read game state here.
+- After that your code runs only from events:
 
   ```lua
-  events.on("frame", function(dt) ... end)          -- every frame, dt in seconds
-  events.on("key", function(name, down) ... end)    -- every key press and release
-  input.bind("F6", function() ... end)              -- one key press
+  local boz = require("boz")
+
+  boz.on("round_started", function(data) log("round " .. data.round) end)   -- a game event
+  input.bind("F6", function() boz.player():give_points(500) end)            -- a key
+  events.on("frame", function(dt) end)                                      -- every frame
   ```
 
 - Each mod has its own globals. `mod.id`, `mod.name`, `mod.dir` describe your mod.
-- `require("name")` loads `scripts/name.lua` from your mod (`require("ui.tabs")` loads
-  `scripts/ui/tabs.lua`), once.
-- **Errors** do not crash the game: they are written to `boz-log.txt` as `[lua] <mod>: ...` with a
-  traceback, and the handler that failed is switched off. Fix the script and restart.
+- `require("name")` loads `scripts/name.lua` from your mod, once.
+- **Errors** don't crash the game: they go to `boz-log.txt` as `[lua] <mod>: ...` with a traceback,
+  and the handler that failed is switched off. Fix the script and restart.
 
-### Using the standard lib
-
-Require the modules you need:
-
-```lua
-local player = require("boz.player")
-local console = require("boz.console")
-local pause_settings = require("boz.pause_settings")
-```
-
-What is in it (everything is in the [standard library reference](standard-library.md)):
-
-| Module | For |
-| --- | --- |
-| `boz.player` | Health, god mode, position, stance, speeds, perks (give and take), field of view |
-| `boz.weapons` | The player's weapons: give, take, Pack-a-Punch, ammo, damage, fire rate, events |
-| `boz.zombies` | Zombies, dogs, monkeys and George: spawn, kill, teleport, speed, freeze/burn/explode, ... |
-| `boz.rounds` | The round: next round, go to a round, counts, spawning on or off, time |
-| `boz.score` | Points: add, spend, set, what actions are worth |
-| `boz.pickups` | Power-ups: spawn, give, timers |
-| `boz.pieces` | Mystery boxes, perk machines, doors, traps, Pack-a-Punch, ...: use (or use for free), move the box, costs |
-| `boz.effects` | The game's effects and projectiles anywhere (black holes, explosions, ...) |
-| `boz.hud`, `boz.camera`, `boz.screen`, `boz.audio` | HUD elements and messages; camera shakes; full-screen effects and fog; sounds and music |
-| `boz.map`, `boz.spawns`, `boz.stats` | The level (power, map events), spawn points, achievements and stats |
-| `boz.input` | Watch, block or send the game's actions (shoot, aim, reload, ...) |
-| `boz.fly` | Noclip |
-| `boz.console`, `boz.cvars` | Console variables and commands |
-| `boz.reflect`, `boz.entities`, `boz.game_events` | Anything else: every reflected field, every entity and component, every game event |
-| `boz.pause_settings` | Sliders and checkboxes in the pause menu's Settings page |
-| `boz.text` | Your own text for the game's menus |
-| `boz.iwui`, `boz.frontend` | Building blocks for menu changes |
-
-Functions that only make sense in a match (perks, zombies, field of view, fly) return `nil` or
-`false` outside one, so you can call them any time.
+Functions that only make sense in a match return `nil` or `false` outside one, so you can call them
+any time.
 
 ### Recipes
 
@@ -126,36 +81,35 @@ The pause menu's Settings page gets new rows that look exactly like the game's o
 field of view setting, complete:
 
 ```lua
-local pause_settings = require("boz.pause_settings")
-local camera = require("boz.camera")
+local boz = require("boz")
 
 local function saved_fov()
     local value = settings.get("fov")
     return type(value) == "number" and value or 50
 end
 
-pause_settings.add_slider{
+boz.menu.add_slider{
     id = "fov",
     label = "Field of view",
     min = 50, max = 120, step = 1,
     get = saved_fov,
     set = function(value)
         settings.set("fov", value)
-        camera.set_fov(value)
+        boz.camera.set_fov(value)
     end,
 }
 
-camera.set_fov(saved_fov())   -- apply the saved value from the start
+boz.camera.set_fov(saved_fov())   -- apply the saved value from the start
 ```
 
 A checkbox works the same way:
 
 ```lua
-pause_settings.add_checkbox{
+boz.menu.add_checkbox{
     id = "god_mode",
     label = "God mode",
-    get = function() return console.get("UnlimitedHealth") == "true" end,
-    set = function(on) console.set("UnlimitedHealth", on) end,
+    get = function() return boz.console.get("UnlimitedHealth") == "true" end,
+    set = function(on) boz.console.set("UnlimitedHealth", on) end,
 }
 ```
 
@@ -168,15 +122,16 @@ The game has hundreds of settings and cheats as console variables
 ([console reference](console-reference.md)):
 
 ```lua
-local console = require("boz.console")
-console.set("WeaponsUnlimitedAmmo", true)
-print(console.get("WalkSpeed"))
-console.exec("SwitchPowerOn")
+local boz = require("boz")
+
+boz.console.set("WeaponsUnlimitedAmmo", true)
+print(boz.console.get("WalkSpeed"))
+boz.console.exec("SwitchPowerOn")
 ```
 
 Many variables exist only during a match (the game creates them when the code using them first
-runs); `console.get` returns `nil` until then. Some the game reads but never creates (marked
-*lookup only*): create them with `console.register("StartingScore", 5000)`.
+runs); `boz.console.get` returns `nil` until then. Some the game reads but never creates (marked
+*lookup only*): create them with `boz.console.register("StartingScore", 5000)`.
 
 #### Show a window or overlay
 
@@ -193,8 +148,8 @@ end)
 events.on("frame", function()
     if not open then return end
     open = ui.window("My mod", {x = 100, y = 100, w = 400, h = 200, closable = true}, function()
-        if ui.button("Give all perks") then
-            require("boz.player").give_all_perks()
+        if ui.button("Give Juggernog") then
+            require("boz").player():give_perk("Juggernog")
         end
     end)
     overlay.capture(open)
@@ -227,8 +182,7 @@ end)
 ```
 
 The function gets the player's own copy of the file each time the game opens it. Register the
-patch in `main.lua`, before the game loads the file. The standard lib uses this for the main
-menu (`boz.frontend`).
+patch in `main.lua`, before the game loads the file. 
 
 ### Hooks: when the standard lib is not enough
 
@@ -282,7 +236,7 @@ the standard lib.
   run commands, watch variables, try cheats. Turn it on in the launcher.
 - **Log every file the game opens** (launcher settings) shows file names for `assets/` and
   `assets.patch`.
-- For menu work: `iwui.dump(element)` logs a page's widgets; `require("boz.flash").capture_log()`
+- For menu work: `iwui.dump(element)` logs a page's widgets; `require("boz.engine.flash").capture_log()`
   logs the main menu's ActionScript `trace()` output and warnings.
 
 ### Mods working together
@@ -317,8 +271,8 @@ bozkit new my-mod --id my_mod --name "My mod" --author "Your name"
 - `--kind script` (the default) makes a Lua mod; `--kind map` makes a map for the editor.
 - `--template` picks what you start from. Script mods: `blank`, `round` (code at every round
   start), `hotkey` (a key runs a console line) and `settings` (options in the pause menu). Maps:
-  `empty`, `debug`, `kino`, `callofthedead`, `ascension` and `tutorial` (see
-  [Your first map](getting-started.md#1-create-a-map-project)).
+  `new`, `kino`, `callofthedead`, `ascension` and `tutorial` (see
+  [New map or Remix](how-a-map-works.md#new-map-or-remix)).
 
 The mod id must start with a lower-case letter and use only `a-z`, `0-9`, `_` and `-`.
 
@@ -436,25 +390,19 @@ note = "Edited from my installed 1.0.11 data"
 
 When a small code change does the job, `assets.patch` changes a game file as the game loads it,
 so the file never has to be shipped (see
-[Making Lua mods](#change-a-file-as-it-loads)).
+[Change a file as it loads](#change-a-file-as-it-loads)).
 
 ## Client Lua API
 
 Everything the client itself gives a mod script, in Lua 5.4. The
-[standard library](standard-library.md) is built on it and covers most needs in friendlier
-form; use these functions directly when it does not. The API grows with each client release;
+[standard library](scripting.md) is built on it and covers most needs in friendlier form, so
+most mods should use that and call these functions directly only when it doesn't cover something. The API grows with each client release;
 anything not listed here is not part of it yet.
 
 ### Scripts and modules
 
-A mod is a folder in the client's `mods/` folder:
-
-```
-mods/my-mod/
-  mod.toml          id, name, version, author, game, description
-  assets/           replacement game files (see making-mods.md)
-  scripts/main.lua  runs when the game starts, if the mod is switched on
-```
+A mod is a folder in the client's `mods/` folder (see [The mod folder](#the-mod-folder)), and
+its `scripts/main.lua` runs when the game starts, if the mod is switched on.
 
 `main.lua` runs once, just before the game starts, so its hooks and file patches see everything
 the game does. It sets things up: registers event handlers, key bindings, hooks and so on; game
@@ -519,7 +467,8 @@ Names from the game definition the client loaded (`gamedef/`).
 | `gamedef.commands()` | array | Every known console command: `{name, id, owner}`. |
 
 The game's console itself (running lines, reading and setting variables, its output) is not part
-of the client: the standard library's `boz.console` provides it (see *Standard library* below).
+of the client: the standard library's `boz.console` provides it (see
+[boz.console](scripting.md#bozconsole-and-bozcvars)).
 The [console reference](console-reference.md) lists every variable and command.
 
 ### game module
@@ -629,7 +578,7 @@ after `##` is not shown, so `"Run##SetRound"` shows "Run" with its own identity.
 | --- | --- |
 | `assets.patch(file, fn)` | Every time the game opens `file` (matched by file name, without case), `fn(bytes)` gets the player's copy as a string and returns the changed bytes, or `nil` to leave it alone. Several mods can patch one file; patches run in load order. Register in `main.lua`, before the game loads the file. |
 
-Replacement files in a mod's `assets/` folder (see [Making Lua mods](#replace-game-files)) are applied
+Replacement files in a mod's `assets/` folder (see [Replace game files](#replace-game-files)) are applied
 before patches.
 
 ### shared module
@@ -637,22 +586,16 @@ before patches.
 `shared` is one table every mod sees (each mod's own globals are separate). Code that several
 mods carry, like the standard lib, uses it to coordinate; mods can use it to talk to each other.
 
-### Lua API and the standard library
-
-Most mods should use the standard lib (`boz.*`) rather than the functions on this page: it turns
-the game's internals into plain functions (`camera.set_fov(90)`,
-`pause_settings.add_slider{...}`). See the [standard library](standard-library.md).
-
 ### API example
 
 ```lua
 -- Toggle unlimited ammo with F5 and show its state in a corner.
-local console = require("boz.console")
+local boz = require("boz")
 local on = false
 
 input.bind("F5", function()
     on = not on
-    console.set("WeaponsUnlimitedAmmo", on)
+    boz.console.set("WeaponsUnlimitedAmmo", on)
 end)
 
 events.on("frame", function()

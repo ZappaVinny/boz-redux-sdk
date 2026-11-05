@@ -167,21 +167,115 @@ return {name}
 '''
 
 
-def stub(name: str) -> str:
-    """A new script for a prefab or model called *name*."""
+EMPTY_TEMPLATE = '''local {name} = boz.{parent}:extend("{name}")
+
+return {name}
+'''
+
+OBJECT_TEMPLATE = '''-- {name}: {label}, changed by this script. self is that object.
+local {name} = boz.{parent}:extend("{name}")
+
+-- The level started.
+function {name}:start()
+{start}end
+{hooks}
+return {name}
+'''
+
+START_PARENT = '''    boz.{parent}.start(self)     -- keep what it does at the start
+'''
+OWN_START = ('Debris',)   # classes with a start() of their own, which a script must pass on
+
+USE_HOOK = '''
+-- A player used it. This hands the use back to the game, which pays and runs it. Leave the line
+-- out and nothing happens. Note the dot, and self passed first.
+function {name}:on_use(player)
+    boz.{parent}.on_use(self, player)
+end
+'''
+
+
+def _after(hook: str, arguments: str, comment: str) -> str:
+    return f'''
+-- {comment}
+function {{name}}:{hook}({arguments})
+end
+'''
+
+
+VOLUME_HOOKS = '''
+-- A Use volume: a player pressed use (its cost already paid).
+function {name}:on_use(player)
+end
+
+-- A Hit volume: it was shot.
+function {name}:on_hit(player)
+end
+
+-- A Trigger volume: someone came in, or left. who.zombie is true for a zombie.
+function {name}:on_enter(who)
+end
+
+function {name}:on_exit(who)
+end
+'''
+
+# The classes a script can extend: class, what it is, the hooks its template starts with.
+OBJECT_CLASSES = (
+    ('Door', 'Door', USE_HOOK + _after('on_opened', 'player', 'It opened.')),
+    ('Debris', 'Debris', USE_HOOK + _after('on_opened', 'player', 'It opened.')),
+    ('Perk', 'Perk machine', USE_HOOK + _after('on_bought', 'player, perk', 'A player bought it.')),
+    ('MysteryBox', 'Mystery box',
+     USE_HOOK + _after('on_spun', 'player', 'A player spun it.')
+     + _after('on_weapon', 'player, weapon', 'The box picked a weapon.')),
+    ('PackAPunch', 'Pack-a-Punch',
+     USE_HOOK + _after('on_upgraded', 'player, weapon', 'A weapon went in.')),
+    ('PowerSwitch', 'Power switch', USE_HOOK + _after('on_on', 'player', 'The power came on.')),
+    ('TrapSwitch', 'Trap switch',
+     USE_HOOK + _after('on_activated', 'player', 'A player ran its traps.')
+     + _after('on_cooled', '', 'Its trap is ready again.')),
+    ('Trap', 'Trap', _after('on_cooled', '', 'It is ready again.')),
+    ('WallBuy', 'Wall buy',
+     USE_HOOK + _after('on_bought', 'player, weapon', 'A player bought the weapon or its ammo.')),
+    ('Barricade', 'Barricade', USE_HOOK + _after('on_repaired', 'player', 'A player put a board back.')),
+    ('ZombieSpawn', 'Zombie spawn', ''),
+    ('Volume', 'Volume', VOLUME_HOOKS),
+)
+
+
+def stub(name: str, template: str = 'prefab', parent: str = 'Prefab') -> str:
+    """A new script called *name*: template 'empty' (just the class), 'prefab' (a basic prefab
+    with its hooks) or 'object' (extends *parent*, one of OBJECT_CLASSES, with that class's
+    hooks). 'empty' extends *parent* too."""
     if not NAME_RE.fullmatch(name):
         raise ScriptError(f'script name {name!r}: use letters, digits and _')
+    if template == 'empty':
+        return EMPTY_TEMPLATE.format(name=name, parent=parent)
+    if template == 'object':
+        for class_name, label, hooks in OBJECT_CLASSES:
+            if class_name == parent:
+                start = START_PARENT.format(parent=parent) if parent in OWN_START else ''
+                return OBJECT_TEMPLATE.format(name=name, parent=parent, label=label, start=start,
+                                              hooks=hooks.format(name=name, parent=parent))
+        raise ScriptError(f'no object class {parent!r}')
     return TEMPLATE.format(name=name)
 
 
-def new_script(scripts: str | Path, name: str) -> str:
-    """Create scripts/prefabs/<name>.lua (unless it exists); returns its path relative to
-    scripts/ ('prefabs/<name>.lua')."""
-    relative = f'prefabs/{name}.lua'
+def script_path(name: str) -> str:
+    """The script called *name*, relative to scripts/."""
+    return f'prefabs/{name}.lua'
+
+
+def new_script(scripts: str | Path, name: str, template: str = 'prefab',
+               parent: str = 'Prefab') -> str:
+    """Create scripts/prefabs/<name>.lua (unless it exists; see stub); returns its path relative
+    to scripts/ ('prefabs/<name>.lua')."""
+    relative = script_path(name)
     path = Path(scripts) / relative
     if not path.exists():
+        text = stub(name, template, parent)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(stub(name), encoding='utf-8', newline='\n')
+        path.write_text(text, encoding='utf-8', newline='\n')
     return relative
 
 

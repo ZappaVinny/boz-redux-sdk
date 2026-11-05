@@ -58,7 +58,7 @@ CI fails when one is out of date.
 
 | File | Source | Generator |
 | --- | --- | --- |
-| `lib/boz/engine/*_data.lua` | The game definition | `python3 tools/stdlib/generate_data.py` |
+| `lib/boz/*_data.lua` | The game definition | `python3 tools/stdlib/generate_data.py` |
 | `docs/game-events.md` | The game definition and `tools/symbols/event_notes.toml` | `python3 tools/docgen/events_doc.py` |
 | The weapon field tables in `docs/weapons-and-assets.md` | `bozkit.weapons.FIELDS` | `python3 tools/docgen/weapons_doc.py` |
 | `docs/console-reference.md` | The game definition and `tools/symbols/console_notes.toml` | `python3 tools/symbols/symbols.py console-doc gamedef/console/boz-1.0.11.toml tools/symbols/console_notes.toml docs/console-reference.md` |
@@ -71,22 +71,13 @@ CI fails when one is out of date.
 `boz_suite/tabs.py`. The SDK app rebuilds it in a checkout when the sources change.
 `blender/README.md` describes the editor's modules.
 
-### Releases
-
-`.github/workflows/release.yml` builds the SDK packages on every push to `main` (kept as workflow
-artifacts) and publishes them for a `v*` tag: `tools/package_release.sh` makes the Linux ZIP
-(source with the gamedef, the editor built by Blender, the navmesh helpers for Linux and
-Windows), and `tools/build_exe.py` builds `boz-sdk.exe` with PyInstaller for the Windows ZIP.
-The bundled launcher treats its own folder as the SDK (`bozkit.schema.sdk_root`). Bump
-`version` in `pyproject.toml` before tagging.
-
 ### Documentation
 
-The documentation is a few large pages, one per big subject; each file's `#` title is a main
-section of the documentation site, and `##` and `###` headings split it into sections. Add new
-material as a section of the page it belongs to; start a new page only for a subject that is
-really different, and list it in `docs/README.md`. Link with relative paths and anchors
-(`lua-mods.md#client-lua-api`). Write for modders first: say what a feature does and how to use
+The documentation is written by hand for a new modder, and the website's copy is the master: the
+SDK's `docs/` mirrors it. Each file's `#` title is a page of the site, and `##` and `###` headings
+split it. Add new material as a section of the page it belongs to, with a code example, and start
+a new page only for a subject that is really different. Only document what works today. Link with relative paths and anchors
+(`script-mods.md#client-lua-api`). Write for modders first: say what a feature does and how to use
 it, then how it works inside, at the end of the section.
 
 ## Contributing to the game definition
@@ -267,7 +258,39 @@ Pull before you start and apply the database first, so you export on top of ever
 
 The SDK is becoming a Lua-first development suite for Zombies: a shared compiler, desktop project
 manager and Blender add-on that edit existing maps first, then create complete new maps. Dead Ops
-modding and LAN co-op are not part of this work.
+modding is not part of this work.
+
+### Mod tools roadmap
+
+What modders can't do yet and we want them to, most important first. Each item is open to anyone
+who wants to pick it up.
+
+1. **Zones and teleporters.** Doors that open areas, spawns that wake as players reach them, and the
+   game's teleporters. New maps are one area today, so this is the biggest gap for real maps. It needs
+   reverse engineering first.
+2. **Scripts in co-op.** Scripts see only the local player, and each game runs its own, so a hidden
+   wall can differ between players. Start with a real co-op test of a scripted map, then give scripts
+   every player and a way to keep games in step.
+3. **Moving and turning objects.** `set_position` and `set_rotation` on objects, with prefabs moving
+   as one. Use points need testing, because the game files fixed ones in a grid.
+4. **Scripts reach every object.** Remove **Scripts can switch it**, without making large maps
+   heavier.
+5. **Ending a match and player facing.** A win condition for scripts, and setting which way a player
+   looks after a teleport.
+6. **Spawning prefabs during play.** Placing your own prefabs from a script, not only the game's
+   entities.
+7. **More game prefabs.** Turrets first, then rides: landers, the zipline and the flinger.
+8. **George on any map.** Needs the level traits primitive in the client.
+9. **Luring zombies.** Making zombies go to an object, like a monkey bomb does.
+10. **Custom HUD.** The **UI / HUD** tab: HUD elements in the game's own style, with icons for custom
+    perks and power-ups.
+11. **Custom characters.** Player arms, characters and zombie models, with skeleton mapping.
+12. **Animated map objects.** Animating models in the game's format, as weapons already can.
+13. **Editing effects.** Changing the game's particle effects, and making new ones.
+14. **Faster iteration.** Reloading scripts in the running game, and `boz.*` completions in the
+    editor's script window.
+15. **Big maps.** Rooms and portals, so large levels draw only what the player can see.
+16. **Lighting and music.** Baked lightmaps, and replacing the game's music.
 
 ### Architecture boundary
 
@@ -279,33 +302,3 @@ modding and LAN co-op are not part of this work.
 
 A missing feature moves downward only when it is reusable: mod behavior becomes a standard-library
 API when many mods need it; client code is added only for universal runtime infrastructure.
-
-### Phases
-
-1. **Project foundation:** versioned projects, validation, deterministic builds, installation,
-   packaging, compatibility metadata and the desktop shell.
-2. **Writable formats:** native textures, materials, models, entities, collision, sectors, portals
-   and navigation, with lossless preservation of unknown data.
-3. **Existing-map Blender tools:** import, edit, validate and export map content through the shared
-   compiler.
-4. **Lua platform:** world, entity, weapon, interaction, navigation, audio, asset and debugging APIs,
-   plus generated editor annotations.
-5. **Custom-map MVP:** generate and register a complete Zombies map whose gameplay lives in Lua.
-6. **Full suite:** skeletal models, animations, weapons, effects, audio, localization, UI,
-   lightmaps, migrations and compatibility guarantees.
-
-The full 64-bit runtime rewrite waits until the custom-map MVP. A bounded design and benchmark
-prototype may start after the existing-map editor, but project, package, gamedef and Lua interfaces
-must remain independent of host bitness.
-
-### Game files
-
-Projects and packages may contain extracted, complete or modified game files; distribution
-validation warns about them but never blocks a build. The official BOZ Redux repositories never
-contain game data.
-
-### Milestones
-
-Each phase ends in a tested, documented, buildable state. Phases 1 to 4 are development
-milestones, not public releases; a first preview of the SDK comes only after the custom-map MVP
-passes its acceptance tests.
