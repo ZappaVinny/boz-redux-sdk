@@ -7,7 +7,7 @@
 --
 -- Names: double_points, insta_kill, max_ammo, nuke, carpenter, firesale, deathmachine,
 -- perkbottle, lightningbolt (the game's order). How often they drop is the Game tab's economy
--- (docs/map-editor.md, Game rules).
+-- (docs/editor.md, Game rules).
 
 local pickups = {}
 

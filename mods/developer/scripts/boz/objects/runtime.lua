@@ -558,6 +558,11 @@ function runtime.start(list, all_names, weapon_list)
         end
     end
     match_events.know_names(member_names)
+    -- A name the entity has in the game is another name of the world's object (PowerSwitch).
+    local ok, data = pcall(require, "boz.world_data")
+    for world_name, game_name in pairs(ok and type(data) == "table" and data.aliases or {}) do
+        by_hash[hash.name(game_name)] = world_name
+    end
     bridge()
     Object._in_level = false
     starting.pending = map.resuming()
