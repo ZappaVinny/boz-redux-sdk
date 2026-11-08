@@ -12,7 +12,7 @@ from . import group, levels, maps, spec_fields
 from .hashing import iw_hash
 from .world import (BLOCK_MARGIN, CHALK_FIELD, COLLISION_PARTS, HIT_SOURCE, INGAME, Instance,
                     Layout, Mesh, Model, PLAYER_RADIUS, Placement, Prefab, TRIGGER_SIZE, TRIGGER_SOURCE, Texture, UNIT,
-                    USE_SOURCE, WEAPON_FIELD, World, WorldError, describe, lower, object_names,
+                    USE_SOURCE, Volume, WEAPON_FIELD, World, WorldError, describe, lower, object_names,
                     script_of, validate, validate_layout, walk)
 
 def compile_world(pack, name: str, world: World,
@@ -39,12 +39,16 @@ def compile_world(pack, name: str, world: World,
     files.runtime['objects'] = describe(world)
     # Your prefabs' links (only scripts and the runtime read them): every target must exist.
     known = {n.lower() for n in object_names(world)}
+    zone_of = {full.lower(): item.zone_name() for full, item in walk(world.objects())
+               if isinstance(item, Volume) and item.kind_of == 'zone'}
     for key, (full, item) in own.items():
         for kind_name, targets in links_module.clean(item.links).items():
             missing = [t for t in targets if t.lower() not in known]
             if missing:
                 raise WorldError(f'{full}: its {kind_name} link names {missing[0]}, which is not '
                                  'in the map')
+            if kind_name == 'zones':   # a link to a zone's box opens its zone
+                targets = list(dict.fromkeys(zone_of.get(t.lower(), t) for t in targets))
             files.runtime.setdefault('links', {}).setdefault(full, {})[kind_name] = list(targets)
     # Game prefabs placed without a piece (shipped entities) get their class from what they are.
     classes = files.runtime.pop('classes', {})
@@ -146,6 +150,145 @@ HIT_SONG = 'boz/hit_volume'   # no such song: the group never completes
 POWER_SWITCH = 'PowerSwitch'   # DefaultPowerSwitchName: the level listens to the switch so named
 POWER_LINK = 'powerSwitch'     # perks, Pack-a-Punch, doors, trap switches, teleporters, screens
 LIST_LINKS = (('CTrapSwitch', 'traps'), ('CDoor', 'm_Siblings'))
+
+
+# Sectors and zones ---------------------------------------------------------------------------
+
+SECTOR_PORTAL_REACH = 25.0   # centimetres past a portal's faces where its two sectors are looked for
+SHELL_FLAGS = 0x120000       # a sector shell's CIwModel flags: 0x100000 keeps its vertices, which the
+                             # game builds the sector's volume from (Kino's shells have it)
+
+
+def area_name(level_name: str, zone: str) -> str:
+    """The CArea resource name of a zone (prefixed: area names are global)."""
+    return f'{level_name}_zone_{zone.lower()}'
+
+
+def sector_group_name(level_name: str, sector: str) -> str:
+    """The group (and the game's sector name) of a sector: prefixed, because a mod's file
+    replaces any game file of the same name."""
+    return f'{level_name}_sector_{sector.lower()}'
+
+
+def map_zones(boxes) -> dict:
+    """{zone name: [its MapBoxes]}, in the order the zones first appear."""
+    zones: dict = {}
+    for box in boxes:
+        if box.kind == 'zone':
+            zones.setdefault(box.zone, []).append(box)
+    return zones
+
+
+def zone_spawns(zones: dict, spawns: list[int], positions: dict) -> dict:
+    """{zone: [spawn name hashes]}: a spawn is in the first zone whose boxes hold it, else in
+    the starting zone."""
+    if not zones:
+        return {}
+    starting = next((z for z, boxes in zones.items() if any(b.starting for b in boxes)),
+                    next(iter(zones)))
+    out = {zone: [] for zone in zones}
+    for key in spawns:
+        where = positions.get(key)
+        zone = next((z for z, boxes in zones.items()
+                     if where is not None and any(b.contains(where, 10.0) for b in boxes)), starting)
+        out[zone].append(key)
+    return out
+
+
+def box_json(box) -> dict:
+    return {'position': [round(c, 2) for c in box.position],
+            'rotation': [round(c, 6) for c in box.rotation],
+            'size': [round(c, 2) for c in box.size]}
+
+
+def portal_quad(box) -> tuple[list, tuple]:
+    """A portal volume's quad (its middle, across its thinnest side) and that side's normal."""
+    thin = min(range(3), key=lambda i: box.size[i])
+    a, b = [i for i in range(3) if i != thin]
+    half = [c / 2 for c in box.size]
+    quad = []
+    for sa, sb in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+        local = [0.0, 0.0, 0.0]
+        local[a], local[b] = sa * half[a], sb * half[b]
+        turned = spec_fields.rotate(tuple(box.rotation), tuple(local))
+        quad.append(tuple(box.position[i] + turned[i] for i in range(3)))
+    axis = [0.0, 0.0, 0.0]
+    axis[thin] = 1.0
+    return quad, spec_fields.rotate(tuple(box.rotation), tuple(axis))
+
+
+def portal_sectors(box, sectors: list) -> tuple[str, str]:
+    """The sectors on the two sides of a portal volume (front: where its normal points)."""
+    _quad, normal = portal_quad(box)
+    reach = min(box.size) / 2 + SECTOR_PORTAL_REACH
+    found = []
+    for sign in (1, -1):
+        point = tuple(box.position[i] + sign * normal[i] * reach for i in range(3))
+        inside = [s.name for s in sectors if s.contains(point)]
+        if len(inside) != 1:
+            side = 'its front' if sign == 1 else 'its back'
+            raise WorldError(f'portal {box.name}: {"no sector" if not inside else "two sectors"} '
+                             f'on {side} (a portal joins two sectors: put it in a doorway, with '
+                             'a sector box reaching it from each side)')
+        found.append(inside[0])
+    if found[0] == found[1]:
+        raise WorldError(f'portal {box.name}: both its sides are in sector {found[0]}')
+    return found[0], found[1]
+
+
+def sector_groups(level_name: str, boxes, placed_template: bytes) -> tuple[dict, dict]:
+    """The groups for the world's sectors ({file name: group}) and what scripts read of them.
+
+    A sector is a group of its own, listed by ``<level>_sectors``, the statics group's child.
+    It holds the sector's shell: an entity named ``<sector>_shell`` drawing a model of the
+    box's eight corners, no triangles and no materials; the game makes the sector's volume
+    from those corners (their convex hull) and draws nothing for it. Portals go in the group of
+    the sector their normal points into. Props need no listing: the game puts every level prop
+    in the sector holding its centre."""
+    from . import map_resources, native, reflect, resources
+
+    sectors = [box for box in boxes if box.kind == 'sector']
+    portals = [box for box in boxes if box.kind == 'portal']
+    if not sectors:
+        if portals:
+            raise WorldError(f'portal {portals[0].name}: the map has no sectors to join')
+        return {}, {}
+    portal_lists: dict[str, list] = {box.name: [] for box in sectors}
+    for box in portals:
+        front, back = portal_sectors(box, sectors)
+        quad, normal = portal_quad(box)
+        portal = map_resources.Portal(
+            quad, normal, sum(normal[i] * box.position[i] for i in range(3)),
+            sector_group_name(level_name, front), sector_group_name(level_name, back))
+        portal_lists[front].append(group.Resource(None, iw_hash(f'{level_name}_portal_{box.name}'),
+                                                  map_resources.encode_portal(portal)))
+    files, children, runtime = {}, [], {}
+    for box in sectors:
+        group_name = sector_group_name(level_name, box.name)
+        corners = [tuple(round(c - box.position[i]) for i, c in enumerate(corner))
+                   for corner in box.corners()]
+        if any(not -32768 <= c <= 32767 for corner in corners for c in corner):
+            raise WorldError(f'sector {box.name}: at most 650 m across')
+        shell = iw_hash(f'{group_name}_shell')
+        model = native.build_model(corners, [(0.0, 0.0)] * 8, [], [], flags=SHELL_FLAGS)
+        spec = resources.decode_entity_spec(placed_template)
+        spec_fields.set_transform(spec, tuple(box.position), (0.0, 0.0, 0.0, 1.0))
+        renderable = spec_fields.component(spec, 'CIsRenderableModel').blob
+        for element in spec_fields.prop(renderable, 'assets').elements:
+            for prop in element.properties:
+                if prop.name_hash in (iw_hash('Name'), iw_hash('model')):
+                    reflect.set_typed_value(prop, shell)
+        types = [group.ResourceType(levels.MODEL, 1, 1, [group.Resource(None, shell, model)]),
+                 group.ResourceType(levels.ENTITY_SPEC, 1, 1, [group.Resource(
+                     None, shell, resources.encode_entity_spec(spec))])]
+        if portal_lists[box.name]:
+            types.append(group.ResourceType(iw_hash('CIsPortal'), 1, 1, portal_lists[box.name]))
+        files[f'{group_name}.group.bin'] = levels.make_group(group_name, types=types, flags=1)
+        children.append(levels.Child(f'levels/{level_name}//{group_name}.group', group_name))
+        runtime[box.name] = {'group': group_name, **box_json(box)}
+    files[f'{level_name}_sectors.group.bin'] = levels.make_group(f'{level_name}_sectors', children,
+                                                                 flags=1)
+    return files, runtime
 
 
 def rewire_links(spec, home: str, renames: dict, present: set, power: int) -> bool:
@@ -377,6 +520,9 @@ class _Level:
         self.feeds: list[int] = []
         self.placed_settings: dict[int, dict] = {}   # id() of an added resource -> its settings
         self.zombie_spawns: list[int] = []
+        self.spawn_positions: dict[int, tuple] = {}   # zombie spawn name hash -> position
+        self.zone_boxes: dict[str, str] = {}     # lower zone volume name -> its zone's name
+        self.area_names: dict[int, str] = {}     # CArea name hash -> its zone's name
         self.used: set[int] = set()       # entity names already placed
         self.copies = 0
         self._loaded = None
@@ -551,6 +697,7 @@ class _Level:
             self.repack(spec_hashes(spec), entity.group)
         if spec_fields.component(spec, 'CSpawnPoint'):
             self.zombie_spawns.append(key)
+            self.spawn_positions[key] = tuple(entity.position)
             if entity.piece == 'zombie_window':
                 self.window_spawns.append((script_of(entity).get('name') or entity.source,
                                            tuple(entity.position)))
@@ -1207,7 +1354,9 @@ class _Level:
                 corners += [spec_fields.apply_chain(chain, c) for c in _box_corners(vertices)]
             if not corners:
                 continue
-            doors.append(_tag_area(name_hash, corners))
+            # Like a blocking object: the player's centre stops the margin plus its radius away,
+            # so its body stops at the door instead of sinking into it.
+            doors.append(_tag_area(name_hash, corners, grow=BLOCK_MARGIN / 100 + self.player_radius))
         return doors + (self.blockers if blockers else [])
 
     def build_navmesh(self, build) -> bytes:
@@ -1293,6 +1442,14 @@ class _Level:
                     raise WorldError(f'{own} has no {kind.label} link')
                 values = []
                 for target in targets:
+                    if kind.name == 'zones':
+                        zone = getattr(self, 'zone_boxes', {}).get(target.lower())
+                        if zone is None:
+                            raise WorldError(f'{own}: its {kind.label} link names {target}, '
+                                             'which is not a zone volume')
+                        if iw_hash(area_name(self.name, zone)) not in values:
+                            values.append(iw_hash(area_name(self.name, zone)))
+                        continue
                     found = self.named.get(target.lower())
                     own_kinds = getattr(self, 'own_objects', {}).get(target.lower())
                     if found is None and own_kinds is not None and links.can_target(kind, own_kinds):
@@ -1345,6 +1502,7 @@ class _Level:
         from . import links, resources, toolkit
 
         names = {found[0]: found[3] for found in self.named.values()}
+        names.update(getattr(self, 'area_names', {}))
         out: dict = {}
         for resource in self.added + self.moved:
             own = names.get(resource.in_group_hash)
@@ -1410,7 +1568,6 @@ class _Level:
 
 
 SPAWN_TO_BARRICADE = 600.0   # centimetres from a window zombie spawn to its barricade, at most
-TAG_GROW = 0.1   # metres a door's tagged area reaches past its collision on every side
 
 
 def _player_radius(statics) -> float:
@@ -1439,7 +1596,7 @@ def _navmesh_tags(body: bytes) -> set[int]:
     return tags
 
 
-def _tag_area(name_hash: int, corners, below: float = 0.0, grow: float = TAG_GROW) -> tuple:
+def _tag_area(name_hash: int, corners, grow: float, below: float = 0.0) -> tuple:
     """(name hash, XZ hull in metres, min y, max y) of points in centimetres: a navmesh area
     tagged with the name (doors, and objects scripts open and close). The outline is grown
     evenly on every side (a circle swept around the hull), so a thin wall still tags a strip
@@ -1485,20 +1642,40 @@ def _compile_layout(pack, name: str, world: Layout,
     level.build_props(world)
     for entity in world.entities:
         level.entity(entity, move_existing=False)
+    zones = map_zones(world.boxes)
+    for zone, boxes in zones.items():
+        level.area_names[iw_hash(area_name(name, zone))] = zone
+        for box in boxes:
+            level.zone_boxes[box.name.lower()] = zone
     level.rewire_links()
 
-    # The starting area lists the zombie spawns that are in the world.
+    # The level's areas (zones): without zone volumes one starting area lists every zombie
+    # spawn; with them each zone is an area listing the spawns in its boxes (the rest are the
+    # starting zone's), and doors open them (Opens zones).
     level_blob = resources.decode_reflected(by_class[levels.LEVEL].resources[0].body)
     (start_area,) = struct.unpack_from('<I', spec_fields.prop(level_blob, 'm_StartingArea').raw)
     areas = [r for r in by_class[levels.AREA].resources if r.in_group_hash == start_area]
     if not areas:
         raise WorldError(f'{base} has no starting area')
-    area_blob = resources.decode_reflected(areas[0].body)
-    spawns = level.zombie_spawns
-    spec_fields.prop(area_blob, 'm_SpawnPoints').raw = struct.pack(
-        f'<I{len(spawns)}I', len(spawns), *spawns)
-    areas[0].body = resources.encode_reflected(area_blob)
-    by_class[levels.AREA].resources = areas
+    members = zone_spawns(zones, level.zombie_spawns, level.spawn_positions)
+    if not zones:
+        members = {'': list(level.zombie_spawns)}
+    written = []
+    for zone, spawns in members.items():
+        area_blob = resources.decode_reflected(areas[0].body)
+        spec_fields.prop(area_blob, 'm_SpawnPoints').raw = struct.pack(
+            f'<I{len(spawns)}I', len(spawns), *spawns)
+        key = iw_hash(area_name(name, zone)) if zone else start_area
+        written.append(group.Resource(None, key, resources.encode_reflected(area_blob)))
+    by_class[levels.AREA].resources = written
+    if zones:
+        starting = next(zone for zone, boxes in zones.items() if any(b.starting for b in boxes))
+        spec_fields.prop(level_blob, 'm_StartingArea').raw = struct.pack(
+            '<I', iw_hash(area_name(name, starting)))
+        level.runtime['zones'] = {zone: {
+            'starting': zone == starting, 'area': area_name(name, zone),
+            'boxes': [box_json(box) for box in zones[zone]],
+            'spawns': [level.name_of(key) for key in members[zone]]} for zone in zones}
     if level.pack_a_punch and not level.boxes:
         # The game's box and Pack-a-Punch manager looks up the boxes unchecked once anything is
         # registered with it (FUN_4a12d080): with no box the level crashes as it loads.
@@ -1527,9 +1704,18 @@ def _compile_layout(pack, name: str, world: Layout,
         levels.read_group_at(pack, f'levels/{base}/{base}'), name,
         [levels.Child(f'levels/{base}//{base}_dynamics.group', f'{base}_dynamics'),
          levels.Child(f'levels/{name}//{name}_statics.group', f'{name}_statics')])
-    without_children = levels.renamed(statics, f'{name}_statics')
-    without_children.sections = [x for x in without_children.sections if x.hash != levels.CHILDREN]
-    files.groups[f'{name}_statics.group.bin'] = without_children
+    sector_files, sectors_runtime = sector_groups(name, world.boxes, level.placed_template)
+    if sector_files:
+        files.groups.update(sector_files)
+        files.groups[f'{name}_statics.group.bin'] = levels.renamed(
+            statics, f'{name}_statics',
+            [levels.Child(f'levels/{name}//{name}_sectors.group', f'{name}_sectors')])
+        level.runtime['sectors'] = sectors_runtime
+    else:
+        without_children = levels.renamed(statics, f'{name}_statics')
+        without_children.sections = [x for x in without_children.sections
+                                     if x.hash != levels.CHILDREN]
+        files.groups[f'{name}_statics.group.bin'] = without_children
     files.runtime = level.runtime
     return files
 

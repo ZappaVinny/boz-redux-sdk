@@ -29,29 +29,49 @@ LINK_COLOURS = {
     "power": (1.0, 0.95, 0.1, 1.0), "traps": (1.0, 0.15, 0.1, 1.0),
     "siblings": (1.0, 0.55, 0.1, 1.0), "spawns": (0.2, 1.0, 0.3, 1.0),
     "unlocks": (0.1, 0.9, 1.0, 1.0), "member": (0.7, 0.45, 1.0, 1.0),
+    "zones": (0.1, 0.9, 1.0, 1.0),
     "trap": (1.0, 0.15, 0.1, 1.0), "sibling": (1.0, 0.55, 0.1, 1.0),   # blend files saved before
 }
 SWITCH_HELP = {
     "boz_show_markers": "Markers for spawns and game objects that draw nothing in the game",
     "boz_show_badges": "Labels over the shipped level's game objects",
     "boz_show_areas": "The shipped level's areas (zones)",
-    "boz_show_shapes": "Trigger, hit and use volumes",
+    "boz_show_volumes": "Volumes: your trigger, use, hit, sector, zone and portal boxes, and the "
+                        "shipped level's own (pick which with the arrow)",
     "boz_show_collision": "The shipped level's collision",
     "boz_show_portals": "The shipped level's portals (room culling)",
     "boz_show_navigation": "The shipped level's navmesh connections (climbs, windows)",
     "boz_show_navmesh": "The shipped level's navmesh (walkable area)",
 }
+# The Volumes filter: your volume kinds (link.VOLUME_ITEMS) and the shipped level's shapes.
+VOLUME_KINDS = [("trigger", "Trigger", ""), ("use", "Use", ""), ("hit", "Hit", ""),
+                ("sector", "Sector", ""), ("zone", "Zone", ""), ("portal", "Portal", ""),
+                ("shipped", "Shipped level", "The shipped level's trigger and collision shapes")]
 # Scene switch -> object kinds it shows.
 SWITCHES = {
     "boz_show_markers": {"entity"},
     "boz_show_badges": {"badge"},
     "boz_show_areas": {"area"},
-    "boz_show_shapes": {"shape"},
     "boz_show_collision": {"collision", "collision_piece"},
     "boz_show_portals": {"portal"},
     "boz_show_navigation": {"navigation_connection"},
     "boz_show_navmesh": {"navmesh"},
 }
+
+
+def shown_volume_kinds(scene) -> set[str]:
+    """The volume kinds Volumes shows now (none while it is off)."""
+    if not scene.boz_show_volumes:
+        return set()
+    return {kind for kind, _text, _help in VOLUME_KINDS if getattr(scene, f"boz_volume_{kind}")}
+
+
+def draw_volume_kinds(layout, scene) -> None:
+    """One checkbox per volume kind: any mix can show."""
+    column = layout.column(align=True)
+    column.active = scene.boz_show_volumes
+    for kind, text, _help in VOLUME_KINDS:
+        column.prop(scene, f"boz_volume_{kind}", text=text)
 
 
 def apply_visibility(context=None):
@@ -60,7 +80,18 @@ def apply_visibility(context=None):
     types = set(scene.boz_marker_types)
     kinds = {kind for switch, members in SWITCHES.items() if getattr(scene, switch)
              for kind in members}
+    volumes = shown_volume_kinds(scene)
     for obj in scene.objects:
+        settings = getattr(obj, "boz", None)   # the editor's settings (not in shipped-map tests)
+        own = settings is not None and settings.role == "volume"
+        if own or obj.get("boz_kind") == "shape":
+            visible = (settings.volume if own else "shipped") in volumes
+            if obj.visible_get() != visible:
+                try:
+                    obj.hide_set(not visible)
+                except RuntimeError:
+                    pass
+            continue
         kind = obj.get("boz_kind")
         if kind not in {k for members in SWITCHES.values() for k in members}:
             continue
@@ -422,10 +453,12 @@ def draw_switches(layout, scene):
     grid = box.grid_flow(columns=2, even_columns=True, align=True)
     for switch, text in (("boz_show_markers", "Markers"), ("boz_show_badges", "Badges"),
                          ("boz_show_areas", "Areas"), ("boz_show_links", "Links"),
-                         ("boz_show_shapes", "Shapes"), ("boz_show_collision", "Collision"),
+                         ("boz_show_volumes", "Volumes"), ("boz_show_collision", "Collision"),
                          ("boz_show_portals", "Portals"), ("boz_show_navigation", "Nav links"),
                          ("boz_show_navmesh", "Navmesh")):
         grid.prop(scene, switch, text=text, toggle=True)
+    if scene.boz_show_volumes:
+        draw_volume_kinds(box, scene)
     if scene.boz_show_links:
         box.prop(scene, "boz_links_selected_only")
         if draw_error:
@@ -443,6 +476,11 @@ CLASSES = (BOZ_OT_link_select, BOZ_OT_link_remove, BOZ_OT_link_add_selected, BOZ
 _PROPERTIES = {
     **{switch: BoolProperty(default=False, update=_update, description=SWITCH_HELP[switch])
        for switch in SWITCHES},
+    "boz_show_volumes": BoolProperty(default=True, update=_update,
+                                     description=SWITCH_HELP["boz_show_volumes"]),
+    **{f"boz_volume_{kind}": BoolProperty(name=text, default=kind != "shipped", update=_update,
+                                           description=help or f"Show your {text.lower()} volumes")
+       for kind, text, help in VOLUME_KINDS},
     "boz_show_links": BoolProperty(default=False, update=_redraw,
                                    description="Lines between linked objects (power, traps, doors, "
                                    "window spawns); faint lines are defaults you have not set"),

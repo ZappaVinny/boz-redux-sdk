@@ -35,7 +35,11 @@ end
 
 local Debris = require("boz.objects.debris")
 
-local CLASSES = {Object = Object, Prefab = Prefab, Volume = require("boz.objects.volume"), Debris = Debris}
+local Zone = require("boz.objects.zone")
+local Sector = require("boz.objects.sector")
+
+local CLASSES = {Object = Object, Prefab = Prefab, Volume = require("boz.objects.volume"), Debris = Debris,
+                 Zone = Zone, Sector = Sector}
 for name, class in pairs(native) do
     if name ~= "Native" then
         CLASSES[name] = class
@@ -275,6 +279,29 @@ local function check_zombies(dt)
     end
 end
 
+-- Players walking into and out of zones and sectors (on_enter / on_exit).
+local areas, area_wait = {}, 0     -- {object, {player = true}} of every zone and sector
+
+local function check_areas(dt)
+    area_wait = area_wait - dt
+    if area_wait > 0 or #areas == 0 then
+        return
+    end
+    area_wait = ZOMBIE_CHECK
+    for _, area in ipairs(areas) do
+        for _, player in ipairs(runtime.players()) do
+            local inside = area.object:contains(player)
+            if inside and not area.players[player] then
+                area.players[player] = true
+                area.object:_emit("enter", player)
+            elseif not inside and area.players[player] then
+                area.players[player] = nil
+                area.object:_emit("exit", player)
+            end
+        end
+    end
+end
+
 local function check_leaving(dt)
     for i = #leaving, 1, -1 do
         local pending = leaving[i]
@@ -463,6 +490,9 @@ local function route(name, data)
             for _, other in ipairs(door:links("siblings")) do   -- debris it opens with
                 if other:is_a(Debris) then other:open(player) end
             end
+            for _, zone in ipairs(door:links("zones")) do       -- the game opened them
+                if zone:is_a(Zone) then zone:_opened() end
+            end
         end
     elseif name == "perk_bought" then
         local perk = just_used(native.Perk)
@@ -549,6 +579,7 @@ local function bridge()
         clock = clock + (dt or 0)
         check_leaving(dt or 0)
         check_zombies(dt or 0)
+        check_areas(dt or 0)
         if starting.pending then
             starting.waited = starting.waited + (dt or 0)
             if starting.waited > LOAD_WAIT then
@@ -602,7 +633,7 @@ end
 function runtime.start(list, all_names, weapon_list)
     objects, entries, volumes, leaving, weapon_objects, by_hash = {}, {}, {}, {}, {}, {}
     runtime._player = nil
-    used, zombie_volumes = {}, {}
+    used, zombie_volumes, areas = {}, {}, {}
     started = true
     Object.forget_level_listeners()
     Object._in_level = true
@@ -652,6 +683,11 @@ function runtime.start(list, all_names, weapon_list)
             if class then
                 objects[lower(entry.name)] = class:new(entry.name, entry)
             end
+        end
+    end
+    for _, entry in ipairs(list or {}) do
+        if entry.class == "Zone" or entry.class == "Sector" then
+            table.insert(areas, {object = runtime.get(entry.name), players = {}})
         end
     end
     match_events.know_names(member_names)

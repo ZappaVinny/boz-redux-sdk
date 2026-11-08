@@ -243,7 +243,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert set(shapes) == {'reach', 'box'} and not shapes['box'].visible_get()
     assert shapes['box'].material_slots[0].material.name == 'BOZ Shape: solid'
     assert shapes['reach'].material_slots[0].material.name == 'BOZ Shape: reach'
-    scene.boz_show_shapes = True
+    scene.boz_volume_shipped = True
     assert shapes['box'].visible_get()
     assert bpy.ops.boz.validate_scene() == {'FINISHED'}
     shapes['box'].scale.x = 25.0

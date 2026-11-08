@@ -58,7 +58,12 @@ ROLE_ITEMS = [("model", "Model", "A mesh you see and bump into: a game model or 
 VOLUME_ITEMS = [("trigger", "Trigger", "Sends \"enter\" and \"exit\" when players or zombies walk "
                  "in and out", 0),
                 ("hit", "Hit", "Sends \"hit\" when it is shot", 1),
-                ("use", "Use", "Sends \"use\" when a player presses use at it", 2)]
+                ("use", "Use", "Sends \"use\" when a player presses use at it", 2),
+                ("sector", "Sector", "A room: the game draws it only while the camera is in it or "
+                 "sees it through a portal", 3),
+                ("zone", "Zone", "An area: its zombie spawns wake when a door that opens it opens",
+                 4),
+                ("portal", "Portal", "A doorway between two sectors: the game sees through it", 5)]
 WHO_ITEMS = [("players", "Players", ""), ("zombies", "Zombies", ""),
              ("anyone", "Anyone", "Players and zombies")]
 SHAPE_ITEMS = [("box", "Box", "Collide with its bounds (fast)"),
@@ -175,6 +180,11 @@ class BOZ_ObjectSettings(PropertyGroup):
     prompt: StringProperty(name="Prompt", description="What players see when they can use it")
     cost: IntProperty(name="Cost", default=0, min=0, max=100000,
                       description="Points it takes to use (0: free)")
+    zone: StringProperty(name="Zone", description="The zone this box is part of: boxes with the "
+                         "same zone name are one zone (empty: the box's own name)")
+    starting: BoolProperty(name="Starting zone", default=False,
+                           description="Players start in this zone: its spawns work from the "
+                           "start (one zone per map)")
 
 
 class BOZ_SceneSettings(PropertyGroup):

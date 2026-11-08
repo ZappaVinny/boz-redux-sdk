@@ -801,11 +801,26 @@ class BOZ_PT_object(Panel):
                 layout.prop(settings, "double_sided")
         elif settings.role == "volume":
             layout.prop(settings, "volume", expand=True)
-            layout.prop(settings, "who", expand=True)
-            layout.prop(settings, "once")
-            if settings.volume == "use":
-                layout.prop(settings, "prompt")
-                layout.prop(settings, "cost")
+            if settings.volume == "sector":
+                layout.label(text="A room: drawn only while the camera is in it or sees it "
+                             "through a portal", icon="INFO")
+                layout.label(text="Cover the room; props inside draw with it")
+            elif settings.volume == "zone":
+                layout.prop(settings, "zone", text="Zone")
+                if not settings.zone:
+                    layout.label(text=f"Empty: the zone {convert.object_name(obj)}")
+                layout.prop(settings, "starting")
+                layout.label(text="Spawns inside wake when a door with Opens zones opens it",
+                             icon="INFO")
+            elif settings.volume == "portal":
+                layout.label(text="A doorway: make it thin, with a sector on each side",
+                             icon="INFO")
+            else:
+                layout.prop(settings, "who", expand=True)
+                layout.prop(settings, "once")
+                if settings.volume == "use":
+                    layout.prop(settings, "prompt")
+                    layout.prop(settings, "cost")
             size = tuple(round(c * world.TRIGGER_SIZE) for c in obj.scale)
             layout.label(text=f"Size {size[0]} x {size[1]} x {size[2]} cm (scale it)")
         elif settings.role == "prefab" and not settings.source:

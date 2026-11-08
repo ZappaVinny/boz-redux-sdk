@@ -26,6 +26,8 @@ for name, class in pairs(native) do
 end
 boz.Debris = require("boz.objects.debris")
 boz.Volume = require("boz.objects.volume")
+boz.Zone = require("boz.objects.zone")
+boz.Sector = require("boz.objects.sector")
 boz.Player = require("boz.game.player")
 boz.Weapon = require("boz.game.weapon")
 
@@ -72,7 +74,8 @@ local SYSTEMS = {audio = "boz.systems.audio", camera = "boz.systems.camera",
                  screen = "boz.systems.screen", effects = "boz.game.effects",
                  pickups = "boz.game.pickups", rounds = "boz.game.rounds",
                  stats = "boz.game.stats", fly = "boz.game.fly", deadops = "boz.game.deadops",
-                 weapons = "boz.engine.weapons", map = "boz.engine.map"}
+                 weapons = "boz.engine.weapons", map = "boz.engine.map",
+                 sectors = "boz.engine.sectors"}
 
 return setmetatable(boz, {__index = function(_, key)
     local path = SYSTEMS[key]

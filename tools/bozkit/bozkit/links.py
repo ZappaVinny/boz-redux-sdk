@@ -17,8 +17,8 @@ from dataclasses import dataclass
 # Object kinds, by what an object is: game prefabs by their components, and your own objects
 # by their editor role (model, volume, prefab). 'door' also covers debris (a door of yours).
 OBJECT_KINDS = ('perk', 'door', 'barricade', 'trap', 'trap_switch', 'power_switch', 'mystery_box',
-                'pack_a_punch', 'wall_buy', 'zombie_spawn', 'player_spawn', 'volume', 'model',
-                'prefab', 'any')
+                'pack_a_punch', 'wall_buy', 'zombie_spawn', 'player_spawn', 'volume', 'zone',
+                'sector', 'model', 'prefab', 'any')
 PIECE_KINDS = {'debris': 'door'}   # prefabs of yours that are a kind of game object
 _COMPONENT_KINDS = (('CTrapSwitch', 'trap_switch'), ('CTrap', 'trap'), ('CPerk', 'perk'),
                     ('CDoor', 'door'), ('CBarricade', 'barricade'),
@@ -26,10 +26,12 @@ _COMPONENT_KINDS = (('CTrapSwitch', 'trap_switch'), ('CTrap', 'trap'), ('CPerk',
                     ('CPackAPunch', 'pack_a_punch'), ('CWeaponChalkOutline', 'wall_buy'))
 
 
-def kinds_of(components=(), piece: str = '', role: str = '', extra: str = '') -> set[str]:
+def kinds_of(components=(), piece: str = '', role: str = '', extra: str = '',
+             volume: str = '') -> set[str]:
     """The object kinds an object is: by its components (game prefabs), its toolkit piece, its
-    editor role ('model', 'volume', 'prefab' for your own) and an extra kind it declares
-    ('door' for debris). Always includes 'any'."""
+    editor role ('model', 'volume', 'prefab' for your own), its volume kind (a zone or sector
+    volume is that kind) and an extra kind it declares ('door' for debris). Always includes
+    'any'."""
     present = set(components)
     out = {'any'}
     for component, kind in _COMPONENT_KINDS:
@@ -43,6 +45,8 @@ def kinds_of(components=(), piece: str = '', role: str = '', extra: str = '') ->
         out.add('powered')   # waits for a power switch (internal: the power link's)
     if role in ('model', 'volume', 'prefab'):
         out.add(role)
+    if role == 'volume' and volume in ('zone', 'sector'):
+        out.add(volume)
     if piece in PIECE_KINDS:
         out.add(PIECE_KINDS[piece])
     if extra:
@@ -75,6 +79,9 @@ KINDS = (
          (('CDoor', 'm_Siblings'),), many=True, default='its own siblings, if placed'),
     Kind('spawns', 'Window spawns', frozenset({'barricade'}), frozenset({'zombie_spawn'}),
          many=True, piece='zombie_window', default='none'),
+    # A link to any box of a zone opens the whole zone (world_compile writes the areas' names).
+    Kind('zones', 'Opens zones', frozenset({'door'}), frozenset({'zone'}),
+         (('CDoor', 'm_AreasUnlock'),), many=True, default='none'),
 )
 BY_NAME = {kind.name: kind for kind in KINDS}
 

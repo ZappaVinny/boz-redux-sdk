@@ -167,10 +167,12 @@ asset browser onto an object gives it the same game-shaded material.
 
 ### Seeing what the game sees
 
-The viewport's switches are in the tool settings bar, next to Orientation and Drag. The **Show**
-menu (also in the sidebar's BOZ tab) switches overlays:
+The viewport's switches are at the left of the tool settings bar (also in the sidebar's BOZ
+tab). They switch overlays:
 
-- **Markers** and **Triggers**;
+- **Markers**;
+- **Volumes**: your trigger, use, hit, sector, zone and portal volumes. Its arrow picks which
+  kinds show, and **Shipped level** adds the shipped level's own trigger and collision shapes;
 - **Links** between objects;
 - **Walkable** and **Collision**, which build the map and show where people can walk (blue, orange
   where a door blocks it) and what bullets hit. **Refresh** builds them again after edits.

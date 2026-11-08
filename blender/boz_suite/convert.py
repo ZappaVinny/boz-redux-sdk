@@ -530,7 +530,9 @@ def model_object(model: "world.Model", scene, parent=None, data=None):
 
 
 VOLUME_MESH = "BOZ Volume"
-VOLUME_COLOURS = {"trigger": (0.2, 0.85, 0.75), "hit": (1.0, 0.25, 0.15), "use": (0.35, 1.0, 0.3)}
+VOLUME_COLOURS = {"trigger": (0.2, 0.85, 0.75), "hit": (1.0, 0.25, 0.15), "use": (0.35, 1.0, 0.3),
+                  "sector": (0.3, 0.45, 1.0), "zone": (1.0, 0.75, 0.1), "portal": (0.85, 0.3, 1.0)}
+VOLUME_ALPHA = {"sector": 0.06, "zone": 0.06}   # big boxes: faint, the wire shows them
 
 
 def volume_mesh():
@@ -573,8 +575,9 @@ def volume_box(kind: str):
     colour = VOLUME_COLOURS.get(kind, VOLUME_COLOURS["trigger"])
     box = bpy.data.objects.new(name, volume_mesh())
     box.material_slots[0].link = "OBJECT"
-    box.material_slots[0].material = meshes.colour_material(name, colour, 0.25)
-    box.color = (*colour, 0.25)
+    alpha = VOLUME_ALPHA.get(kind, 0.25)
+    box.material_slots[0].material = meshes.colour_material(name, colour, alpha)
+    box.color = (*colour, alpha)
     box.show_wire = True
     box.show_transparent = True
     box.hide_render = True
@@ -602,6 +605,8 @@ def volume_object(volume: "world.Volume", scene, parent=None):
     obj.boz.once = volume.once
     obj.boz.prompt = volume.prompt
     obj.boz.cost = volume.cost
+    obj.boz.zone = volume.zone
+    obj.boz.starting = volume.starting
     colour_volume(obj)
     _place(obj, volume, scene, parent)
     set_common(obj, volume)
@@ -1118,7 +1123,9 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
             return world.Volume(name, obj.boz.volume, position, rotation,
                                 size=tuple(round(c * world.TRIGGER_SIZE, 3) for c in scale),
                                 who=obj.boz.who, once=obj.boz.once, prompt=obj.boz.prompt,
-                                cost=obj.boz.cost, **common)
+                                cost=obj.boz.cost,
+                                zone=obj.boz.zone if obj.boz.volume == "zone" else "",
+                                starting=obj.boz.starting and obj.boz.volume == "zone", **common)
         if role != "prefab":
             return None
         if obj.boz.source:

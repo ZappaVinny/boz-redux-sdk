@@ -860,7 +860,7 @@ if a hook runs at all.
 | Log says the script must return a class | The last line is missing | End with `return Name` |
 | `attempt to index a nil value (local 'self')` | A dot where a colon goes | `function Skull:on_hit`, `self:hide()` |
 | A game prefab stopped working, or the log names `_handle` or `_piece` | The use wasn't handed back correctly | See [Handing it back to the game](game-prefabs.md#handing-it-back-to-the-game) |
-| `on_hit` never runs | The prefab has no **Hit** volume, the volume is too small, or a model in front of it takes the shot | Add or resize it. **Show → Triggers** helps. |
+| `on_hit` never runs | The prefab has no **Hit** volume, the volume is too small, or a model in front of it takes the shot | Add or resize it. **Volumes** in the tool settings bar helps. |
 | `on_use` never runs | No **Use** volume, or the player can't afford its **Cost** | Check both |
 | `hide()` does nothing | The object has no script and **Scripts can switch it** is off | Turn it on |
 | A new setting isn't in the panel | The panel wasn't reloaded | Press **Reload** in the Script box |

@@ -530,6 +530,9 @@ def world_data_lua(runtime: dict) -> str:
         data['aliases'] = dict(runtime['aliases'])
     if runtime.get('links'):
         data['links'] = {name: dict(kinds) for name, kinds in runtime['links'].items()}
+    for key in ('zones', 'sectors'):   # boxes, spawns and sector groups for boz.Zone / boz.Sector
+        if runtime.get(key):
+            data[key] = dict(runtime[key])
     data['weapons'] = list(runtime.get('weapons', []))
     data['effects'] = list(runtime.get('effects', []))
     if runtime.get('start_weapon'):

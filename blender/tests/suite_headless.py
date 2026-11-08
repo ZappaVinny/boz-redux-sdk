@@ -48,6 +48,46 @@ check(scene.unit_settings.scale_length < 0.011, "one unit is a centimetre")
 source = world.load(project / "source")
 
 
+def map_volume_checks(anchor, door):
+    """Sector, zone and portal volumes: their boxes, settings, a door's Opens zones link and the
+    Show switches."""
+    sector = convert.volume_object(world.Volume("Hall", "sector", size=(800.0, 300.0, 800.0)), scene)
+    box = convert.volume_object(world.Volume("Hall_Box", "zone", size=(800.0, 300.0, 800.0),
+                                             zone="Hall_Zone"), scene)
+    start = convert.volume_object(world.Volume("Start", "zone", size=(400.0, 300.0, 400.0),
+                                               starting=True), scene)
+    for obj, dx in ((sector, 0.0), (box, 0.0), (start, 1200.0)):
+        obj.location = (anchor[0] + dx, anchor[1], anchor[2] + 150.0)
+    check(sector.instance_collection.name == "BOZ Volume: sector" and box.boz.zone == "Hall_Zone"
+          and start.boz.starting, "sector and zone volumes keep their kind and settings")
+    kinds = [k.name for k in suite.prefab_links.kinds(door, scene.boz.base)]
+    check("zones" in kinds, f"a door of yours has Opens zones ({kinds})")
+    _bad, warn = suite.prefab_links.check(scene)
+    check(any("zone Hall_Zone never opens" in m for m, _n in warn),
+          f"a zone no door opens is warned ({warn})")
+    suite.prefab_links.write(door, {"zones": ["Hall_Box"]})
+    bad, warn = suite.prefab_links.check(scene)
+    check(not any("never opens" in m for m, _n in warn), f"and not once a door opens it ({warn})")
+    check(not any("Hall_Box" in m for m, _n in bad), f"a zone box is a zone link target ({bad})")
+    back = link.scene_to_world(scene, [])
+    hall = next(v for v in back.volumes if v.name == "Hall_Box")
+    check((hall.kind_of, hall.zone, hall.starting) == ("zone", "Hall_Zone", False)
+          and next(v for v in back.volumes if v.name == "Start").starting,
+          "zone volumes are written with their zone and starting flag")
+    scene.boz_volume_zone = False
+    check(box.hide_get() and start.hide_get() and not sector.hide_get(),
+          "the Volumes filter hides zone boxes only")
+    scene.boz_volume_zone = True
+    check(not box.hide_get(), "and shows them again")
+    scene.boz_volume_sector = False
+    check(sector.hide_get() and not box.hide_get(), "two kinds switch independently")
+    scene.boz_volume_sector = True
+    scene.boz_show_volumes = False
+    check(box.hide_get() and sector.hide_get(), "Volumes off hides every volume")
+    scene.boz_show_volumes = True
+    check(not box.hide_get() and not sector.hide_get(), "and Volumes on brings them back")
+
+
 def build_and_compile(label):
     bpy.ops.wm.save_as_mainfile(filepath=str(project / "map.blend"))
     saved = world.load(project / "source")
@@ -1184,7 +1224,8 @@ if LIBRARY:
     check(len(debris) == 2 and all(len(d.children) == 2 for d in debris),
           f"Debris is a prefab of yours: a model and a Use volume ({[d.name for d in debris]})")
     debris_kinds = [k.name for k in suite.prefab_links.kinds(debris[0], scene.boz.base)]
-    check(debris_kinds == ["siblings"], f"debris opens with other doors ({debris_kinds})")
+    check(debris_kinds == ["siblings", "zones"],
+          f"debris opens with other doors and opens zones ({debris_kinds})")
     other = suite.prefab_links.world_name(debris[1])
     suite.prefab_links.write(debris[0], {"siblings": [other]})
     bad, _warn = suite.prefab_links.check(scene)
@@ -1199,7 +1240,7 @@ if LIBRARY:
                            '---@link exits volume many "Exits"\nreturn Runner\n', encoding="utf-8")
     debris[1].boz.script = "prefabs/Runner.lua"
     names = [k.name for k in suite.prefab_links.kinds(debris[1], scene.boz.base)]
-    check(names == ["siblings", "exits"], f"script links join the built-in ones ({names})")
+    check(names == ["siblings", "zones", "exits"], f"script links join the built-in ones ({names})")
     debris[1].boz.script = ""
     # Check: a link to a missing object stops the build.
     write = suite.prefab_links.write
@@ -1221,12 +1262,14 @@ if LIBRARY:
     shrine = next(p for p in back.prefabs if p.name == "Shrine")
     check(sorted(p.name for p in shrine.parts) == ["Vault", "pack_a_punch"] or
           {p.kind for p in shrine.parts} == {"prefab"}, f"prefabs nest ({[p.name for p in shrine.parts]})")
+    map_volume_checks((0.0, 1500.0, 0.0), debris[1])
     check(draw_panels("generated") > 5, "panels draw for every kind")
     weapon_checks("generated")
     own_model_checks("generated", asset_checks("generated"))
     saved, data = build_and_compile("generated")
     weapon_build_checks("generated", data)
     check("Shrine.Vault" in data, "the nested prefab is in the runtime data")
+    check("Hall_Zone" in data and "sectors = " in data, "zones and sectors are in the runtime data")
 if LIBRARY:
     suite.prefab_library.rebuild(None)   # the tests used the real palette folder: clear it
 print("BOZ_SUITE_OK")

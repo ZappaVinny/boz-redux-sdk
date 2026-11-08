@@ -432,11 +432,10 @@ def _blocks(body: bytes, block_hash: int) -> list[int]:
 
 
 def decode_model(body: bytes) -> Model:
-    """Decode positions, UVs, and triangle indices from a ``CIwModel``."""
+    """Decode positions, UVs, and triangle indices from a ``CIwModel`` (a model without
+    triangles, such as a sector's shell, has none)."""
     verts = _block(body, _VERTS)
     tri_blocks = _blocks(body, _TRIS)
-    if not tri_blocks:
-        raise ValueError(f'model is missing block {_TRIS:#010x}')
     render_count = struct.unpack_from('<H', body, verts + 6)[0]
     unique_count = struct.unpack_from('<H', body, verts + 10)[0]
     centre = struct.unpack_from('<h', body, verts + 12)[0]

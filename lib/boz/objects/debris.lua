@@ -33,6 +33,9 @@ function Debris:open(player)
             other:open(player)
         end
     end
+    for _, zone in ipairs(self:zones()) do
+        zone:open()
+    end
     return true
 end
 

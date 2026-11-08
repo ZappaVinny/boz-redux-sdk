@@ -4,7 +4,7 @@ The map is compiled as Build & Run would (without installing anything), and the 
 navmesh and collision mesh are shown as locked overlay objects through the shipped-map add-on's
 builders (blue walkable floor, orange door-gated floor, red wire collision). The add-on's
 visibility switches (scene.boz_show_navmesh, boz_show_collision, boz_show_markers,
-boz_show_shapes) turn them and the base level's markers on and off.
+boz_show_volumes) turn them and the base level's markers on and off.
 """
 from __future__ import annotations
 
@@ -178,8 +178,10 @@ def draw_switches(layout, context, compact=False) -> None:
     row = layout.row(align=True)
     row.prop(scene, "boz_show_markers", text="" if compact else "Markers", icon="MESH_CUBE",
              toggle=True)
-    row.prop(scene, "boz_show_shapes", text="" if compact else "Triggers", icon="CUBE",
-             toggle=True)
+    volumes = row.row(align=True)
+    volumes.prop(scene, "boz_show_volumes", text="" if compact else "Volumes", icon="CUBE",
+                 toggle=True)
+    volumes.popover(BOZ_PT_volume_filter.bl_idname, text="")
     row.prop(scene, "boz_show_links", text="" if compact else "Links", icon="LINKED", toggle=True)
     if scene.boz_show_links:
         row.prop(scene, "boz_links_selected_only", text="" if compact else "Selected",
@@ -196,15 +198,31 @@ def draw_switches(layout, context, compact=False) -> None:
     row.operator(BOZ_OT_preview_refresh.bl_idname, text="", icon="FILE_REFRESH")
 
 
+class BOZ_PT_volume_filter(Panel):
+    """The Volumes button's arrow: which kinds of volume it shows."""
+    bl_idname = "BOZ_PT_volume_filter"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "HEADER"
+    bl_label = "Volumes"
+    bl_ui_units_x = 8
+
+    def draw(self, context):
+        layout = self.layout
+        scene = link.map_scene()
+        layout.label(text="Show these volumes")
+        scene_view.draw_volume_kinds(layout, scene)
+
+
 def draw_header(self, context):
     """The World tab's tool settings bar (next to Orientation and Drag): game shapes and the
     one-click switches for what the viewport shows."""
     workspace = context.workspace
     if workspace is None or workspace.name != "World":
         return
-    self.layout.separator()
-    self.layout.menu("BOZ_MT_shapes", text="Shapes", icon="MESH_CUBE")
+    # Drawn first (prepended), so the switches are on the left and never scrolled off.
     draw_switches(self.layout, context)
+    self.layout.menu("BOZ_MT_shapes", text="Shapes", icon="MESH_CUBE")
+    self.layout.separator()
 
 
 class BOZ_PT_show(Panel):
@@ -218,7 +236,7 @@ class BOZ_PT_show(Panel):
         layout = self.layout
         draw_switches(layout, context)
         layout.label(text="Markers: entities without a model, coloured by type")
-        layout.label(text="Triggers: trigger and collision volumes of entities")
+        layout.label(text="Volumes: your volumes and the shipped level's (arrow: which)")
         layout.label(text="Links: power, traps, doors and what they unlock")
         layout.label(text="Walkable: blue floor, orange behind doors (Refresh after edits)")
 
@@ -281,14 +299,14 @@ def draw_collision_boxes():
     gpu.state.blend_set("NONE")
 
 
-CLASSES = (BOZ_OT_preview, BOZ_OT_preview_refresh, BOZ_PT_show)
+CLASSES = (BOZ_OT_preview, BOZ_OT_preview_refresh, BOZ_PT_volume_filter, BOZ_PT_show)
 
 
 def register():
     global _box_handle
     for cls in CLASSES:
         bpy.utils.register_class(cls)
-    bpy.types.VIEW3D_HT_tool_header.append(draw_header)
+    bpy.types.VIEW3D_HT_tool_header.prepend(draw_header)
     if not bpy.app.background:
         _box_handle = bpy.types.SpaceView3D.draw_handler_add(draw_collision_boxes, (), "WINDOW",
                                                              "POST_VIEW")

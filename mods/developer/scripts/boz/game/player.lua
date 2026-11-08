@@ -74,6 +74,20 @@ function Player:set_speed(name, value) return engine.set_speed(name, value) end
 --- A stat by name ("STAT_ZOMBIESKILLED", ...; boz.stats), and adding to it.
 function Player:stat(name) return require("boz.game.stats").get(name) end
 function Player:add_stat(name, amount) return require("boz.game.stats").add(name, amount) end
+--- The zone it is in (boz.Zone), or nil.
+function Player:zone() return self:_in(require("boz.objects.zone")) end
+--- The sector it is in (boz.Sector), or nil.
+function Player:sector() return self:_in(require("boz.objects.sector")) end
+
+function Player:_in(class)
+    for _, area in ipairs(require("boz.objects.runtime").each(class)) do
+        if area:contains(self) then
+            return area
+        end
+    end
+    return nil
+end
+
 --- Shows a line of text on the HUD for seconds (default 3).
 function Player:message(text, seconds) return require("boz.systems.hud").message(text, seconds) end
 

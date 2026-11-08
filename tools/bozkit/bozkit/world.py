@@ -160,6 +160,36 @@ class Placement:
 
 
 @dataclass
+class MapBox:
+    """A sector, zone or portal volume in the world (MAP_VOLUMES): an oriented box."""
+    kind: str
+    name: str
+    position: tuple[float, float, float]
+    rotation: tuple[float, float, float, float]
+    size: tuple[float, float, float]
+    zone: str = ''            # zones: the zone it is a box of
+    starting: bool = False
+
+    def corners(self) -> list[tuple[float, float, float]]:
+        """Its eight corners in the world."""
+        half = [c / 2 for c in self.size]
+        out = []
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                for sz in (-1, 1):
+                    turned = spec_fields.rotate(tuple(self.rotation),
+                                                (sx * half[0], sy * half[1], sz * half[2]))
+                    out.append(tuple(self.position[i] + turned[i] for i in range(3)))
+        return out
+
+    def contains(self, point, margin: float = 0.0) -> bool:
+        """Whether a world point is inside it (grown by *margin* centimetres)."""
+        inverse = (-self.rotation[0], -self.rotation[1], -self.rotation[2], self.rotation[3])
+        local = spec_fields.rotate(inverse, tuple(point[i] - self.position[i] for i in range(3)))
+        return all(abs(local[i]) <= self.size[i] / 2 + margin for i in range(3))
+
+
+@dataclass
 class Layout:
     """The compiler's input: level meshes, props and their instances, and game entities. Worlds
     lower into it (lower()); the templates are built as one (from_layout)."""
@@ -171,6 +201,7 @@ class Layout:
     inherit: bool = False    # start from the whole base level (its rooms, entities, navmesh)
     removed: list[str] = field(default_factory=list)   # base level entities taken out (0x hashes)
     weapons: list = field(default_factory=list)   # bozkit.weapons.WeaponDef: the project's weapons
+    boxes: list[MapBox] = field(default_factory=list)   # sectors, zones and portals
 
 
 def bgra_to_rgba(bgra: bytes) -> bytes:
@@ -430,7 +461,11 @@ def empty_world(base: str = 'kino') -> 'World':
 
 FORMAT = 3
 OBJECT_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{0,47}$')
-VOLUME_KINDS = ('trigger', 'hit', 'use')
+VOLUME_KINDS = ('trigger', 'hit', 'use', 'sector', 'zone', 'portal')
+# Volumes that shape the map rather than send events: a sector (a room the game draws only when
+# it can see it), a zone (an area whose zombie spawns wake when a door opens it) and a portal (a
+# doorway between two sectors). They compile to the level's sectors and areas, not entities.
+MAP_VOLUMES = ('sector', 'zone', 'portal')
 VOLUME_WHO = ('players', 'zombies', 'anyone')
 # How an object starts. visible is the master: hidden, it stops nothing and blocks nothing until
 # a script shows it. walk_through: a game prefab players and zombies walk through. switchable:
@@ -473,6 +508,8 @@ class Volume:
     once: bool = False
     prompt: str = ''          # use volumes: the text players see
     cost: int = 0             # use volumes: points it takes
+    zone: str = ''            # zone volumes: the zone it is a box of ('' is its own name)
+    starting: bool = False    # zone volumes: the zone players start in
     script: str = ''
     properties: dict = field(default_factory=dict)
 
@@ -480,6 +517,9 @@ class Volume:
 
     def quaternion(self) -> tuple[float, float, float, float]:
         return tuple(self.rotation)
+
+    def zone_name(self) -> str:
+        return self.zone or self.name
 
 
 @dataclass
@@ -590,6 +630,10 @@ def object_json(item) -> dict:
             out['prompt'] = item.prompt
         if item.cost:
             out['cost'] = item.cost
+        if item.zone:
+            out['zone'] = item.zone
+        if item.starting:
+            out['starting'] = True
         return _common_json(item, out)
     out = {'name': item.name}
     if item.source:
@@ -629,7 +673,8 @@ def object_from_json(item: dict):
         return Volume(str(item['name']), str(item['volume']), size=_floats(item.get('size'),
                       (100.0, 100.0, 100.0)), who=str(item.get('who', 'players')),
                       once=bool(item.get('once', False)), prompt=str(item.get('prompt', '')),
-                      cost=int(item.get('cost', 0)), **place, **common)
+                      cost=int(item.get('cost', 0)), zone=str(item.get('zone', '')),
+                      starting=bool(item.get('starting', False)), **place, **common)
     place['scale'] = _floats(item.get('scale'), UNIT)
     start = dict(item.get('start', {}))
     if any(key in item for key in ('mesh', 'game', 'asset')) and 'source' not in item:
@@ -807,7 +852,10 @@ def validate(world: World) -> list[str]:
                 problems.append(f'{label}: blocking margin must be between 0 and 500 cm')
         elif isinstance(item, Volume):
             if item.kind_of not in VOLUME_KINDS:
-                problems.append(f'{label}: kind must be trigger, hit or use')
+                problems.append(f'{label}: kind must be trigger, hit, use, sector, zone or portal')
+            if item.kind_of == 'zone' and item.zone and not OBJECT_NAME_RE.fullmatch(item.zone):
+                problems.append(f'{label}: zone names use letters, digits and _ (at most 48, '
+                                'starting with a letter)')
             if item.who not in VOLUME_WHO:
                 problems.append(f'{label}: who must be players, zombies or anyone')
             if min(item.size) <= 0:
@@ -819,8 +867,26 @@ def validate(world: World) -> list[str]:
                 problems.append(f'{label}: mesh {item.mesh!r} does not exist')
             if item.base and '.' in full:
                 problems.append(f'{label}: the base level\'s entities cannot be prefab parts')
-    if world.inherit:   # the base level brings its floors and spawns
+    map_volumes = [(full, item) for full, item in walk(world.objects())
+                   if isinstance(item, Volume) and item.kind_of in MAP_VOLUMES]
+    if world.inherit:   # the base level brings its floors, spawns, sectors and zones
+        if map_volumes:
+            problems.append(f'{map_volumes[0][0]!r}: sectors, zones and portals are for new maps '
+                            '(a remix keeps the base level\'s own)')
         return sorted(set(problems), key=problems.index)
+    zones: dict[str, list] = {}
+    for full, item in map_volumes:
+        if item.kind_of == 'zone':
+            zones.setdefault(item.zone_name().lower(), []).append((full, item))
+    for key, boxes in zones.items():
+        others = [n for n in names if n == key and n not in {f.lower() for f, _i in boxes}]
+        if others:
+            problems.append(f'zone {boxes[0][1].zone_name()!r}: another object has this name')
+    starting = {key for key, boxes in zones.items() if any(item.starting for _f, item in boxes)}
+    if zones and len(starting) != 1:
+        problems.append('one zone must be the starting zone (zone volumes: Starting zone)'
+                        if not starting else
+                        f'only one zone can be the starting zone, not {len(starting)}')
     flat = [item for _full, item in walk(world.objects())]
     if not any(isinstance(i, Prefab) and (i.piece == 'player_spawn' or
                                           i.source.startswith('spawn_player_')) for i in flat):
@@ -946,6 +1012,11 @@ def lower(world: World) -> Layout:
                                                  shape=item.shape, rotation=rotation, scale=scale,
                                                  script=script, padding=item.padding,
                     block_margin=item.block_margin))
+        elif isinstance(item, Volume) and item.kind_of in MAP_VOLUMES:
+            size = tuple(abs(item.size[i] * scale[i]) for i in range(3))
+            layout.boxes.append(MapBox(item.kind_of, full, position, rotation, size,
+                                       zone=item.zone_name() if item.kind_of == 'zone' else '',
+                                       starting=item.starting))
         elif isinstance(item, Volume):
             size = tuple(item.size[i] * scale[i] for i in range(3))
             layout.entities.append(Placement(VOLUME_SOURCES[item.kind_of], position, rotation=rotation,
@@ -989,7 +1060,9 @@ def describe(world: World) -> list[dict]:
         entry = {'name': full, 'kind': item.kind, 'script': _module(item.script),
                  'owner': owner or ''}
         settings: dict = {}
-        if isinstance(item, Volume):
+        if isinstance(item, Volume) and item.kind_of == 'sector':
+            entry.update({'class': 'Sector', 'kind': 'sector'})
+        elif isinstance(item, Volume):
             entry['class'] = 'Volume'
             entry.update({'volume': item.kind_of, 'who': item.who, 'once': item.once,
                           'prompt': item.prompt, 'cost': item.cost})
@@ -1011,9 +1084,30 @@ def describe(world: World) -> list[dict]:
             entry['settings'] = settings
         return entry
 
+    zones: dict[str, dict] = {}
+
     def visit(items, prefix: str, owner: str):
         for item in items:
             full = f'{prefix}{item.name}'
+            if isinstance(item, Volume) and item.kind_of == 'zone':
+                # One object per zone, whatever number of boxes it has (their places: the
+                # compiler's boxes). Zone names are the map's, even for a box in a prefab.
+                name = item.zone_name()
+                entry = zones.get(name.lower())
+                if entry is None:
+                    entry = {'name': name, 'kind': 'zone', 'class': 'Zone', 'script': '',
+                             'owner': owner or '', 'starting': False}
+                    zones[name.lower()] = entry
+                    out.append(entry)
+                entry['starting'] = entry['starting'] or item.starting
+                if item.script and not entry['script']:
+                    entry['script'] = _module(item.script)
+                if item.properties:
+                    entry.setdefault('settings', {}).update(
+                        {key: {'value': value} for key, value in item.properties.items()})
+                continue
+            if isinstance(item, Volume) and item.kind_of == 'portal':
+                continue
             if isinstance(item, (Prefab, Volume)) or item.script:
                 name = item.source if getattr(item, 'piece', '') == 'player_spawn' else full
                 out.append(entry_of(name, item, owner))
@@ -1032,6 +1126,8 @@ def object_names(world: World) -> list[str]:
     (door_opened says which door)."""
     names = {item.source if getattr(item, 'piece', '') == 'player_spawn' else full
              for full, item in walk(world.objects())}
+    names |= {item.zone_name() for _full, item in walk(world.objects())
+              if isinstance(item, Volume) and item.kind_of == 'zone'}
     return sorted(name for name in names if name)
 
 

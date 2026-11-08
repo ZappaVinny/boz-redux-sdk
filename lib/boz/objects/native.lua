@@ -73,6 +73,8 @@ function Door:is_open()
     local piece = self:_piece()
     return piece ~= nil and piece:is_open()
 end
+--- The zones it opens (boz.Zone, its Opens zones link).
+function Door:zones() return self:links("zones") end
 
 --- Mystery box. Events: spun, weapon.
 local MysteryBox = define("MysteryBox", "CMysteryBox")
@@ -131,6 +133,12 @@ local ZombieSpawn = define("ZombieSpawn", "CSpawnPoint")
 function ZombieSpawn:set_active(on)
     local entity = self._handle:entity_pointer()
     return entity ~= 0 and require("boz.engine.spawns").set_active(entity, on)
+end
+--- True while zombies can come out of it (its zone is open, or set_active(true)).
+function ZombieSpawn:active()
+    local entity = self._handle:entity_pointer()
+    local spawns = require("boz.engine.spawns")
+    return entity ~= 0 and spawns.point(entity):active()
 end
 
 native.Native = Native

@@ -31,10 +31,17 @@ NAMESPACE = uuid.UUID("6d1f1c52-7a0e-4d43-9a58-1f2a6b9c0b11")
 ICON_COLOURS = {"Spawns": (200, 60, 60), "Jump points": (230, 230, 230), "Sound": (50, 170, 170),
                 "Defence": (150, 110, 70), "Buying": (210, 130, 50), "Machines": (120, 90, 200),
                 "Doors": (230, 140, 30), "Barricades": (190, 130, 80),
-                "trigger": (50, 215, 190), "hit": (240, 70, 50), "use": (90, 240, 80)}
+                "trigger": (50, 215, 190), "hit": (240, 70, 50), "use": (90, 240, 80),
+                "sector": (75, 115, 255), "zone": (255, 190, 25), "portal": (215, 75, 255)}
 VOLUMES = (("trigger", "Trigger volume", "An invisible box: scripts hear \"enter\" and \"exit\""),
            ("hit", "Hit volume", "An invisible box: scripts hear \"hit\" when it is shot"),
-           ("use", "Use volume", "An invisible box: scripts hear \"use\" when a player presses use"))
+           ("use", "Use volume", "An invisible box: scripts hear \"use\" when a player presses use"),
+           ("sector", "Sector", "A room the game draws only while the camera is in it or sees it "
+            "through a portal. Cover the room with it"),
+           ("zone", "Zone", "An area whose zombie spawns wake when a door that opens it opens. "
+            "Boxes with one zone name are one zone"),
+           ("portal", "Portal", "A doorway between two sectors: the game sees through it. Make "
+            "it thin and fill the doorway"))
 catalogs: dict[str, str] = {}
 
 

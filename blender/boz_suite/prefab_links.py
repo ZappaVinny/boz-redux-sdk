@@ -58,7 +58,8 @@ def object_kinds(obj, base: str) -> set:
     """What the object is, by the palette's names (bozkit.links.OBJECT_KINDS)."""
     if obj.boz.role == "prefab" and obj.boz.source:
         return links.kinds_of(components(obj, base), obj.get("boz_piece", ""))
-    return links.kinds_of(role=obj.boz.role, piece=str(obj.get("boz_piece", "")))
+    return links.kinds_of(role=obj.boz.role, piece=str(obj.get("boz_piece", "")),
+                          volume=obj.boz.volume if obj.boz.role == "volume" else "")
 
 
 _declared: dict = {}   # script path -> (mtime, its ---@link kinds)
@@ -181,7 +182,29 @@ def check(scene) -> tuple[list, list]:
         elif "traps" not in values and "CTrapSwitch" in components(obj, base):
             warnings.append((f"trap switch {own} has no Traps link: it runs only its own map's "
                              "traps, if they are placed", obj.name))
+    warnings += _unopened_zones(scene, found)
     return problems, warnings
+
+
+def _unopened_zones(scene, found) -> list:
+    """A warning for each zone (besides the starting one) that no door or debris opens: its
+    spawns never wake unless a script opens it."""
+    zones, opened = {}, set()
+    for obj in scene.objects:
+        settings = getattr(obj, "boz", None)
+        if settings is not None and settings.role == "volume" and settings.volume == "zone":
+            zone = settings.zone or world_name(obj)
+            first, starting = zones.get(zone, (obj, False))
+            zones[zone] = (first, starting or settings.starting)
+    for obj in scene.objects:
+        if is_linkable(obj):
+            for target in set_links(obj).get("zones", []):
+                other = found.get(target.lower())
+                if other is not None:
+                    opened.add(other.boz.zone or world_name(other))
+    return [(f"zone {zone} never opens: no door or debris opens it (set a door's Opens zones), "
+             "so its spawns stay asleep unless a script opens it", first.name)
+            for zone, (first, starting) in zones.items() if not starting and zone not in opened]
 
 
 def lines(scene) -> list:

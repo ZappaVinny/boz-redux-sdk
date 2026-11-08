@@ -171,8 +171,10 @@ def realize() -> None:
         elif kind == "debris":
             made = _place_debris(scene, position, rotation)
         elif kind == "volume":
-            made = convert.volume_object(world.Volume(label, obj.get("boz_volume", "trigger"),
-                                                      position, rotation), scene)
+            volume = obj.get("boz_volume", "trigger")
+            made = convert.volume_object(world.Volume(label, volume, position, rotation,
+                                                      size=VOLUME_SIZES.get(volume, (100.0,) * 3)),
+                                         scene)
         else:
             made = convert.model_object(world.Model(label, position, rotation, game=source,
                                                     collision="solid", shape="box"), scene)
@@ -224,6 +226,11 @@ def _land_at(obj, point) -> None:
                      (min(c.y for c in corners) + max(c.y for c in corners)) / 2,
                      min(c.z for c in corners)))
     obj.location += point - bottom
+
+
+# A placed volume's first size (cm): a room for sectors and zones, a doorway for portals.
+VOLUME_SIZES = {"sector": (600.0, 300.0, 600.0), "zone": (600.0, 300.0, 600.0),
+                "portal": (20.0, 250.0, 150.0)}
 
 
 def _place_piece(scene, key: str, label: str, position, rotation):
