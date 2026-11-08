@@ -20,7 +20,7 @@ Most mods never need this: [Events](events.md) lists what the common ones become
 
 ## All events
 
-372 events; 26 with notes on their arguments.
+372 events; 28 with notes on their arguments.
 This list is generated from the game definition by `tools/docgen/events_doc.py`.
 
 | Event | Sent by | Handled by | Notes |
@@ -334,14 +334,14 @@ This list is generated from the game definition by `tools/docgen/events_doc.py`.
 | `SUBJECT_TELEPORTER_SYNCH` |  |  |  |
 | `SUBJECT_TELEPORT_CABLE_SYNCH` |  |  |  |
 | `SUBJECT_TELEPORT_MAINFRAME_SYNCH` |  |  |  |
-| `SUBJECT_TELEPORT_PLAYER` |  | CTeleportManager |  |
+| `SUBJECT_TELEPORT_PLAYER` |  | CTeleportManager | CTeleportManager moves a player. a: TeleportPlayerInfo* (+4 player name hash, +8 spawn entity name hash, +0xc enableMovement). For the local player it writes enableMovement to CPlayerController +0x15a (may move) and +0x15b (may look), then CPlayerController::PlaceAt with the spawn's world matrix. |
 | `SUBJECT_TEMP_MOVEMENT_SLOW_DOWN` |  | CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CPlayerController, CRemotePlayer |  |
 | `SUBJECT_TERMINATE` | CProjectileEntity | CProjectileEntity | A projectile ends (a black hole closes: gersch_shuts). |
 | `SUBJECT_TERMS_OF_USE` |  | CFrontendStateOptions |  |
-| `SUBJECT_TRANSFORM_UPDATED` |  |  | Engine: a transform moved (every frame for moving things; not in SubjectId_Register). |
+| `SUBJECT_TRANSFORM_UPDATED` |  |  | Engine: a transform moved (every frame for moving things; not in SubjectId_Register). A CIsRenderableModel hearing it re-joins the sectors holding it two frames later. |
 | `SUBJECT_TRANSITION_MENU` |  | CFlashMenuState |  |
 | `SUBJECT_TRANSITION_MENU_POPSTACK` |  | CFlashMenuState |  |
-| `SUBJECT_TRANSITION_STATE` |  | CTeleportManager |  |
+| `SUBJECT_TRANSITION_STATE` |  | CTeleportManager | Kino's teleport sequence changes state. a: TeleportStateTransitionInfo* (+4 state to go to, +8 state after the wormhole, +0xc time to set, +0x10 flag). |
 | `SUBJECT_TRAP_DAMAGE` |  | CAIControllerHellhound, CAIControllerMonkey, CAIControllerRomero, CAIControllerZombie, CPlayerController |  |
 | `SUBJECT_TRAP_STATE_SYNCH` |  | CTrap |  |
 | `SUBJECT_TRAP_TRANSITION_STATE` | CTrap | CTrap |  |

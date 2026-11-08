@@ -194,7 +194,7 @@ return Vault
 | You write | What you get |
 | --- | --- |
 | `self.name` | Its name in the editor. A part is `"Prefab.Part"`. Copies each have their own. |
-| `self.kind` | `"model"`, `"volume"` or `"prefab"` |
+| `self.kind` | `"model"`, `"volume"` or `"prefab"` (and `"zone"` or `"sector"` for those) |
 | `self:class_name()` | The name of its class, like `"Skull"` or `"Perk"` |
 | `self:is_a(boz.Door)` | True when it is that class, or extends it |
 | `self:part_name()` | Its name inside its prefab, like `"Door"`, or nil |
@@ -423,6 +423,9 @@ Volumes are how a prefab notices the world. They are invisible in the game. Drag
 | **Hit** | Red | `on_hit` |
 | **Use** | Green | `on_use` |
 
+**Zone**, **Sector** and **Portal** are volumes too, but they mark out the map instead of noticing
+things for a prefab: see [Zones](how-a-map-works.md#zones) and [Sectors](how-a-map-works.md#sectors).
+
 Volume settings:
 
 | Setting | What it does |
@@ -587,6 +590,9 @@ The kind limits what can be linked:
 | `pack_a_punch` | Pack-a-Punch machines |
 | `wall_buy` | Wall buys |
 | `zombie_spawn` | Zombie spawns |
+| `zone` | Zones (any of their boxes) |
+| `sector` | Sectors |
+| `teleporter` | Teleporters |
 | `player_spawn` | Player spawns |
 | `volume` | Volumes |
 | `model` | Models |
@@ -633,7 +639,8 @@ local player = boz.player()
 player:give_points(500)
 player:give_perk("Juggernog")
 player:give_weapon("mp40")
-player:teleport(boz.get("Spawn_Room"))
+player:teleport(boz.get("Spawn_Room"))   -- stands there, facing its way
+if player:zone() == boz.get("Cellar") then player:message("Down here?") end
 player:message("Hello", 5)
 ```
 

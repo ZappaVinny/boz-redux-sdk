@@ -106,7 +106,7 @@ The level picks which box location is active (`CLevel` `MysteryBoxStart`, `Myste
 | `powerSwitch` | 0 | Opens itself when this power switch is pulled (not buyable) | editor: Needs power |
 | `m_HideAfterActivate` | false | The model disappears once opened (debris) | editor: Disappears when opened |
 | `playSound` | — | Sound when opening | no |
-| `m_AreasUnlock` | — | Zones (`CArea`) it unlocks | placed doors unlock none (generated maps have one area) |
+| `m_AreasUnlock` | — | Zones (`CArea`) it unlocks | editor: Opens zones (a remix's own doors keep theirs; other placed doors unlock none) |
 | `CIsCollisionBox` 300 × 300 × 10 cm | — | Blocks players until open | no |
 
 The navmesh under a door is tagged with its name and closed until it opens (`CDoor::Init`,
@@ -136,7 +136,7 @@ The navmesh under a door is tagged with its name and closed until it opens (`CDo
 | Field | Default | Meaning | Editor |
 | --- | --- | --- | --- |
 | `spawnType` | — | windows, ground, Lightning (dogs), Hole, Monkey | the level marker you pick |
-| `m_StartActive` | false | Used from the first round, not only once players reach its area | editor: Active from the start |
+| `m_StartActive` | false | Used from the first round, not only once its zone opens | editor: Active from the start |
 
 Player spawns are the entities named `spawn_player_1` to `_4`.
 
@@ -174,9 +174,73 @@ use runs `Poi_SendUse`, which broadcasts the interact event to the entity in rea
 These are in the shipped levels; each needs its own game prefab or links before it is useful:
 
 - Turret (`CTurret`: cost, duration, damage, range, rate of fire, cool-down, power).
-- Teleporter, mainframe and Gersch points (`CTeleporter`, `CTeleportMainframe`, `CTeleportPointGersch`).
+- Kino's teleporter and mainframe, and Ascension's Gersch points (`CTeleporter`,
+  `CTeleportMainframe`, `CTeleportPointGersch`). They run one map's own sequence, so the editor has
+  a generic [Teleporter](game-prefabs.md#teleporter) and Wormhole instead.
 - Rides: lunar landers, zipline, flinger, centrifuge, ice slide (Ascension, Call of the Dead).
 - Animated scenery, TV and projector screens, fog effects, lights.
+
+## Zones in the game files
+
+A zone is a **`CArea`** resource in the level's group: a list of entity names (`m_SpawnPoints`,
+and on the shipped maps also perk machines, Gersch points, shortcuts and locators). It has no
+shape. The level's `m_StartingArea` is open from the start.
+
+- **Opening one** is `CArea::Activate`. It hands each spawn point to the spawn manager
+  (`SpawnManager_SetPoint`), which keeps a set of usable points for each kind of zombie. `Level_Load`
+  opens the starting area, a door opens its `m_AreasUnlock` areas when it opens (`CDoor::OnEvent`),
+  and a spawn with `m_StartActive` adds itself. The shipped game never closes one; the remove path
+  exists, and `boz.Zone:close()` uses it.
+- **Choosing a spawn** (`SpawnManager_PickPoint`): for a player in turn, the points in that
+  zombie kind's set within `SpawnMaxDistance` (5000 cm), at random among the `NumOfClosestSpawns`
+  nearest. A spawn's `+0x34` flag only means it is free right now (it drops while a zombie climbs
+  out); `SpawnManager_HasPoint` says whether it is in a set at all.
+- **Zones and sectors aren't linked.** Kino has 9 areas and about 19 sectors; that their names
+  match is a naming habit.
+
+## Sectors in the game files
+
+The level loads `<level>_sectors`, whose child groups are one sector each. A sector's group holds:
+
+- its **shell**: the entity named `…_shell`, `…_inside_shell` or `…_mergemodel`. The game builds
+  the sector's volume from the convex hull of the shell model's vertices (`Sector_BuildHull`), so
+  a shell can be vertex-only, as the editor's are;
+- its **details** and **decals** (`…_details`, `…_decals`), drawn within `DetailDistance` and
+  `DecalDistance`, and its occluders;
+- its **portals** (`CIsPortal`), each naming the sectors in front of and behind it
+  (`SectorManager_LinkPortals`).
+
+Every other model joins the sector that contains it when it loads
+(`RenderableModel_AttachToSector`). When its transform moves (`SUBJECT_TRANSFORM_UPDATED`), it
+joins the sectors holding it again two frames later, so zombies follow the rooms they walk through;
+effects do the same (`Renderable_AttachToSectors`). Each frame (`SectorManager_Render`, from the playing
+state's `Render`):
+
+1. The camera's sectors are those containing it, or the nearest one when it is in none
+   (`SectorManager_CameraSectors`).
+2. From each, the game follows portals, clipping the view to each one
+   (`SectorManager_DrawThroughPortals`).
+3. Sectors it reached draw their shell, details, decals and members that pass the view and
+   occluder tests. The rest draw nothing.
+
+Nothing is unloaded: every sector loads with the level, and only drawing is skipped. Models
+outside every sector are only culled by the view. `CIsSectorManager +0x53` draws every sector in
+view without portals (`boz.sectors.set_culling(false)`), and a sector's `+0xd4` says it was drawn
+this frame.
+
+## Teleporting in the game files
+
+Kino's teleporter sends `SUBJECT_TELEPORT_PLAYER` (`TeleportPlayerInfo`: the player, a spawn
+entity and `enableMovement`) to `CTeleportManager`. For the local player it writes
+`enableMovement` to the player controller's `+0x15a` (may move) and `+0x15b` (may look), then calls
+`CPlayerController::PlaceAt` with the spawn's world matrix: the player stands on it and faces its
+way. The wormhole is its own group, `teleporterwormhole_shared`: four lanes of tunnel models and
+swirl effects, with the four `Wormhole_Spawn` spots in Kino's statics. Players stay
+`TeleportWormholeTimeMS` (2000) there, unable to move or look, with the full-screen effect
+`0x43d9cbd8` on each jump.
+
+`player:teleport` does the same with any object: `PlaceAt` with the object's matrix (or one built
+from a prefab of yours' place), both flags cleared during a stop-over, and the same effect.
 
 ## Navigation meshes
 
@@ -196,8 +260,8 @@ The game moves the player in `CPlayerController::FixedStep` through `Player_Move
 ### The helper program
 
 The rebuild runs [Recast](https://github.com/recastnavigation/recastnavigation) through a small
-native program, `boz-navmesh`. Build it once as described in
-[Installation](getting-started.md#the-navmesh-helper). Without it, saving still
+native program, `boz-navmesh`, which comes with the SDK releases
+([Installation](getting-started.md#the-navmesh-helper)). Without it, saving still
 works and reports that the navmesh was not rebuilt.
 
 ### How BOZ stores navmeshes
@@ -287,7 +351,6 @@ Hit, Use) change nothing walkable and leave the navmesh alone.
 
 - Tags stay where they were: moving a door does not move the floor it gates.
 - New window crossings and climbs cannot be added yet.
-- Windows builds of the helper are not produced yet.
 
 ## Editing shipped map files
 

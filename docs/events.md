@@ -69,6 +69,7 @@ Hook is the name in a script. Event is the name for `:on()`.
 | Hook | Event | On | Arguments | What it means | Can it stop it? |
 | --- | --- | --- | --- | --- | --- |
 | `start` | | Every scripted object | | The level started, or a save continued | |
+| `usable` | | Prefabs with a **Use** volume | `player, volume` | Before a use costs anything | **Yes**: return `false` and a reason ([usable](prefabs.md#usable)) |
 | `on_use` | `use` | Prefabs with a **Use** volume | `player, volume` | A player pressed use | |
 | `on_use` | `use` | Door, Perk, MysteryBox, PackAPunch, PowerSwitch, TrapSwitch, WallBuy, Barricade | `player` | A player used it | **Yes**: don't [hand it back](game-prefabs.md#handing-it-back-to-the-game) |
 | `on_hit` | `hit` | Prefabs with a **Hit** volume | `player, volume` | It was shot | |
@@ -76,6 +77,13 @@ Hook is the name in a script. Event is the name for `:on()`.
 | `on_exit` | `exit` | Prefabs with a **Trigger** volume | `who, volume` | Someone walked out, or a zombie died inside | |
 | `on_event` | | Every scripted object | `name, data` | A game event or a `boz.send` | |
 | `on_opened` | `opened` | Door, Debris | `player` | It opened | |
+| `on_opened` | `opened` | Zone | | It opened: a door, or a script's `open()` | |
+| `on_closed` | `closed` | Zone | | A script closed it | |
+| `on_enter` | `enter` | Zone, Sector | `player` | A player walked in | |
+| `on_exit` | `exit` | Zone, Sector | `player` | A player walked out | |
+| `on_teleported` | `teleported` | Teleporter | `player` | It sent a player off | |
+| `on_arrived` | `arrived` | Teleporter | `player` | The player arrived | |
+| `on_ready` | `ready` | Teleporter | | It charged and can send someone again | |
 | `on_bought` | `bought` | Perk | `player, perk` | A player bought this perk | |
 | `on_bought` | `bought` | WallBuy | `player, weapon` | A player paid for the weapon or its ammo | |
 | `on_spun` | `spun` | MysteryBox | `player` | A player spun this box | |
@@ -140,6 +148,8 @@ Catch these with `boz.on(name, function(data) ... end)`, or in `on_event`.
 | --- | --- | --- |
 | `perk_bought` | `perk`, `player` | A player got a perk, bought or given |
 | `door_opened` | `door`, `hash` | A door opened. `door` is its name. |
+| `zone_opened` | `zone` | A [zone](how-a-map-works.md#zones) opened. `zone` is its name. |
+| `zone_closed` | `zone` | A script closed a zone |
 | `box_weapon` | `weapon` | The mystery box picked a weapon |
 | `pack_a_punch` | `weapon` | A weapon went into Pack-a-Punch |
 | `powerup_grabbed` | `powerup`, `player` | A power-up was picked up |
@@ -147,7 +157,7 @@ Catch these with `boz.on(name, function(data) ... end)`, or in `on_event`.
 | `trap_activated` | | A trap was switched on |
 | `trap_cooled` | `trap` | A trap is ready again. `trap` is its name. |
 | `barricade_repaired` | | A board went back on a barricade |
-| `teleporter_activated` | | A teleporter was used |
+| `teleporter_activated` | | Kino's own teleporter was used (a Teleporter of yours sends `teleported`) |
 
 Power-up names: `double_points`, `insta_kill`, `max_ammo`, `nuke`, `carpenter`, `firesale`,
 `deathmachine`, `perkbottle`, `lightningbolt`.

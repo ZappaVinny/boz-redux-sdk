@@ -42,7 +42,7 @@ note = "A bullet or knife hit an entity (Weapon_FireBullets, CWeaponManager::Mel
 [SUBJECT_POI_TRIGGER]
 note = "A point of interest came into reach (the use prompt: CIngameStatePlaying::UpdatePoiPrompt)."
 [SUBJECT_TRANSFORM_UPDATED]
-note = "Engine: a transform moved (every frame for moving things; not in SubjectId_Register)."
+note = "Engine: a transform moved (every frame for moving things; not in SubjectId_Register). A CIsRenderableModel hearing it re-joins the sectors holding it two frames later."
 [SUBJECT_SPAWN_ZOMBIE]
 note = "CWaveManager::SpawnZombies asks to spawn one: a: ZombieSpawnInfo* (spec, configuration, position, speed, spawn point)."
 [SUBJECT_CARPENTER_ACTIVATED]
@@ -53,3 +53,7 @@ note = "Every system writes its state into the save (CSaveManager)."
 note = "Every system reads its state back from the save."
 [SUBJECT_RESTART_LEVEL]
 note = "The level restarts: managers reset (rounds to 0, power off)."
+[SUBJECT_TELEPORT_PLAYER]
+note = "CTeleportManager moves a player. a: TeleportPlayerInfo* (+4 player name hash, +8 spawn entity name hash, +0xc enableMovement). For the local player it writes enableMovement to CPlayerController +0x15a (may move) and +0x15b (may look), then CPlayerController::PlaceAt with the spawn's world matrix."
+[SUBJECT_TRANSITION_STATE]
+note = "Kino's teleport sequence changes state. a: TeleportStateTransitionInfo* (+4 state to go to, +8 state after the wormhole, +0xc time to set, +0x10 flag)."

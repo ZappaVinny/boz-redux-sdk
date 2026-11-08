@@ -47,8 +47,8 @@ def compile_world(pack, name: str, world: World,
             if missing:
                 raise WorldError(f'{full}: its {kind_name} link names {missing[0]}, which is not '
                                  'in the map')
-            if kind_name == 'zones':   # a link to a zone's box opens its zone
-                targets = list(dict.fromkeys(zone_of.get(t.lower(), t) for t in targets))
+            # A link to any box of a zone is a link to the zone (boz.get knows zones by name).
+            targets = list(dict.fromkeys(zone_of.get(t.lower(), t) for t in targets))
             files.runtime.setdefault('links', {}).setdefault(full, {})[kind_name] = list(targets)
     # Game prefabs placed without a piece (shipped entities) get their class from what they are.
     classes = files.runtime.pop('classes', {})
@@ -681,8 +681,8 @@ class _Level:
                 reflect.set_typed_value(prop, copy_name)
         door = spec_fields.component(spec, 'CDoor')
         if door is not None and door.blob is not None and not (self.inherited and in_base):
-            # A door unlocks areas of its own map: generated maps have one area, and another
-            # map's areas are not in this one, so it unlocks none.
+            # A placed door unlocks none of its own map's areas (they aren't in this one); its
+            # Opens zones link sets the map's own (apply_links). A remix's own doors keep theirs.
             areas = spec_fields.prop(door.blob, 'm_AreasUnlock')
             if areas is not None:
                 areas.raw = struct.pack('<I', 0)

@@ -268,9 +268,22 @@ Invisible boxes that send events to scripts. `size` is in centimetres.
 
 `who` is `players`, `zombies` or `anyone`; `once` fires the first time only.
 
+Three more kinds mark out a new map instead of sending events (refused in an inherited map):
+
+| `volume` | What it is | Fields |
+| --- | --- | --- |
+| `zone` | A box of a [zone](how-a-map-works.md#zones): its zombie spawns wake when it opens | `zone`: the zone it belongs to (empty: its own name); `starting`: players start in it (exactly one zone) |
+| `sector` | A [sector](how-a-map-works.md#sectors): a room drawn only while the camera can see it | |
+| `portal` | A doorway between two sectors: its thinnest side faces them | |
+
 #### Prefabs
 
-- **Your prefabs** have `parts`: models, volumes and prefabs, placed in the prefab's space.
+- **Your prefabs** have `parts`: models, volumes and prefabs, placed in the prefab's space. A
+  `piece` gives one a class of its own: `"debris"` (boz.Debris) or `"teleporter"`
+  (boz.Teleporter, with `wait` and `cooldown` in `properties`).
+- `links` is the **Links** box: a link's name, then the names it points at. Built-in ones include
+  `"zones"` (a door's Opens zones: any box of a zone), `"destination"` and `"stop_over"` (a
+  Teleporter's); your script's `---@link` names work the same.
 - **Game prefabs** are one of the game's entities: `source` (a name or `0x` hash, from the base
   level or from any `group`), the editor `piece` it came from, its `settings` as the editor
   shows them, and the `fields` they write (`"CPerk.m_perkSinglePCost": 2000`; names and the power
@@ -296,8 +309,17 @@ Invisible boxes that send events to scripts. `size` is in centimetres.
   buy gets one at the same offset: the weapon's own chalk when the game has one, else an outline
   drawn from the weapon model's side.
 - **Doors:** the floor under a door's collision box is cut out as its own navmesh polygons,
-  tagged with the door's name, so players and zombies pass only once the door is bought. Copies
-  get names of their own; doors in generated maps unlock no areas.
+  tagged with the door's name, so players and zombies pass only once the door is bought. The cut
+  reaches past the door by the player's width, so nobody walks into it. Copies get names of their
+  own.
+- **Zones:** each zone becomes a game area (`CArea`, `<level>_zone_<zone>`) listing the zombie
+  spawns inside its boxes (spawns outside every box join the starting zone), and the starting one
+  is the level's starting area. A door's Opens zones becomes its `m_AreasUnlock`. Placed doors
+  otherwise unlock nothing.
+- **Sectors:** each sector becomes a group of its own (`<level>_sector_<sector>`), listed by
+  `<level>_sectors`: a shell model of the box's corners, which the game turns into the room's
+  volume and doesn't draw, and the portals that face into it (each portal names the sectors on its
+  two sides). The game puts every other model in the room that holds its middle.
 - **Scripts:** the build adds `require("boz.game.world").start()` to `main.lua`, the standard
   library, and a generated `boz/world_data.lua` (start state, scripted objects, volumes).
   The runtime applies the start state when the level starts, starts the scripts, powers perk

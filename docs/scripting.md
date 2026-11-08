@@ -39,7 +39,7 @@ Anything from `boz.get`, and `self` in a script. The full list, with examples, i
 
 | Call | What it does |
 | --- | --- |
-| `.name`, `.kind`, `.settings` | Its name, `"model"`/`"volume"`/`"prefab"`, and its settings |
+| `.name`, `.kind`, `.settings` | Its name, `"model"`/`"volume"`/`"prefab"`/`"zone"`/`"sector"`, and its settings |
 | `class_name()`, `is_a(class)` | Its class |
 | `part_name()`, `parent()`, `part(name)`, `parts()` | Prefabs and their parts |
 | `position()`, `rotation()`, `near(target, cm)`, `exists()` | Where it is |
@@ -67,6 +67,7 @@ Get one with `boz.player()`, or from a hook's `player` argument.
 | `give_weapon(name)`, `take_weapon(name)`, `weapon()` | Weapons. The new weapon goes in hand. |
 | `position()` | Where the player is (eye height) |
 | `teleport(place, options)` | Moves the player. On an object they stand on it, facing its way (a prefab of yours: where it is placed); a position is eye height, like `position()`. Options: `via` (an object to stop over at first, held still with their view fixed, as in the game's wormhole), `seconds` (the stop-over, 2: the game's wormhole time), `effect` (the teleport flash, true), `done(player)` (runs on arrival). |
+| `zone()`, `sector()` | The [zone and sector](#zones-and-sectors) the player is in, or nil |
 | `movement()`, `set_movement(on, look)` | Off holds the player where they stand. With `look` false their view is held too. |
 | `downed()`, `kill()` | Down in last stand, or killed |
 | `stance()`, `set_stance(name)` | `"standing"`, `"crouching"`, `"prone"`, `"downed"` |
@@ -129,6 +130,43 @@ end
 | `boz.rounds.set_wave(field, value)` | Changes the running round, such as `"m_ZombieHealth"` |
 
 To shape a map's rounds as a whole, use the [Game tab](editor.md#game-rules).
+
+## Zones and sectors
+
+`boz.get` gives a [zone](how-a-map-works.md#zones) by its zone name, as a `boz.Zone`:
+
+| Call | What it does |
+| --- | --- |
+| `open()` | Opens it, as a door that opens it would. False when it was open already. |
+| `close()` | Closes it: its spawns aren't used until it opens again. False when it was closed. |
+| `is_open()`, `starting()` | Whether its spawns are used, and whether it's the starting zone |
+| `spawns()`, `doors()` | Its zombie spawns, and the doors and debris that open it |
+| `contains(target)`, `players()` | Whether a position or object is inside it, and the players in it |
+| `position()` | The middle of its first box |
+
+Events: `opened`, `closed`, `enter(player)` and `exit(player)`. Every script also hears the game
+events `zone_opened` and `zone_closed`, with `zone`, its name.
+
+```lua
+local cellar = boz.get("Cellar")
+cellar:on("enter", function(zone, player)
+    player:message("It's cold down here")
+end)
+boz.on("zone_opened", function(data)
+    log(data.zone .. " is open")
+end)
+```
+
+A [sector](how-a-map-works.md#sectors) is a `boz.Sector`, by its name:
+
+| Call | What it does |
+| --- | --- |
+| `contains(target)`, `players()` | Whether a position or object is inside it, and the players in it |
+| `drawn()` | True when the game drew it this frame |
+| `position()` | Its middle |
+
+Events: `enter(player)` and `exit(player)`. `boz.sectors.set_culling(false)` draws every sector in
+view, ignoring portals, to compare against; `boz.sectors.culling()` says which is on.
 
 ## Systems
 

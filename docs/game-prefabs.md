@@ -167,6 +167,8 @@ of that:
 ## Door
 
 A door the player buys open. Pick one of the game's designs from **Doors** in the asset browser.
+Its **Opens zones** link is the zones behind it: their spawns wake once it opens
+([Zones](how-a-map-works.md#zones)).
 
 | Setting | Label | Kind | Live |
 | --- | --- | --- | --- |
@@ -178,6 +180,7 @@ A door the player buys open. Pick one of the game's designs from **Doors** in th
 | --- | --- |
 | `open()` | Opens it, free |
 | `is_open()` | True once open |
+| `zones()` | The zones it opens, as [boz.Zone](scripting.md#zones-and-sectors) |
 
 | Override | When | Can stop it? |
 | --- | --- | --- |
@@ -211,8 +214,9 @@ to everything else, and `is_a(boz.Door)` is true.
 **Make it:** drag **Debris** from **Doors**, or make a prefab with your model and a **Use**
 volume. The volume holds the **Cost** and **Prompt**, not a Cost setting.
 
-When bought it hides, which opens walking and bullets, plays the debris sound, sends `opened` and
-opens anything in its **Opens with** link. It stays open in saved games.
+When bought it hides, which opens walking and bullets, plays the debris sound, sends `opened`, and
+opens anything in its **Opens with** link and the zones in its **Opens zones** link. It stays open
+in saved games.
 
 | Method | What it does |
 | --- | --- |
@@ -258,8 +262,7 @@ over at** to it: players stand on its first Spot, facing down the tunnels. Link 
 | **Time at the stop-over** | Seconds the player is held at the stop-over, view and all (2, as in the game) |
 | **Wait between uses** | Seconds it charges after a use (30). While it charges the prompt says *Charging* and a use costs nothing. |
 
-The Wormhole is an ordinary prefab of yours: the game's tunnel models and effects, and a Spot for
-each player. Move, swap or delete its parts, or use anything else as the stop-over.
+The stop-over can be a [Wormhole](#wormhole) or any object of yours.
 
 | Method | What it does |
 | --- | --- |
@@ -292,6 +295,35 @@ function Booth:on_arrived(player)
 end
 
 return Booth
+```
+
+## Wormhole
+
+The wormhole from Kino der Toten, as **a prefab of your own**: the game's tunnel models and swirl
+effects, and a place for each player to stand. Its job is to be a stop-over on the way somewhere,
+for a [Teleporter](#teleporter) or for `player:teleport` in a script.
+
+**Make it:** drag **Wormhole** from **Teleporting** and put it somewhere players can't see or
+reach, such as well under the map. A map needs only one; every teleporter can stop over at it.
+
+| Part | What it is |
+| --- | --- |
+| **Spot_1** to **Spot_4** | Where a player stands, one per lane: flat Trigger volumes, facing down the tunnels |
+| **Tunnel_1** to **Tunnel_4** | The tunnel each lane looks into |
+| **Swirl_1** to **Swirl_4** | The swirling effect in each tunnel |
+| **Room**, **Shell** | The dark box around it all |
+
+The Wormhole itself stands on **Spot_1**, facing the same way, so linking the whole Wormhole puts
+players there. Link a **Spot** to pick a lane.
+
+It is yours to change, like any prefab you made: move, swap or delete parts, swap a swirl for
+another effect, or build a stop-over of your own from scratch and use that instead. While players
+are in it they can't move or look around, as in the game, for the stop-over's time.
+
+From a script, any object can be the stop-over:
+
+```lua
+boz.player():teleport(boz.get("Roof"), {via = boz.get("Wormhole.Spot_2"), seconds = 4})
 ```
 
 ## Perk
@@ -570,11 +602,13 @@ how they arrive: Window, Ground, From above, Ceiling, Climb, Dogs or Monkeys.
 | --- | --- | --- | --- |
 | `active_from_the_start` | Active from the start | On or off | Read only here; use `set_active` |
 
-**Off** means the spawn starts working once players reach its area.
+**Off** means it works once its zone is open: from the start in the starting zone, else once a
+door opens its zone ([Zones](how-a-map-works.md#zones)).
 
 | Method | What it does |
 | --- | --- |
-| `set_active(on)` | Lets zombies come out of it, or not |
+| `set_active(on)` | Lets zombies come out of it, or not, whatever its zone |
+| `active()` | True while zombies can come out of it |
 
 There's nothing to override: a spawn has no player use. Switch them from another object:
 

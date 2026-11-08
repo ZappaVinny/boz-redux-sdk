@@ -68,7 +68,8 @@ that map. Players who install your packaged mod get the same choice.
 
 The **Problems** panel in the sidebar has two parts:
 
-- **Warnings:** what looks wrong in the map right now, each with a button that selects the object.
+- **Warnings:** what looks wrong in the map right now, such as a zone no door opens, each with a
+  button that selects the object.
 - **Last build:** what the build said.
 
 **Project → Check for problems** runs the checks by hand.
@@ -81,9 +82,9 @@ The **World** tab is where you build the level.
 
 | Group | What's in it |
 | --- | --- |
-| **Game prefabs** | Machines (perks, Pack-a-Punch, mystery box, power switch), Buying (wall buys), Doors (including **Debris**), Barricades (including **Window**), Defence (traps, trap switch) |
+| **Game prefabs** | Machines (perks, Pack-a-Punch, mystery box, power switch), Buying (wall buys), Doors (including **Debris**), Barricades (including **Window**), Defence (traps, trap switch), Teleporting (**Teleporter**, **Wormhole**) |
 | **Level markers** | Spawns, Jump points, Sound |
-| **Volumes** | Trigger, Hit, Use |
+| **Volumes** | Trigger, Hit, Use, and the map's [Zone](how-a-map-works.md#zones), [Sector](how-a-map-works.md#sectors) and Portal |
 | **Models**, **Textures** | Everything from every map |
 | **My prefabs**, **My assets** | Your own |
 
@@ -137,7 +138,9 @@ Links point objects at each other. Each link shows who it points to, with:
 - **×** to remove one;
 - **↺** to go back to the default.
 
-Your script's `---@link` lines show here too. See [Links](prefabs.md#links).
+Doors and Debris have **Opens zones** ([Zones](how-a-map-works.md#zones)), and a Teleporter has
+**Destination** and **Stop over at**. Your script's `---@link` lines show here too. See
+[Links](prefabs.md#links).
 
 ### Prefabs
 
@@ -153,6 +156,11 @@ takes it apart. **Save as new prefab** stores it under **My prefabs**. Walkthrou
   the game draws your mesh. **Use the game's model** goes back.
 - **Zombie spawn:** **Type** picks how they arrive.
 - **Window:** a barricade and a spawn, ready for you to link.
+- **Teleporter:** a Use volume that sends players to its **Destination**, by way of its **Stop over
+  at**. Add any model as its pad. See [Teleporter](game-prefabs.md#teleporter).
+- **Wormhole:** the game's wormhole as your own prefab: its tunnel models and effects, and a
+  **Spot** for each player. Place it out of sight and use it as a Teleporter's stop-over. Every
+  part can be moved, swapped or deleted. See [Wormhole](game-prefabs.md#wormhole).
 
 ### Textures
 
@@ -171,8 +179,8 @@ The viewport's switches are at the left of the tool settings bar (also in the si
 tab). They switch overlays:
 
 - **Markers**;
-- **Volumes**: your trigger, use, hit, sector, zone and portal volumes. Its arrow picks which
-  kinds show, and **Shipped level** adds the shipped level's own trigger and collision shapes;
+- **Volumes**: your trigger, use, hit, sector, zone and portal volumes. Its arrow has a tick box
+  for each kind, and **Shipped level** adds the shipped level's own trigger and collision shapes;
 - **Links** between objects;
 - **Walkable** and **Collision**, which build the map and show where people can walk (blue, orange
   where a door blocks it) and what bullets hit. **Refresh** builds them again after edits.

@@ -17,6 +17,9 @@ Run** puts you in it in one click.
 the asset browser, ready to drag in. Perk machines, the mystery box, Pack-a-Punch, wall buys, traps
 and windows work as soon as you place them.
 
+**Build big maps.** Doors open new zones and wake their spawns, the game draws only the rooms the
+player can see, and teleporters carry players through the wormhole.
+
 **Bring your own models and textures.** Import FBX, glTF and OBJ. The editor makes a game version
 with the right number of triangles, and shows you how it will look.
 

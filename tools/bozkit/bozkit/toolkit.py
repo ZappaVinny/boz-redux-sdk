@@ -154,8 +154,8 @@ PIECES = [
     # (each type is a piece of its own, resolved on the base level or another map).
     *(Piece(key, 'Zombie spawn', 'Level markers/Spawns', 'spawn', spawn_type=kind,
             settings=(Setting('CSpawnPoint.m_StartActive', 'Active from the start', 'bool',
-                              'On: used from the first round wherever players are. Off: used '
-                              'once players reach its area', False),),
+                              'On: used from the first round, whatever its zone. Off: used '
+                              'once its zone is open', False),),
             description=description, palette=key == SPAWN_TYPES[0][0])
       for key, _label, kind, description in SPAWN_TYPES),
     Piece('jump_point', 'Jump point', 'Level markers/Jump points', 'jump',
