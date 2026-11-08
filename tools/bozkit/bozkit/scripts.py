@@ -63,6 +63,13 @@ def _default(text: str | None, type_name: str):
         raise ScriptError(f'default {text!r} is not a {type_name}') from exc
 
 
+# Settings a prefab of yours with a class of its own has without a script (its script adds more).
+PIECE_SETTINGS = {
+    'teleporter': (Property('wait', 'seconds', 2.0, 'Time at the stop-over'),
+                   Property('cooldown', 'seconds', 30.0, 'Wait between uses')),
+}
+
+
 def parse_properties(text: str) -> list[Property]:
     """The settings a script declares (``---@setting`` lines), in order."""
     out, seen = [], set()
@@ -224,6 +231,8 @@ end
 OBJECT_CLASSES = (
     ('Door', 'Door', USE_HOOK + _after('on_opened', 'player', 'It opened.')),
     ('Debris', 'Debris', USE_HOOK + _after('on_opened', 'player', 'It opened.')),
+    ('Teleporter', 'Teleporter', USE_HOOK + _after('on_teleported', 'player', 'A player set off.')
+     + _after('on_arrived', 'player', 'A player arrived.')),
     ('Perk', 'Perk machine', USE_HOOK + _after('on_bought', 'player, perk', 'A player bought it.')),
     ('MysteryBox', 'Mystery box',
      USE_HOOK + _after('on_spun', 'player', 'A player spun it.')

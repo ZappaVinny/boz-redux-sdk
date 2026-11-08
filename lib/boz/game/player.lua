@@ -1,12 +1,11 @@
--- boz.player: the local player in a Zombies match: health, place, stance, speed and perks.
+-- boz.Player: the local player in a Zombies match: points, health, perks, weapons and place.
 --
---   local player = require("boz.engine.player")
---   player.give_all_perks()
---   player.health()  player.set_health(500, true)  player.set_god(true)
---   player.position()  player.teleport({x = 0, y = 250, z = 0})
---   player.downed()  player.stance()  player.set_speed("SprintSpeed", 1.5)
+--   local player = boz.player()
+--   player:give_points(500)  player:set_health(500, true)  player:give_perk("Juggernog")
+--   player:teleport(boz.get("Roof"))                          stand on it, facing its way
+--   player:teleport(boz.get("Roof"), {via = boz.get("Wormhole.Spot"), seconds = 3})
 --
--- game: CHealth::SetHealth
+-- game: CPlayerController::PlaceAt
 
 local Class = require("boz.class")
 local engine = require("boz.engine.player")
@@ -51,13 +50,64 @@ function Player:weapon() return weapons.current() end
 
 --- Position {x, y, z} (centimetres, y up; the camera, about 136 above the feet).
 function Player:position() return engine.position() end
---- Moves the player.
-function Player:teleport(position)
-    if type(position) == "table" and type(position.position) == "function" then
-        position = position:position()
+local TELEPORT_FLASH = 0x43d9cbd8   -- the game's teleport flash (CTeleportSpawnConfig)
+
+-- Puts the player at a target: on an object (facing its way), else at a position {x, y, z}
+-- (eye height, like position()).
+local function place(target)
+    if type(target) == "table" and target._handle then
+        local entity = target._handle:entity_pointer()
+        if entity ~= 0 then
+            return engine.place_on(entity)
+        end
+        local spot = target._entry and target._entry.place   -- a prefab of yours: its own place
+        if spot then
+            local p = spot.position
+            return engine.place_at({x = p[1], y = p[2], z = p[3]}, spot.rotation)
+        end
+        local position = target:position()
+        return position ~= nil and engine.place_at(position, target:rotation())
     end
-    return engine.teleport(position)
+    return target ~= nil and engine.teleport(target)
 end
+
+--- Moves the player to an object (standing on it, facing its way) or a position.
+--- options: via (an object or position to stop at first, held there, view too, like the game's
+--- wormhole), seconds (how long, 2: the game's wormhole time),
+--- effect (the teleport flash, true), done(player) (runs on arrival).
+function Player:teleport(target, options)
+    options = options or {}
+    local function jump(to)
+        if options.effect ~= false then
+            require("boz.systems.screen").effect(TELEPORT_FLASH)
+        end
+        return place(to)
+    end
+    if options.via == nil then
+        local ok = jump(target)
+        if ok and options.done then
+            options.done(self)
+        end
+        return ok
+    end
+    if not jump(options.via) then
+        return false
+    end
+    engine.set_movement(false, false)
+    require("boz.engine.timers").after(options.seconds or 2, function()
+        engine.set_movement(true, true)
+        jump(target)
+        if options.done then
+            options.done(self)
+        end
+    end)
+    return true
+end
+
+--- True while the player may walk; set_movement(false) holds them where they stand, and
+--- set_movement(false, false) holds their view too.
+function Player:movement() return engine.movement() end
+function Player:set_movement(on, look) return engine.set_movement(on, look) end
 
 --- True while down (last stand).
 function Player:downed() return engine.downed() end

@@ -146,6 +146,28 @@ def main() -> None:
              "bought, it vanishes. Opens with other doors (Links)")
     icon(obj, ICON_COLOURS.get("Doors", (120, 120, 120)))
     count += 1
+    # A teleporter of yours (boz.Teleporter): a Use volume; link its Destination and stop-over.
+    obj = bpy.data.objects.new("Teleporter", None)
+    obj.empty_display_type = "PLAIN_AXES"
+    obj["boz_asset_kind"] = "teleporter"
+    collection.objects.link(obj)
+    describe(obj, "Game prefabs/Teleporting", "Teleporter: a Use volume that sends players to its "
+             "Destination link, stopping over at its Stop over at link (a Wormhole spot). Add any "
+             "model as its pad", ("native",))
+    icon(obj, (90, 60, 200))
+    count += 1
+    # The wormhole: the game's own models and effects plus a Spot per player, as a prefab of
+    # yours (toolkit.wormhole_prefab) to stop over in with player:teleport's via.
+    obj = bpy.data.objects.new("Wormhole", None)
+    obj.empty_display_type = "PLAIN_AXES"
+    obj["boz_asset_kind"] = "wormhole"
+    collection.objects.link(obj)
+    describe(obj, "Game prefabs/Teleporting", "The wormhole: a place to stop over on the way when "
+             "teleporting (player:teleport's via). Its parts are yours to move, swap or delete",
+             ("native",))
+    if not preview_file(obj, built.thumb_for("model", 0xc1bc6ebb)):
+        icon(obj, (90, 60, 200))
+    count += 1
     for kind, label, description in VOLUMES:
         obj = bpy.data.objects.new(label, None)
         obj.empty_display_type = "CUBE"

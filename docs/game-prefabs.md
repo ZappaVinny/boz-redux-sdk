@@ -242,6 +242,58 @@ end
 return Rubble
 ```
 
+## Teleporter
+
+A Teleporter is a **teleporter of your own**: a **Use** volume that sends the player somewhere
+else, with an optional stop on the way. It has no model; add any model as its pad.
+
+**Make it:** drag **Teleporter** from **Teleporting**. In its **Links** box, set **Destination**
+to any object: the player stands on it, facing the way it faces. To stop on the way, drag a
+**Wormhole** from the same place somewhere out of sight, such as under the map, and set **Stop
+over at** to it: players stand on its first Spot, facing down the tunnels. Link one of its four
+**Spot** volumes instead to pick a lane. The Use volume holds the **Cost** and **Prompt**.
+
+| Setting | What it does |
+| --- | --- |
+| **Time at the stop-over** | Seconds the player is held at the stop-over, view and all (2, as in the game) |
+| **Wait between uses** | Seconds it charges after a use (30). While it charges the prompt says *Charging* and a use costs nothing. |
+
+The Wormhole is an ordinary prefab of yours: the game's tunnel models and effects, and a Spot for
+each player. Move, swap or delete its parts, or use anything else as the stop-over.
+
+| Method | What it does |
+| --- | --- |
+| `teleport(player)` | Sends the player. Returns false without a Destination. **Override this one.** |
+| `charge()` | Starts charging |
+| `ready()` | True when it can send someone |
+| `usable(player)` | False, with a reason, while it charges or has no Destination: the use costs nothing |
+
+| Override | When | Can stop it? |
+| --- | --- | --- |
+| `on_use(player, volume)` | The Use volume was bought, already paid | **Yes**, but the points are gone. To keep it, [hand it back](#handing-it-back-to-the-game). |
+| `teleport(player)` | It sends someone | **Yes**. To keep it, [hand it back](#handing-it-back-to-the-game). |
+| `on_teleported(player)` | The player has left | No |
+| `on_arrived(player)` | The player has arrived | No |
+| `on_ready()` | It has charged | No |
+
+```lua
+local Booth = boz.Teleporter:extend("Booth")
+
+function Booth:teleport(player)
+    if not boz.rounds.powered() then
+        player:message("No power")
+        return false
+    end
+    return boz.Teleporter.teleport(self, player)
+end
+
+function Booth:on_arrived(player)
+    player:give_points(100)
+end
+
+return Booth
+```
+
 ## Perk
 
 A perk machine. Pick one from **Machines**.

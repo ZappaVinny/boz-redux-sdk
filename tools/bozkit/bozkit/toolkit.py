@@ -510,3 +510,49 @@ def _defaults(piece_: Piece, spec, names: dict[int, str]) -> dict:
             value = names.get(value, f'0x{value:08x}')
         values[setting.key] = value
     return values
+
+
+# The wormhole (Kino's teleporterwormhole_shared): four lanes, one per player, as shipped. The
+# palette places it as a prefab of yours: the game's models and effects plus a Spot volume at the
+# end of each lane (where Kino stands its players) to use as player:teleport's via.
+WORMHOLE_GROUP = 'levels/kino/teleporterwormhole_shared.group.bin'
+_WORMHOLE_ORIGIN = (-2596.4, 611.3, 9472.2)   # Wormhole_Spawn01, on its floor: Spot_1
+_WORMHOLE_PARTS = (   # (part name, entity hash, shipped position, rotation)
+    ('Shell', 0xad043969, (-3282.8, 758.2, 9446.2), (0.0, 0.0, 0.0, 1.0)),
+    ('Room', 0x436b4124, (-3307.0, 1048.5, 9491.9), (0.0, 0.0, 0.0, 1.0)),
+    ('Tunnel_1', 0xc1bc6ebc, (-2594.1, 584.3, 9092.9), (0.0, 0.0, 0.0, 1.0)),
+    ('Tunnel_2', 0xc1bc6ebb, (-3039.7, 584.3, 9092.9), (0.0, 0.0, 0.0, 1.0)),
+    ('Tunnel_3', 0xd7534933, (-3512.6, 584.3, 9092.9), (0.0, 0.0, 0.0, 1.0)),
+    ('Tunnel_4', 0xd7534932, (-3957.3, 584.3, 9092.9), (0.0, 0.0, 0.0, 1.0)),
+    ('Swirl_1', 0x865d63ab, (-2586.5, 761.0, 9059.9), (0.70710678, 0.0, 0.0, 0.70710678)),
+    ('Swirl_2', 0x865d63aa, (-3036.4, 761.0, 9059.9), (0.70710678, 0.0, 0.0, 0.70710678)),
+    ('Swirl_3', 0x865d63a9, (-3507.9, 761.0, 9059.9), (0.70710678, 0.0, 0.0, 0.70710678)),
+    ('Swirl_4', 0xc602d478, (-3948.9, 761.0, 9059.9), (0.70710678, 0.0, 0.0, 0.70710678)),
+)
+_WORMHOLE_SPOTS = (-2596.4, -3049.5, -3502.6, -3956.0)   # x of Wormhole_Spawn01..04 (facing -z)
+
+
+def wormhole_prefab(name: str = 'Wormhole', position=(0.0, 0.0, 0.0),
+                    rotation=(0.0, 0.0, 0.0, 1.0)):
+    """The wormhole as a prefab of yours (bozkit.world.Prefab): every part can be moved, swapped
+    or deleted. It stands on Spot_1 facing down the tunnels, so a teleport to the prefab itself
+    lands there; Spot_1..Spot_4 are a place per player."""
+    from . import world
+
+    turn = (0.0, 1.0, 0.0, 0.0)   # the shipped spots face -z: turn it all so the prefab faces +z
+
+    def local(point):
+        offset = tuple(point[i] - _WORMHOLE_ORIGIN[i] for i in range(3))
+        return tuple(round(v, 2) + 0.0 for v in spec_fields.rotate(turn, offset))
+
+    def turned(rotation):
+        return tuple(round(v, 6) + 0.0 for v in spec_fields.quat_mul(turn, rotation))
+
+    parts = [world.Prefab(part, local(where), turned(rotation), source=f'0x{entity:08x}',
+                          group=WORMHOLE_GROUP)
+             for part, entity, where, rotation in _WORMHOLE_PARTS]
+    parts += [world.Volume(f'Spot_{number}', 'trigger',
+                           local((x, _WORMHOLE_ORIGIN[1], _WORMHOLE_ORIGIN[2])),
+                           size=(60.0, 20.0, 60.0), who='players')
+              for number, x in enumerate(_WORMHOLE_SPOTS, 1)]
+    return world.Prefab(name, tuple(position), tuple(rotation), parts=parts)

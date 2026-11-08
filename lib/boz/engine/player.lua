@@ -6,7 +6,7 @@
 --   player.position()  player.teleport({x = 0, y = 250, z = 0})
 --   player.downed()  player.stance()  player.set_speed("SprintSpeed", 1.5)
 --
--- game: CHealth::SetHealth
+-- game: CHealth::SetHealth, CPlayerController::PlaceAt
 
 local core = require("boz.engine.core")
 local components = require("boz.engine.components")
@@ -89,6 +89,67 @@ end
 function player.teleport(position)
     local entity = map.player()
     return entity ~= nil and require("boz.engine.entities").set_position(entity, position)
+end
+
+local MAY_MOVE, MAY_LOOK = 0x15a, 0x15b    -- CPlayerController: may move, may look (the wormhole clears both)
+local WORLD_MATRIX = 0x38                  -- CIsTransform: world rotation rows, then position
+
+--- Stands the player on an entity, facing its way (the game's own teleport).
+function player.place_on(entity)
+    local controller = component("CPlayerController")
+    local t = entity and entity ~= 0 and core.call("CIsTransform::FromEntity", entity)
+    if not controller or not t or t == 0 then
+        return false
+    end
+    core.call("CIsTransform::UpdateWorld", t)
+    core.call("CPlayerController::PlaceAt", controller, t + WORLD_MATRIX)
+    return true
+end
+
+--- Stands the player at a position (feet, like an entity's) facing a rotation {x, y, z, w}.
+function player.place_at(position, rotation)
+    local controller = component("CPlayerController")
+    if not controller then
+        return false
+    end
+    local q = rotation or {0, 0, 0, 1}
+    local function turn(v)   -- v turned by q
+        local x, y, z, w = q[1], q[2], q[3], q[4]
+        local tx, ty, tz = 2 * (y * v[3] - z * v[2]), 2 * (z * v[1] - x * v[3]), 2 * (x * v[2] - y * v[1])
+        return {v[1] + w * tx + (y * tz - z * ty), v[2] + w * ty + (z * tx - x * tz),
+                v[3] + w * tz + (x * ty - y * tx)}
+    end
+    -- A world matrix as CIsTransform keeps it: each row an axis turned, then the position.
+    local matrix = core.scratch("player.place_at", 48)
+    local values = {}
+    for _, axis in ipairs({{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}) do
+        for _, v in ipairs(turn(axis)) do values[#values + 1] = v end
+    end
+    values[10], values[11], values[12] = position.x, position.y, position.z
+    for i, v in ipairs(values) do
+        game.write("f32", matrix + 4 * (i - 1), v)
+    end
+    core.call("CPlayerController::PlaceAt", controller, matrix)
+    return true
+end
+
+--- Lets the player walk (true) or holds them where they stand (false). With look false, their
+--- view is held too (as in the game's wormhole); looking is left alone when look is nil.
+function player.set_movement(on, look)
+    local controller = component("CPlayerController")
+    if controller then
+        game.write("u8", controller + MAY_MOVE, on and 1 or 0)
+        if look ~= nil then
+            game.write("u8", controller + MAY_LOOK, look and 1 or 0)
+        end
+    end
+    return controller ~= nil
+end
+
+--- True while the player may walk.
+function player.movement()
+    local controller = component("CPlayerController")
+    return controller ~= nil and game.read("u8", controller + MAY_MOVE) ~= 0
 end
 
 --- The stance name ("standing", "crouching", "prone", "downed"), or nil.

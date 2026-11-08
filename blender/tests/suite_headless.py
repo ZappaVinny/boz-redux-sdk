@@ -1121,8 +1121,33 @@ if LIBRARY:
         stand_in["boz_asset_kind"] = "debris"
         stand_in.location = (600.0 + 400.0 * number, 900.0, 0.0)
         scene.collection.objects.link(stand_in)
+    stand_in = bpy.data.objects.new("Teleporter", None)
+    stand_in["boz_asset_kind"] = "teleporter"
+    stand_in.location = (-2000.0, 600.0, 0.0)
+    scene.collection.objects.link(stand_in)
+    stand_in = bpy.data.objects.new("Wormhole", None)
+    stand_in["boz_asset_kind"] = "wormhole"
+    stand_in.location = (-2000.0, 900.0, -1500.0)
+    scene.collection.objects.link(stand_in)
     palette.realize()
     check(not any("boz_asset_kind" in o for o in scene.objects), "stand-ins are gone")
+    wormhole = scene.objects.get("Wormhole")
+    spots = sorted(c.boz.part_name for c in (wormhole.children if wormhole else [])
+                   if c.boz.role == "volume")
+    check(wormhole is not None and wormhole.boz.role == "prefab" and len(wormhole.children) == 14
+          and spots == ["Spot_1", "Spot_2", "Spot_3", "Spot_4"],
+          f"the Wormhole drops as a prefab of yours with four Spots ({spots})")
+    teleporter = scene.objects.get("Teleporter")
+    check(teleporter is not None and teleporter.get("boz_piece") == "teleporter"
+          and teleporter.get(convert.PROPERTY_PREFIX + "cooldown") == 30.0
+          and suite.objects.script_class(teleporter, scene.boz.base) == "Teleporter",
+          "the Teleporter drops as a prefab of yours with its settings")
+    kinds = [k.name for k in suite.prefab_links.kinds(teleporter, scene.boz.base)]
+    check({"destination", "stop_over"} <= set(kinds), f"it has Destination and Stop over at ({kinds})")
+    suite.prefab_links.write(teleporter, {"destination": "spawn_player_1",
+                                          "stop_over": "Wormhole.Spot_1"})
+    bad, _warn = suite.prefab_links.check(scene)
+    check(not any("Teleporter" in m for m, _n in bad), f"its links are valid ({bad})")
     dropped = [o for o in scene.objects if o.name.startswith("dropped")]
     check(sorted(o.boz.role for o in dropped) == ["model", "model", "prefab", "volume"],
           f"drops become models, a game prefab and a volume ({[o.boz.role for o in dropped]})")
@@ -1270,6 +1295,9 @@ if LIBRARY:
     weapon_build_checks("generated", data)
     check("Shrine.Vault" in data, "the nested prefab is in the runtime data")
     check("Hall_Zone" in data and "sectors = " in data, "zones and sectors are in the runtime data")
+    check("Wormhole.Spot_1" in data, "the Wormhole's spots are in the runtime data")
+    check('class = "Teleporter"' in data and '"Wormhole.Spot_1"' in data.split("links = ", 1)[-1],
+          "the Teleporter's class and links are in the runtime data")
 if LIBRARY:
     suite.prefab_library.rebuild(None)   # the tests used the real palette folder: clear it
 print("BOZ_SUITE_OK")

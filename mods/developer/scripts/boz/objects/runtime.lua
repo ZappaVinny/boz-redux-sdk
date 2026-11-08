@@ -39,7 +39,7 @@ local Zone = require("boz.objects.zone")
 local Sector = require("boz.objects.sector")
 
 local CLASSES = {Object = Object, Prefab = Prefab, Volume = require("boz.objects.volume"), Debris = Debris,
-                 Zone = Zone, Sector = Sector}
+                 Zone = Zone, Sector = Sector, Teleporter = require("boz.objects.teleporter")}
 for name, class in pairs(native) do
     if name ~= "Native" then
         CLASSES[name] = class
@@ -183,15 +183,32 @@ local function inside(entry, entity, delta)
     return count
 end
 
+-- Whether the prefab a Use volume belongs to takes a use now (its usable()), and why not.
+local function usable(entry, who)
+    local owner = entry.owner ~= "" and runtime.get(entry.owner) or nil
+    if not owner or type(owner.usable) ~= "function" then
+        return true
+    end
+    local ok, can, reason = pcall(owner.usable, owner, who, string.sub(entry.name, #entry.owner + 2))
+    if not ok then
+        log(entry.owner .. ":usable: " .. tostring(can))
+        return true
+    end
+    if can ~= false then
+        return true
+    end
+    return false, reason
+end
+
 local function fire_volume(event, entry, info)
     if entry.once and entry._fired then
         return
     end
-    if event == "use" and not pay(entry.cost) then
+    local who = who_of(info)
+    if event == "use" and (not usable(entry, who) or not pay(entry.cost)) then
         return
     end
     entry._fired = true
-    local who = who_of(info)
     local volume = runtime.get(entry.name)
     local owner = entry.owner ~= "" and runtime.get(entry.owner) or nil
     if owner then
@@ -333,7 +350,10 @@ local function show_prompt(entity)
                 and not engine.is_hidden(entry.name)
                 and engine.get(entry.name):entity_pointer() == entity then
             local text = entry.prompt ~= "" and entry.prompt or "Use"
-            if entry.cost and entry.cost > 0 then
+            local can, reason = usable(entry, nil)
+            if not can then
+                text = reason or "Not ready"
+            elseif entry.cost and entry.cost > 0 then
                 text = text .. " [Cost: " .. entry.cost .. "]"
             end
             local element = core.call("Poi_FindPromptElement")

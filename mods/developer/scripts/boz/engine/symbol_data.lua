@@ -296,6 +296,7 @@ return {
         ["CPlayerController::IsAiming"] = 0x1d3747,
         ["CPlayerController::LateUpdate"] = 0x1d3b39,
         ["CPlayerController::OnEvent"] = 0x1da251,
+        ["CPlayerController::PlaceAt"] = 0x1d5f29,
         ["CPlayerController::SetStance"] = 0x1db635,
         ["CPlayerFreeFly::Init"] = 0x1ddc75,
         ["CPlayerFreeFly::OnEvent"] = 0x1dddb9,

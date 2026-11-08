@@ -208,3 +208,39 @@ class SectorTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WormholeTests(unittest.TestCase):
+    def test_wormhole_is_an_ordinary_prefab(self):
+        from bozkit import toolkit, world
+        wormhole = toolkit.wormhole_prefab('Hole', (0.0, -2000.0, 0.0))
+        self.assertFalse(wormhole.is_game)
+        games = [p for p in wormhole.parts if isinstance(p, world.Prefab)]
+        spots = [p for p in wormhole.parts if isinstance(p, world.Volume)]
+        self.assertEqual(len(games), 10)
+        self.assertTrue(all(p.group == toolkit.WORMHOLE_GROUP and p.is_game for p in games))
+        self.assertEqual([s.name for s in spots], ['Spot_1', 'Spot_2', 'Spot_3', 'Spot_4'])
+        self.assertTrue(all(s.kind_of == 'trigger' and s.position[1] == 0.0 for s in spots))
+        w = world.World(prefabs=[wormhole])
+        self.assertFalse([m for m in world.validate(w) if 'Hole' in m or 'Spot' in m])
+        self.assertIn('Hole.Spot_1', world.object_names(w))
+        self.assertEqual(spots[0].position, (0.0, 0.0, 0.0))   # the prefab stands on Spot_1
+        self.assertTrue(all(s.rotation == (0.0, 0.0, 0.0, 1.0) for s in spots))
+        entry = next(e for e in world.describe(w) if e['name'] == 'Hole')
+        self.assertEqual(entry['place'], {'position': [0.0, -2000.0, 0.0], 'rotation': [0.0, 0.0, 0.0, 1.0]})
+
+
+class TeleporterTests(unittest.TestCase):
+    def test_teleporter_is_a_class_with_links_and_settings(self):
+        from bozkit import scripts
+        pad = world.Prefab('Pad', piece='teleporter', parts=[
+            world.Volume('Use', 'use', prompt='Teleport', cost=1500)],
+            links={'destination': 'Goal', 'stop_over': 'Hole.Spot_1'}, properties={'wait': 5.0})
+        entry = next(e for e in world.describe(world.World(prefabs=[pad])) if e['name'] == 'Pad')
+        self.assertEqual(entry['class'], 'Teleporter')
+        self.assertEqual(entry['settings'], {'wait': {'value': 5.0}, 'cooldown': {'value': 30.0}})
+        kinds = {kind.name for kind in links.kinds_for(links.kinds_of(role='prefab', piece='teleporter'))}
+        self.assertTrue({'destination', 'stop_over'} <= kinds)
+        self.assertNotIn('destination', {k.name for k in links.kinds_for(links.kinds_of(role='prefab'))})
+        self.assertEqual([p.name for p in scripts.PIECE_SETTINGS['teleporter']], ['wait', 'cooldown'])
+        self.assertTrue(any(name == 'Teleporter' for name, *_ in scripts.OBJECT_CLASSES))

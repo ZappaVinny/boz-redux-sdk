@@ -18,8 +18,8 @@ from dataclasses import dataclass
 # by their editor role (model, volume, prefab). 'door' also covers debris (a door of yours).
 OBJECT_KINDS = ('perk', 'door', 'barricade', 'trap', 'trap_switch', 'power_switch', 'mystery_box',
                 'pack_a_punch', 'wall_buy', 'zombie_spawn', 'player_spawn', 'volume', 'zone',
-                'sector', 'model', 'prefab', 'any')
-PIECE_KINDS = {'debris': 'door'}   # prefabs of yours that are a kind of game object
+                'sector', 'teleporter', 'model', 'prefab', 'any')
+PIECE_KINDS = {'debris': 'door', 'teleporter': 'teleporter'}   # prefabs of yours with a kind of their own
 _COMPONENT_KINDS = (('CTrapSwitch', 'trap_switch'), ('CTrap', 'trap'), ('CPerk', 'perk'),
                     ('CDoor', 'door'), ('CBarricade', 'barricade'),
                     ('CPowerSwitch', 'power_switch'), ('CMysteryBox', 'mystery_box'),
@@ -82,6 +82,11 @@ KINDS = (
     # A link to any box of a zone opens the whole zone (world_compile writes the areas' names).
     Kind('zones', 'Opens zones', frozenset({'door'}), frozenset({'zone'}),
          (('CDoor', 'm_AreasUnlock'),), many=True, default='none'),
+    # A teleporter of yours (boz.Teleporter): where it sends players, and where they stop on the way.
+    Kind('destination', 'Destination', frozenset({'teleporter'}), frozenset({'any'}),
+         default='none: it does nothing'),
+    Kind('stop_over', 'Stop over at', frozenset({'teleporter'}), frozenset({'any'}),
+         default='none: straight there'),
 )
 BY_NAME = {kind.name: kind for kind in KINDS}
 

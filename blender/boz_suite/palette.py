@@ -14,7 +14,7 @@ from pathlib import Path
 import bpy
 from bpy.app.handlers import persistent
 
-from ._bozkit import library, world
+from ._bozkit import library, toolkit, world
 
 from . import convert, game
 from . import link
@@ -71,7 +71,8 @@ def register_library() -> None:
 
 
 def show_palette() -> None:
-    """Point every asset browser at the game's palette (not Blender's own assets)."""
+    """Point every asset browser at the game's palette (not Blender's own assets) and reload it
+    from disk (Blender keeps showing the old file's assets after a rebuild otherwise)."""
     for screen in bpy.data.screens:
         for area in screen.areas:
             if area.type != "FILE_BROWSER" or area.ui_type != "ASSETS":
@@ -84,6 +85,19 @@ def show_palette() -> None:
                     except TypeError:
                         pass
             area.tag_redraw()
+    _refresh_asset_browsers()
+
+
+def _refresh_asset_browsers() -> None:
+    wm = bpy.context.window_manager
+    for window in (wm.windows if wm else []):
+        for area in window.screen.areas:
+            if area.type == "FILE_BROWSER" and area.ui_type == "ASSETS":
+                try:
+                    with bpy.context.temp_override(window=window, area=area):
+                        bpy.ops.asset.library_refresh()
+                except (RuntimeError, TypeError, AttributeError):
+                    pass
 
 
 def start_build() -> bool:
@@ -170,6 +184,10 @@ def realize() -> None:
             made = _place_window(scene, position, rotation)
         elif kind == "debris":
             made = _place_debris(scene, position, rotation)
+        elif kind == "teleporter":
+            made = _place_teleporter(scene, position, rotation)
+        elif kind == "wormhole":
+            made = _place_wormhole(scene, position, rotation)
         elif kind == "volume":
             volume = obj.get("boz_volume", "trigger")
             made = convert.volume_object(world.Volume(label, volume, position, rotation,
@@ -290,6 +308,27 @@ def _place_debris(scene, position, rotation):
     prefab = objects.group_into_prefab([model, use], "Debris")
     prefab["boz_piece"] = "debris"
     return prefab
+
+
+def _place_teleporter(scene, position, rotation):
+    """A teleporter of yours (boz.Teleporter): a Use volume as a prefab, its settings at their
+    defaults. Link its Destination (and Stop over at); add a model for a pad if you like."""
+    from . import objects
+    use = convert.volume_object(world.Volume("Use", "use", position, rotation, who="players",
+                                             prompt="Teleport", cost=1500), scene)
+    prefab = objects.group_into_prefab([use], "Teleporter")
+    prefab["boz_piece"] = "teleporter"
+    objects.sync_properties(prefab)
+    return prefab
+
+
+def _place_wormhole(scene, position, rotation):
+    """The wormhole as a prefab of yours: the game's models and effects and four Spot volumes."""
+    from . import objects
+    obj = convert.prefab_object(toolkit.wormhole_prefab("Wormhole", position, rotation),
+                                scene.boz.base, scene, {})
+    objects.sync_all(scene)
+    return obj
 
 
 def _realize_timer():

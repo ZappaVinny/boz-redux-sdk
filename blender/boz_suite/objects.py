@@ -46,6 +46,8 @@ def kind_label(obj) -> tuple[str, str]:
             return f"Game prefab (native): {label}", "TOOL_SETTINGS"
         if obj.get("boz_piece") == "debris":
             return "Debris (a door of yours)", "OUTLINER_OB_EMPTY"
+        if obj.get("boz_piece") == "teleporter":
+            return "Teleporter (yours)", "OUTLINER_OB_EMPTY"
         return "Your prefab", "OUTLINER_OB_EMPTY"
     return "Not part of the map", "QUESTION"
 
@@ -56,14 +58,18 @@ def scripts_dir() -> Path | None:
 
 
 def declared(obj) -> list:
-    """The properties obj's script declares ([] without a script or when it cannot be read)."""
+    """Its settings: its class's own (a teleporter's), then its script's ---@setting lines."""
+    own = list(scripts.PIECE_SETTINGS.get(str(obj.get("boz_piece", "")), ())) \
+        if obj.boz.role == "prefab" and not obj.boz.source else []
     folder = scripts_dir()
     if not obj.boz.script or folder is None:
-        return []
+        return own
     try:
-        return scripts.read_properties(folder / obj.boz.script)
+        found = scripts.read_properties(folder / obj.boz.script)
     except scripts.ScriptError:
-        return []
+        return own
+    names = {prop.name for prop in found}
+    return [prop for prop in own if prop.name not in names] + found
 
 
 def sync_properties(obj) -> None:
@@ -212,8 +218,8 @@ def script_class(obj, base: str) -> str:
     if obj.boz.role != "prefab":
         return "Prefab"
     piece = obj.get("boz_piece", "")
-    if piece == "debris":
-        return "Debris"
+    if piece in world.OWN_CLASSES:
+        return world.OWN_CLASSES[piece]
     if piece:
         return toolkit.class_of(piece)
     return toolkit.class_of_components(prefab_links.components(obj, base))

@@ -36,6 +36,12 @@ local function each(self, fn)
     end
 end
 
+--- Whether a player may use its Use volume now (before the cost is taken). Return false and a
+--- reason ("Charging") to refuse: nothing is paid and the prompt shows the reason.
+function Prefab:usable(player, volume)
+    return true
+end
+
 --- One of its parts by its name in the prefab ("Door"), as its class.
 function Prefab:part(name)
     return require("boz.objects.runtime").get(self._parts[name] or (self.name .. "." .. name))

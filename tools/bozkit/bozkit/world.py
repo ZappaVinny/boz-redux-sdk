@@ -1045,7 +1045,7 @@ def lower(world: World) -> Layout:
     return layout
 
 
-OWN_CLASSES = {'debris': 'Debris'}   # prefabs of yours with a boz class of their own, by piece
+OWN_CLASSES = {'debris': 'Debris', 'teleporter': 'Teleporter'}   # prefabs of yours with a boz class, by piece
 
 
 def describe(world: World) -> list[dict]:
@@ -1072,6 +1072,9 @@ def describe(world: World) -> list[dict]:
             settings = toolkit.native_settings(item.piece, item.settings) if item.piece else {}
         elif isinstance(item, Prefab):
             entry['class'] = OWN_CLASSES.get(item.piece, 'Prefab')
+            from .scripts import PIECE_SETTINGS   # its class's own settings, at their defaults
+            settings = {prop.name: {'value': prop.default}
+                        for prop in PIECE_SETTINGS.get(item.piece, ())}
             entry['parts'] = [{'name': f'{full}.{part.name}', 'part': part.name, 'kind': part.kind}
                               for part in item.parts]
             # Every entity under it (nested prefabs flattened): what hide() and friends reach.
@@ -1086,9 +1089,10 @@ def describe(world: World) -> list[dict]:
 
     zones: dict[str, dict] = {}
 
-    def visit(items, prefix: str, owner: str):
+    def visit(items, prefix: str, owner: str, transform):
         for item in items:
             full = f'{prefix}{item.name}'
+            placed = _compose(transform, (item.position, item.rotation, getattr(item, 'scale', UNIT)))
             if isinstance(item, Volume) and item.kind_of == 'zone':
                 # One object per zone, whatever number of boxes it has (their places: the
                 # compiler's boxes). Zone names are the map's, even for a box in a prefab.
@@ -1111,13 +1115,17 @@ def describe(world: World) -> list[dict]:
             if isinstance(item, (Prefab, Volume)) or item.script:
                 name = item.source if getattr(item, 'piece', '') == 'player_spawn' else full
                 out.append(entry_of(name, item, owner))
+                if isinstance(item, Prefab) and not item.is_game:
+                    # It has no entity of its own: where it stands and faces, for teleports.
+                    out[-1]['place'] = {'position': [round(v, 2) for v in placed[0]],
+                                        'rotation': [round(v, 6) for v in placed[1]]}
             if isinstance(item, Prefab) and not item.is_game:
                 # Its parts' events go to the nearest prefab with a script or a class of its
                 # own (debris), else to this one (map scripts listen on any prefab).
                 driven = bool(item.script) or bool(item.piece)
-                visit(item.parts, full + '.', full if driven else (owner or full))
+                visit(item.parts, full + '.', full if driven else (owner or full), placed)
 
-    visit(world.objects(), '', '')
+    visit(world.objects(), '', '', ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), UNIT))
     return out
 
 

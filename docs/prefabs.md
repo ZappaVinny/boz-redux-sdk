@@ -274,6 +274,7 @@ These are the hooks a prefab has. You only write the ones you need.
 | --- | --- | --- |
 | `start()` | The level starts | Nothing |
 | `on_use(player, volume)` | A player presses use | A **Use** volume |
+| `usable(player, volume)` | Before a use costs anything: return false to refuse it | A **Use** volume |
 | `on_hit(player, volume)` | Something is shot | A **Hit** volume |
 | `on_enter(who, volume)` | Someone walks in | A **Trigger** volume |
 | `on_exit(who, volume)` | Someone walks out | A **Trigger** volume |
@@ -322,6 +323,25 @@ function Button:on_use(player, volume)
 end
 
 return Button
+```
+
+### usable
+
+Runs before a use takes the volume's **Cost**. Return `false` and a reason to refuse it: nothing
+is paid, `on_use` doesn't run, and the prompt shows the reason instead of the cost. Use it for
+anything that is sometimes not ready, so players never pay for nothing.
+
+```lua
+local Shrine = boz.Prefab:extend("Shrine")
+
+function Shrine:usable(player, volume)
+    if self._used_this_round then
+        return false, "Come back next round"
+    end
+    return true
+end
+
+return Shrine
 ```
 
 ### on_hit
@@ -796,10 +816,14 @@ local ZapPad = boz.Prefab:extend("ZapPad")
 ---@setting radius int 300 "Reach (cm)"
 ---@setting runs_for seconds 10 "Runs for"
 
-function ZapPad:on_use(player)
+function ZapPad:usable(player)
     if self._running then
-        return
+        return false, "Running"
     end
+    return true
+end
+
+function ZapPad:on_use(player)
     self._running = true
     local zap = boz.every(0.5, function()
         for _, zombie in ipairs(boz.zombies()) do
@@ -817,37 +841,49 @@ end
 return ZapPad
 ```
 
-`_running` starts with `_` so a save never keeps it. The volume's cost is taken even while the
-trap runs; a player who pays twice loses the second payment. To avoid that, leave **Cost** at 0
-and use `player:spend(1000)` after the `_running` check. `spend` returns true when it paid.
+`_running` starts with `_` so a save never keeps it. While it runs, `usable` refuses uses before
+the volume takes its cost, and the prompt says *Running*.
 
-### A teleport pad
+### A teleporter
 
-Walk on it and arrive somewhere else. Each pad picks its own destination.
+The editor has this built in: [Teleporter](game-prefabs.md#teleporter). Drag it in, link its
+**Destination**, and for a stop in the wormhole drag a **Wormhole** and link **Stop over at** to
+it.
 
-**Build:** a floor model and a **Trigger** volume over it, set off by **Players**. Group them.
-After adding the script, press **Reload**, and link **Destination** to any object.
+The same thing as a script of your own, to change any part of it. Give the Use volume a **Cost**;
+`usable` refuses uses while it cools, so nobody pays for nothing.
 
 ```lua
 local Pad = boz.Prefab:extend("Pad")
 
----@link destination any one "Destination"
----@setting cooldown seconds 3 "Wait between uses"
+---@link target any one "Goes to"
+---@link via any one "Stops at"
+---@setting cooldown seconds 30 "Wait between uses"
 
-function Pad:on_enter(player)
-    local target = self:links("destination")[1]
-    if not target or self._waiting then
+function Pad:usable(player)
+    if self._cooling then
+        return false, "Cooling down"
+    end
+    return true
+end
+
+function Pad:on_use(player)
+    local target = self:links("target")[1]
+    if not target then
         return
     end
-    self._waiting = true
-    player:teleport(target)
+    self._cooling = true
+    player:teleport(target, {via = self:links("via")[1]})
     boz.after(self.settings.cooldown, function()
-        self._waiting = false
+        self._cooling = false
     end)
 end
 
 return Pad
 ```
+
+`player:teleport` stands the player on the target, facing the way it faces, with the game's
+teleport flash. With `via` it stops there first and holds the player and their view still for `seconds` (2).
 
 ## When something goes wrong
 

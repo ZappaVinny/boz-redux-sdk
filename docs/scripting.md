@@ -65,7 +65,9 @@ Get one with `boz.player()`, or from a hook's `player` argument.
 | `set_god(on)`, `god()` | No damage |
 | `give_perk(name)`, `take_perk(name)`, `has_perk(name)`, `perks()` | Perks |
 | `give_weapon(name)`, `take_weapon(name)`, `weapon()` | Weapons. The new weapon goes in hand. |
-| `position()`, `teleport(place)` | Where the player is. `place` is a position or an object. |
+| `position()` | Where the player is (eye height) |
+| `teleport(place, options)` | Moves the player. On an object they stand on it, facing its way (a prefab of yours: where it is placed); a position is eye height, like `position()`. Options: `via` (an object to stop over at first, held still with their view fixed, as in the game's wormhole), `seconds` (the stop-over, 2: the game's wormhole time), `effect` (the teleport flash, true), `done(player)` (runs on arrival). |
+| `movement()`, `set_movement(on, look)` | Off holds the player where they stand. With `look` false their view is held too. |
 | `downed()`, `kill()` | Down in last stand, or killed |
 | `stance()`, `set_stance(name)` | `"standing"`, `"crouching"`, `"prone"`, `"downed"` |
 | `speed(name)`, `set_speed(name, value)` | A movement speed, like `"SprintSpeed"` |

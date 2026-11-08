@@ -28,6 +28,7 @@ boz.Debris = require("boz.objects.debris")
 boz.Volume = require("boz.objects.volume")
 boz.Zone = require("boz.objects.zone")
 boz.Sector = require("boz.objects.sector")
+boz.Teleporter = require("boz.objects.teleporter")
 boz.Player = require("boz.game.player")
 boz.Weapon = require("boz.game.weapon")
 
