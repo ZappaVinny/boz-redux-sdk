@@ -547,6 +547,11 @@ class ProjectPage(QWidget):
                        button('▶  Run in game', self.run_in_game,
                               'Installs this mod and the Developer mod into the client, '
                               'then starts the game', primary=True)]
+        self.test_button = button('Run tests', self.run_tests,
+                                  'Builds and installs the project, then plays its tests '
+                                  '(tests/*.lua; a smoke test when there are none) in the game '
+                                  'without a window, on every client build, and opens the report')
+        widgets.insert(-1 if project.kind == 'map' else len(widgets), self.test_button)
         widgets.append(coming('Export…'))
         for widget in widgets:
             self.actions.addWidget(widget)
@@ -597,6 +602,30 @@ class ProjectPage(QWidget):
             QMessageBox.information(self, 'Build warnings', '\n'.join(warnings))
         self.log_size = -1
         self.log.clear()
+
+    def run_tests(self) -> None:
+        if not self.main.settings.client:
+            QMessageBox.warning(self, 'Run tests', 'Choose the client folder first (Client page).')
+            return
+        if getattr(self, 'test_worker', None) and self.test_worker.isRunning():
+            return
+        self.test_worker = TestWorker(self.main.settings.client, str(self.project.root))
+        self.test_worker.progressed.connect(
+            lambda text: self.main.statusBar().showMessage('Tests: ' + text))
+        self.test_worker.done.connect(self.tests_done)
+        self.test_button.setEnabled(False)
+        self.test_button.setText('Testing…')
+        self.main.statusBar().showMessage('Tests: building and starting…')
+        self.test_worker.start()
+
+    def tests_done(self, summary: str, page: str) -> None:
+        self.test_button.setEnabled(True)
+        self.test_button.setText('Run tests')
+        self.main.statusBar().showMessage('Tests: ' + summary, 15000)
+        if page:
+            open_path(page)
+        else:
+            QMessageBox.warning(self, 'Run tests', summary)
 
     def save(self) -> None:
         try:
@@ -729,6 +758,27 @@ class ClientPage(QWidget):
         command = sdkhome.launcher_command(root)
         if command:
             sdkhome.start_detached(command, root)
+
+
+class TestWorker(QThread):
+    """bozkit test for one project, off the UI thread."""
+    progressed = Signal(str)
+    done = Signal(str, str)  # summary, report page ('' when nothing ran)
+
+    def __init__(self, client: str, project: str) -> None:
+        super().__init__()
+        self.client = client
+        self.project = project
+
+    def run(self) -> None:
+        from . import testing
+        try:
+            page, results = testing.run(self.client, [self.project], progress=self.progressed.emit)
+        except Exception as exc:  # shown to the user; nothing else depends on it
+            self.done.emit(f'{type(exc).__name__}: {exc}', '')
+            return
+        passed = sum(result.passed for result in results)
+        self.done.emit(f'{passed} of {len(results)} passed', str(page))
 
 
 class LibraryWorker(QThread):

@@ -311,6 +311,20 @@ def cmd_install(args) -> int:
     return 0
 
 
+def cmd_test(args) -> int:
+    from . import testing
+    split = lambda text: [item.strip() for item in (text or '').split(',') if item.strip()]
+    try:
+        page, results = testing.run(args.client, args.targets, split(args.arch), split(args.only),
+                                    args.report, args.smoke, args.coop_mix)
+    except (testing.TestError, sdk_project.ProjectError) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 1
+    passed = sum(result.passed for result in results)
+    print(f'{passed} of {len(results)} passed; report: {page}')
+    return 0 if results and passed == len(results) else 1
+
+
 def cmd_extract(args) -> int:
     try:
         sdk_project.extract_asset(args.source, args.output, args.kind)
@@ -662,6 +676,18 @@ def main(argv=None) -> int:
     install.add_argument('--profile', choices=('development', 'distribution'), default='development')
     install.add_argument('--force', action='store_true')
     install.set_defaults(func=cmd_install)
+    test = sub.add_parser('test', help='run mod tests (tests/*.lua) in the game, headless')
+    test.add_argument('targets', nargs='*',
+                      help='installed mod ids, mod folders or projects (default: every installed mod)')
+    test.add_argument('--client', required=True, help='client root with the game data')
+    test.add_argument('--arch', default='', help='builds to use, e.g. x86,x64 (default: all found)')
+    test.add_argument('--only', default='', help='test names to run (file names without .lua)')
+    test.add_argument('--report', help='report folder (default: <client>/test-report)')
+    test.add_argument('--smoke', action='store_true',
+                      help='run the built-in smoke test instead of the mods\' own tests')
+    test.add_argument('--coop-mix', action='store_true',
+                      help='co-op tests: the guest on another build than the host (32 with 64)')
+    test.set_defaults(func=cmd_test)
     extract = sub.add_parser('extract', help='extract a DZ archive or resource group with dade')
     extract.add_argument('source')
     extract.add_argument('output')

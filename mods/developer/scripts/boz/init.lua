@@ -16,6 +16,16 @@ local timers = require("boz.engine.timers")
 
 local boz = {}
 
+local version = require("boz.version")
+--- This standard library's version ("0.3.0").
+boz.VERSION = version.VERSION
+--- The client Lua API it is written for; client.api is the running client's.
+boz.CLIENT_API = version.CLIENT_API
+if type(client) ~= "table" or (client.api or 0) ~= boz.CLIENT_API then
+    log("BOZ library " .. boz.VERSION .. " is written for BOZ Redux API " .. boz.CLIENT_API .. ", this client has "
+        .. tostring(type(client) == "table" and client.api or "an older one") .. "; some things may not work")
+end
+
 boz.class = require("boz.class")
 boz.Object = require("boz.objects.object")
 boz.Prefab = require("boz.objects.prefab")

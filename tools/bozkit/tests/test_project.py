@@ -92,6 +92,9 @@ class ProjectTests(unittest.TestCase):
         self.assertNotIn('maps =', project._mod_manifest(loaded))
         level = dataclasses.replace(loaded, kind='map', map_name='my_map')
         self.assertIn('maps = ["my_map"]', project._mod_manifest(level))
+        library = project.standard_library_version()
+        manifest = project._mod_manifest(level)
+        self.assertIn(f'[sdk]\nboz = "{library["VERSION"]}"\nclient_api = {library["CLIENT_API"]}', manifest)
 
     def test_distribution_warns_but_allows_game_derived_assets(self) -> None:
         loaded = self.make_project()

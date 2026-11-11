@@ -25,7 +25,11 @@ submodule (boz-redux-gamedef: symbols, reflection, events, console).
   docs are written by hand (no generated standard-library page). Builds ship the SDK's copy; the
   Developer mod keeps one (`python3 tools/stdlib/sync.py`).
 - `mods/developer`: the reference mod (console overlay, cheats, noclip). Linked into the client's
-  `mods/` for testing.
+  `mods/` for testing. Its `tests/` (boot, touch, coop) are the BOZ Test suite.
+- BOZ Test: `python3 -m bozkit test [mods|folders|projects] --client ../boz-redux` (`bozkit/testing.py`)
+  runs `tests/*.lua` (or a built-in smoke test) headless on every client build found (x86, x64,
+  x64-base), co-op as two clients, and writes `<client>/test-report/index.html`. Run it before
+  committing anything that touches the Lua API or game behaviour.
 - `docs/`: a copy of the website's docs (`boz-redux-site/docs` is the master), written by hand for
   a new modder. Each file's `#` title is a page of the site; `##`/`###` headings split it. `docs/README.md` is the introduction and page list. Generated pages and their
   generators are listed in `docs/contributing.md`. `docs/internal/` is gitignored notes.

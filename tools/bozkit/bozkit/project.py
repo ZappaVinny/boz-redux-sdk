@@ -386,8 +386,11 @@ def _mod_manifest(project: Project) -> str:
     ]
     if project.kind == 'map':
         lines.append(f'maps = [{_toml_string(project.map_name)}]')
+    library = standard_library_version()
+    lines.extend(['', '[sdk]', f'boz = {_toml_string(library["VERSION"])}',
+                  f'client_api = {library["CLIENT_API"]}', f'project_schema = {PROJECT_SCHEMA}'])
     if project.dependencies:
-        lines.extend(['', '[sdk]', f'project_schema = {PROJECT_SCHEMA}', '', '[[sdk.dependencies]]'])
+        lines.extend(['', '[[sdk.dependencies]]'])
         dependency_lines: list[str] = []
         for index, dep in enumerate(project.dependencies):
             if index:
@@ -412,6 +415,15 @@ def _copy_tree(source: Path, destination: Path, skip: set | frozenset = frozense
             target = destination / item.relative_to(source)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(item, target)
+
+
+def standard_library_version() -> dict:
+    """The standard library's VERSION and CLIENT_API, from lib/boz/version.lua."""
+    text = (standard_library_path() / 'version.lua').read_text(encoding='utf-8')
+    found = re.search(r'VERSION\s*=\s*"([^"]+)"\s*,\s*CLIENT_API\s*=\s*(\d+)', text)
+    if not found:
+        raise ProjectError('lib/boz/version.lua: no VERSION and CLIENT_API')
+    return {'VERSION': found.group(1), 'CLIENT_API': int(found.group(2))}
 
 
 def standard_library_path() -> Path:
