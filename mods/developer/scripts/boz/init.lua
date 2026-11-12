@@ -86,7 +86,7 @@ local SYSTEMS = {audio = "boz.systems.audio", camera = "boz.systems.camera",
                  pickups = "boz.game.pickups", rounds = "boz.game.rounds",
                  stats = "boz.game.stats", fly = "boz.game.fly", deadops = "boz.game.deadops",
                  weapons = "boz.engine.weapons", map = "boz.engine.map",
-                 sectors = "boz.engine.sectors"}
+                 sectors = "boz.engine.sectors", online = "boz.systems.online"}
 
 return setmetatable(boz, {__index = function(_, key)
     local path = SYSTEMS[key]

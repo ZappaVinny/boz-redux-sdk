@@ -19,3 +19,6 @@ CLAUDE.local.md
 
 # Map edits saved into the reference mods from Blender are game data: never commit them.
 mods/*/assets/
+
+# The Online mod (online server picker) is kept local, not published.
+mods/online/

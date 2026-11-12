@@ -17,7 +17,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / 'lib' / 'boz'
-MODS = [ROOT / 'mods' / 'developer']
+# Local mods (gitignored, e.g. mods/online) are synced when they are present.
+MODS = [ROOT / 'mods' / 'developer', ROOT / 'mods' / 'online']
 GENERATED_PER_MOD = {'world_data.lua'}
 
 
@@ -51,7 +52,7 @@ def main() -> int:
     parser.add_argument('--check', action='store_true', help='only report differences')
     args = parser.parse_args()
     status = 0
-    for mod in MODS:
+    for mod in (mod for mod in MODS if mod.is_dir()):
         if args.check:
             found = differences(mod)
             for line in found:
