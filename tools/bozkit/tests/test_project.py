@@ -96,6 +96,25 @@ class ProjectTests(unittest.TestCase):
         manifest = project._mod_manifest(level)
         self.assertIn(f'[sdk]\nboz = "{library["VERSION"]}"\nclient_api = {library["CLIENT_API"]}', manifest)
 
+    def test_map_mods_describe_their_map_for_the_launcher(self) -> None:
+        import tomllib
+        level = dataclasses.replace(self.make_project(), kind='map', map_name='my_map')
+        data = tomllib.loads(project._mod_manifest(level))
+        self.assertEqual(data['map'], [{'id': 'my_map', 'title': 'Example Mod', 'description': ''}])
+        self.assertNotIn('preview', data)
+        source = level.root / 'source'
+        source.mkdir(exist_ok=True)
+        (source / 'map_picture.jpg').write_bytes(b'jpeg')
+        (source / 'game.json').write_text(json.dumps({'level': {'map_picture': 'source/map_picture.jpg'}}),
+                                          encoding='utf-8')
+        data = tomllib.loads(project._mod_manifest(level))
+        self.assertEqual((data['preview'], data['map'][0]['picture']), ('map.jpg', 'map.jpg'))
+        self.assertEqual(data['sdk']['client_api'], project.standard_library_version()['CLIENT_API'])
+        (source / 'game.json').write_text(json.dumps({'level': {'map_picture': '../outside.png'}}),
+                                          encoding='utf-8')
+        with self.assertRaises(project.ProjectError):
+            project._mod_manifest(level)
+
     def test_distribution_warns_but_allows_game_derived_assets(self) -> None:
         loaded = self.make_project()
         asset = loaded.assets / 'edited.group.bin'

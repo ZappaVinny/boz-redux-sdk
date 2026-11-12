@@ -78,11 +78,15 @@ local function fail(text)
     add_line(text, "error")
 end
 
+-- Phones (client.touch): the window fills the screen and the command line sits above the log,
+-- clear of the on-screen keyboard. Clients before 0.4.0 have no client table: the PC layout.
+local TOUCH = type(client) == "table" and client.touch == true
+
 local function set_open(open)
     state.open = open
     overlay.capture(open)
     if open then
-        state.focus_input = true
+        state.focus_input = not TOUCH  -- a phone opens without its keyboard
         state.values_age = math.huge
     end
 end
@@ -330,8 +334,29 @@ local function set_var(name, value)
     state.values[name] = result or state.values[name]
 end
 
+local function command_line()
+    local submitted, text = ui.input("##command", state.input, {
+        submit = true,
+        history = state.history,
+        hint = "command or variable  (help, find <text>, clear)",
+        width = -1,
+        focus = state.focus_input,
+    })
+    state.focus_input = false
+    state.input = text
+    if submitted then
+        run(text)
+        state.input = ""
+        state.focus_input = not TOUCH  -- a phone keeps its keyboard closed after a command
+        state.scroll = true
+    end
+end
+
 local function console_tab()
-    ui.child("log", 0, -40, function()
+    if TOUCH then
+        command_line()
+    end
+    ui.child("log", 0, TOUCH and 0 or -40, function()
         for _, line in ipairs(state.lines) do
             local color = COLORS[line.kind]
             if color then
@@ -346,20 +371,8 @@ local function console_tab()
         end
         state.at_bottom = ui.at_bottom()
     end)
-    local submitted, text = ui.input("##command", state.input, {
-        submit = true,
-        history = state.history,
-        hint = "command or variable  (help, find <text>, clear)",
-        width = -1,
-        focus = state.focus_input,
-    })
-    state.focus_input = false
-    state.input = text
-    if submitted then
-        run(text)
-        state.input = ""
-        state.focus_input = true
-        state.scroll = true
+    if not TOUCH then
+        command_line()
     end
 end
 
@@ -383,7 +396,9 @@ local function cheats_tab(dt)
     ui.separator("Cheats (console variables)")
     for _, cheat in ipairs(CHEATS) do
         local changed, on = ui.checkbox(cheat[2] .. "##" .. cheat[1], value_of(cheat[1]) == "true")
-        ui.tooltip(cheat[1])
+        if not TOUCH then
+            ui.tooltip(cheat[1])
+        end
         if changed then
             set_var(cheat[1], on and "true" or "false")
         end
@@ -432,7 +447,8 @@ local function cheats_tab(dt)
             state.fly_text = nil
         end
     end
-    ui.text_disabled("Noclip: move keys fly where you look, Space up, Left Ctrl down.")
+    ui.text_disabled(TOUCH and "Noclip: the move stick flies where you look."
+        or "Noclip: move keys fly where you look, Space up, Left Ctrl down.")
 
     ui.text_disabled("Zombies, rounds, weapons and the map: the Game tab.")
 end
@@ -756,9 +772,11 @@ local function variables_tab(dt)
 end
 
 local function commands_tab()
-    local _, filter = ui.input("##cmdfilter", state.cmd_filter, {hint = "filter commands", width = 300})
+    local _, filter = ui.input("##cmdfilter", state.cmd_filter, {hint = "filter commands", width = TOUCH and -1 or 300})
     state.cmd_filter = filter
-    ui.same_line()
+    if not TOUCH then
+        ui.same_line()
+    end
     local _, args = ui.input("##cmdargs", state.cmd_args, {hint = "arguments for Run", width = -1})
     state.cmd_args = args
     ui.text_disabled("Commands belong to game systems and only answer while that system exists " ..
@@ -785,13 +803,16 @@ end
 -- A mistake inside a tab shows in the log instead of switching the window off (the runtime turns
 -- off handlers that raise errors). Repeated errors are reported once.
 local last_error
+-- A phone gets the whole screen (the size is cut to it), fixed in place.
+local WINDOW = TOUCH and {x = 0, y = 0, w = 4000, h = 4000, closable = true, no_move = true,
+                          no_resize = true, no_collapse = true}
+    or {x = 40, y = 40, w = 980, h = 580, closable = true}
 
 events.on("frame", function(dt)
     if not state.open then
         return
     end
-    local ok, still_open = pcall(ui.window, "Developer console",
-        {x = 40, y = 40, w = 980, h = 580, closable = true},
+    local ok, still_open = pcall(ui.window, "Developer console", WINDOW,
         function()
             ui.tab_bar("developer", function()
                 ui.tab("Console", console_tab)

@@ -1,6 +1,7 @@
 """The Game tab: the map's rules (bozkit.game, source/game.json).
 
-- Level info: the name players see, the loading screen picture, the starting weapon, power on at
+- Level info: the name players see, the loading screen picture, the map picture for the
+  launcher's PLAY screen, the starting weapon, power on at
   the start.
 - Rounds: each game's rounds (single player easy/normal/hard, co-op 2-4 players), the last one
   repeating and growing; a graph of zombies and health by round.
@@ -480,6 +481,7 @@ def load_level(context) -> None:
         scene.boz_game_display_name = manifest.get("mod", {}).get("name", "")
         scene.boz_game_power_on = bool((data.get("level") or {}).get("power_on"))
         scene.boz_game_loading = (data.get("level") or {}).get("loading_image", "")
+        scene.boz_game_map_picture = (data.get("level") or {}).get("map_picture", "")
         scene.boz_game_behaves_like = (data.get("level") or {}).get("behaves_like", "") or "none"
     finally:
         _state["loading"] = False
@@ -810,6 +812,95 @@ class BOZ_OT_game_loading_pick(Operator):
         return {"FINISHED"}
 
 
+class BOZ_OT_game_picture_pick(Operator):
+    bl_idname = "boz.game_picture_pick"
+    bl_label = "Choose the map picture"
+    bl_description = ("The map's picture on the client launcher's PLAY screen (PNG or JPG, "
+                      "16:9 looks best)")
+
+    filepath: StringProperty(subtype="FILE_PATH")
+    filter_glob: StringProperty(default="*.png;*.jpg;*.jpeg", options={"HIDDEN"})
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        root = link.project_root()
+        source = Path(self.filepath)
+        if root is None or not source.is_file():
+            return {"CANCELLED"}
+        _set_map_picture(context, root, source)
+        return {"FINISHED"}
+
+
+def _set_map_picture(context, root: Path, source: Path) -> None:
+    target = root / "source" / f"map_picture{source.suffix.lower()}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    for old in target.parent.glob("map_picture.*"):
+        if old.resolve() != source.resolve():
+            old.unlink()
+    if source.resolve() != target.resolve():
+        shutil.copyfile(source, target)
+    data = load()
+    data.setdefault("level", {})["map_picture"] = target.relative_to(root).as_posix()
+    save(data)
+    load_level(context)
+
+
+class BOZ_OT_game_picture_capture(Operator):
+    bl_idname = "boz.game_picture_capture"
+    bl_label = "Capture the 3D view"
+    bl_description = ("Makes the map picture from the 3D view as it looks now (1280 x 720): "
+                      "frame the shot first")
+
+    def execute(self, context):
+        root = link.project_root()
+        area = next((a for a in context.screen.areas if a.type == "VIEW_3D"), None)
+        region = area and next((r for r in area.regions if r.type == "WINDOW"), None)
+        if root is None or region is None:
+            self.report({"ERROR"}, "Open a 3D view to capture")
+            return {"CANCELLED"}
+        scene = context.scene
+        render = scene.render
+        saved = (render.filepath, render.resolution_x, render.resolution_y,
+                 render.resolution_percentage, render.image_settings.file_format)
+        shot = root / "source" / "map_capture.png"
+        shot.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            render.filepath = str(shot)
+            render.resolution_x, render.resolution_y, render.resolution_percentage = 1280, 720, 100
+            render.image_settings.file_format = "PNG"
+            with context.temp_override(area=area, region=region):
+                bpy.ops.render.opengl(write_still=True, view_context=True)
+        finally:
+            (render.filepath, render.resolution_x, render.resolution_y,
+             render.resolution_percentage, render.image_settings.file_format) = saved
+        if not shot.is_file():
+            self.report({"ERROR"}, "The 3D view could not be captured")
+            return {"CANCELLED"}
+        _set_map_picture(context, root, shot)
+        shot.unlink(missing_ok=True)
+        self.report({"INFO"}, "Map picture captured")
+        return {"FINISHED"}
+
+
+class BOZ_OT_game_picture_clear(Operator):
+    bl_idname = "boz.game_picture_clear"
+    bl_label = "No map picture"
+    bl_description = "The PLAY screen shows the map's name instead of a picture"
+
+    def execute(self, context):
+        root = link.project_root()
+        data = load()
+        image = (data.get("level") or {}).pop("map_picture", None)
+        save(data)
+        if root is not None and image:
+            (root / image).unlink(missing_ok=True)
+        load_level(context)
+        return {"FINISHED"}
+
+
 class BOZ_OT_game_loading_clear(Operator):
     bl_idname = "boz.game_loading_clear"
     bl_label = "Use the base level's"
@@ -908,6 +999,13 @@ class BOZ_PT_game_level(_GamePanel, Panel):
         row.operator(BOZ_OT_game_loading_pick.bl_idname, text="", icon="FILEBROWSER")
         if scene.boz_game_loading:
             row.operator(BOZ_OT_game_loading_clear.bl_idname, text="", icon="X")
+        row = layout.row(align=True)
+        row.label(text="Map picture: " + (scene.boz_game_map_picture or "none (PLAY shows the name)"),
+                  icon="IMAGE_REFERENCE")
+        row.operator(BOZ_OT_game_picture_capture.bl_idname, text="", icon="RESTRICT_RENDER_OFF")
+        row.operator(BOZ_OT_game_picture_pick.bl_idname, text="", icon="FILEBROWSER")
+        if scene.boz_game_map_picture:
+            row.operator(BOZ_OT_game_picture_clear.bl_idname, text="", icon="X")
         from . import weapons_tab
         name, reserve = weapons_tab.start_weapon()
         layout.label(text=f"Starting weapon: {name} ({reserve} spare; Weapons tab)", icon="MOD_PHYSICS")
@@ -1062,6 +1160,7 @@ CLASSES = (BOZ_GameWave, BOZ_GameRound, BOZ_GameLook, BOZ_GameHook, BOZ_GameEcon
            BOZ_OT_game_refresh, BOZ_OT_game_round_add, BOZ_OT_game_round_remove,
            BOZ_OT_game_rounds_copy, BOZ_OT_game_rounds_reset, BOZ_OT_game_special_add,
            BOZ_OT_game_special_remove, BOZ_OT_game_loading_pick, BOZ_OT_game_loading_clear,
+           BOZ_OT_game_picture_pick, BOZ_OT_game_picture_capture, BOZ_OT_game_picture_clear,
            BOZ_OT_game_hook, BOZ_UL_game_rounds, BOZ_UL_game_looks, BOZ_UL_game_hooks,
            BOZ_PT_game_level, BOZ_PT_game_rounds, BOZ_PT_game_specials, BOZ_PT_game_zombies,
            BOZ_PT_game_economy, BOZ_PT_game_hooks)
@@ -1094,6 +1193,8 @@ SCENE_PROPS = {
         update=_display_name_changed),
     "boz_game_loading": lambda: StringProperty(name="Loading screen",
                                                description="The picture shown while the map loads"),
+    "boz_game_map_picture": lambda: StringProperty(
+        name="Map picture", description="The map's picture on the client launcher's PLAY screen"),
     "boz_game_behaves_like": lambda: EnumProperty(
         name="Behaves like", update=_level_changed,
         items=[("none" if k == "" else k, v.split(":")[0], v) for k, v in game.BEHAVES_LIKE.items()],

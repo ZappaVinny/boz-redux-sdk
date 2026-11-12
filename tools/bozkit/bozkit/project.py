@@ -377,6 +377,25 @@ def _toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def map_picture(project: Project) -> Path | None:
+    """The map's picture for the client launcher's PLAY cards (Game tab: Level info), or None."""
+    if project.kind != 'map':
+        return None
+    try:
+        data = json.loads((project.root / 'source' / 'game.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    image = ((data.get('level') or {}).get('map_picture') or '') if isinstance(data, dict) else ''
+    if not image:
+        return None
+    path = (project.root / _safe_relative(image, 'level.map_picture')).resolve()
+    return path if path.is_file() else None
+
+
+def _picture_name(picture: Path) -> str:
+    return 'map' + picture.suffix.lower()
+
+
 def _mod_manifest(project: Project) -> str:
     mod = project.mod
     lines = [
@@ -385,7 +404,16 @@ def _mod_manifest(project: Project) -> str:
         f'game = {_toml_string(mod.game)}', f'description = {_toml_string(mod.description)}',
     ]
     if project.kind == 'map':
+        picture = map_picture(project)
         lines.append(f'maps = [{_toml_string(project.map_name)}]')
+        if picture is not None:
+            lines.append(f'preview = {_toml_string(_picture_name(picture))}')
+        # How the launcher's PLAY screen shows the map.
+        lines.extend(['', '[[map]]', f'id = {_toml_string(project.map_name)}',
+                      f'title = {_toml_string(mod.name)}',
+                      f'description = {_toml_string(mod.description)}'])
+        if picture is not None:
+            lines.append(f'picture = {_toml_string(_picture_name(picture))}')
     library = standard_library_version()
     lines.extend(['', '[sdk]', f'boz = {_toml_string(library["VERSION"])}',
                   f'client_api = {library["CLIENT_API"]}', f'project_schema = {PROJECT_SCHEMA}'])
@@ -607,6 +635,9 @@ def build_project(project: Project, output: str | Path | None = None,
         shutil.rmtree(target)
     target.mkdir(parents=True)
     (target / 'mod.toml').write_text(_mod_manifest(project), encoding='utf-8', newline='\n')
+    picture = map_picture(project)
+    if picture is not None:
+        shutil.copyfile(picture, target / _picture_name(picture))
     _copy_tree(project.scripts, target / 'scripts')
     # A map's Assets tab keeps each asset's high-quality source in assets/<name>/: the build
     # ships the game versions it compiles, never those sources.
