@@ -11,6 +11,7 @@
 local Object = require("boz.objects.object")
 local engine = require("boz.engine.objects")
 
+---@class boz.Prefab : boz.Object
 local Prefab = Object:extend("Prefab")
 
 --- Sets up the prefab called name (entry: its parts, members and settings from the map).
@@ -34,6 +35,15 @@ local function each(self, fn)
     for _, name in ipairs(self._members) do
         fn(engine.get(name))
     end
+end
+
+-- A prefab of yours moves around the spot it stands on in the editor, with every part; a game
+-- prefab moves as its own entity (its parts follow it).
+function Prefab:_motion()
+    if #self._members == 0 then
+        return nil, nil
+    end
+    return self._entry.place, self._members
 end
 
 --- Whether a player may use its Use volume now (before the cost is taken). Return false and a

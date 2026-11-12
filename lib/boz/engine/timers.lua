@@ -60,8 +60,12 @@ local function start()
     events.on("frame", run)
 end
 
-local function add(seconds, interval, fn)
-    assert(type(fn) == "function", "boz timers need a function")
+local function add(seconds, interval, fn, what)
+    local check = require("boz.engine.check")
+    seconds = check.number(seconds, what, 2)
+    if not seconds or not check.fn(fn, what, 2) then
+        return setmetatable({cancelled = true}, Timer)   -- nothing runs; :cancel() still works
+    end
     start()
     local timer = setmetatable({due = clock.now + seconds, interval = interval, fn = fn}, Timer)
     table.insert(clock.list, timer)
@@ -72,13 +76,17 @@ start()
 
 --- Runs fn() once, `seconds` of game time from now. Returns a timer with :cancel().
 function timers.after(seconds, fn)
-    return add(seconds, nil, fn)
+    return add(seconds, nil, fn, "boz.after")
 end
 
 --- Runs fn() every `seconds` of game time until the timer is cancelled. Returns the timer.
 function timers.every(seconds, fn)
-    assert(seconds > 0, "boz timers need a positive interval")
-    return add(seconds, seconds, fn)
+    local n = tonumber(seconds)
+    if n and n <= 0 then
+        require("boz.engine.check").warn("boz.every needs more than 0 seconds, got " .. n, 2)
+        return setmetatable({cancelled = true}, Timer)
+    end
+    return add(seconds, seconds, fn, "boz.every")
 end
 
 --- Seconds of game time since the first timer was made.

@@ -10,7 +10,7 @@ local network = {}
 
 local core = require("boz.engine.core")
 
-local HOST = 0x54
+local HOST = core.offset("CGameNetwork", "isHost")
 
 local function instance()
     return core.singleton("CGameNetwork")

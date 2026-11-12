@@ -63,7 +63,11 @@ VOLUME_ITEMS = [("trigger", "Trigger", "Sends \"enter\" and \"exit\" when player
                  "sees it through a portal", 3),
                 ("zone", "Zone", "An area: its zombie spawns wake when a door that opens it opens",
                  4),
-                ("portal", "Portal", "A doorway between two sectors: the game sees through it", 5)]
+                ("portal", "Portal", "A doorway between two sectors: the game sees through it", 5),
+                ("lure", "Lure point", "Zombies go here while a script runs it "
+                 "(boz.get(\"Name\"):start()), like a monkey bomb pulls them", 6)]
+LURE_ARRIVE_ITEMS = [("wait", "Gather and wait", "They stop near it and wait"),
+                     ("attack", "Attack it", "They swing at it: scripts hear \"hit\" each time")]
 WHO_ITEMS = [("players", "Players", ""), ("zombies", "Zombies", ""),
              ("anyone", "Anyone", "Players and zombies")]
 SHAPE_ITEMS = [("box", "Box", "Collide with its bounds (fast)"),
@@ -131,10 +135,12 @@ class BOZ_ObjectSettings(PropertyGroup):
     stops_bullets: BoolProperty(name="Stops bullets", get=_get_bullets, set=_set_bullets,
                                 description="Shots hit it and leave marks. Off: bullets pass "
                                 "through")
+    # Older projects' "Scripts can switch it" (no longer shown: the build finds the objects
+    # scripts name); kept so those projects build as before.
     switchable: BoolProperty(name="Scripts can switch it", default=False,
-                             description="A script (another object's too) can show, hide and "
-                             "switch its walking and bullets while the game runs. Objects with a "
-                             "script of their own always can")
+                             description="Older projects: kept changeable during play. New "
+                             "projects need nothing: the build keeps every object a script names "
+                             "changeable")
     blocks_walking: BoolProperty(name="Blocks walking", default=True,
                                  description="Players and zombies cannot walk through it. Off: "
                                  "they walk straight through")
@@ -185,6 +191,18 @@ class BOZ_ObjectSettings(PropertyGroup):
     starting: BoolProperty(name="Starting zone", default=False,
                            description="Players start in this zone: its spawns work from the "
                            "start (one zone per map)")
+    # A Lure point's settings (bozkit.world LURE_SETTINGS): what start() does without options.
+    lure_zombies: IntProperty(name="Zombies", default=0, min=0, max=100,
+                              description="How many it pulls, the nearest first (0: all)")
+    lure_radius: FloatProperty(name="Reach (cm)", default=0.0, min=0.0, max=100000.0,
+                               description="Only zombies this close come (0: any distance)")
+    lure_arrive: EnumProperty(name="When they get there", items=LURE_ARRIVE_ITEMS, default="wait")
+    lure_seconds: FloatProperty(name="Seconds", default=0.0, min=0.0, max=3600.0,
+                                description="How long it pulls once started (0: until a script "
+                                "stops it)")
+    lure_enabled: BoolProperty(name="Switched on", default=True,
+                               description="Off, start() does nothing until a script switches it "
+                               "on (set_enabled)")
 
 
 class BOZ_SceneSettings(PropertyGroup):

@@ -187,6 +187,42 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(entities['Vault_1.Jug'].settings, {'CPerk.m_perkSinglePCost': 2500})
         self.assertEqual([p.name for p in layout.props], ['crate'])
 
+    def test_objects_scripts_name_stay_changeable(self):
+        # Only what a script can name is kept apart from the level; the rest is baked (light
+        # maps). A prefab's name reaches its parts, "Lamp_" .. i reaches Lamp_1, Lamp_2.
+        built = world.World('kino', inherit=True, meshes=[crate_mesh()])
+        built.models = [world.Model(name, game=GAME_MODEL) for name in
+                        ('Plain', 'Secret', 'Lamp_1', 'Lamp_2', 'Named_In_Setting')]
+        holder = world.Model('Holder', game=GAME_MODEL)
+        holder.properties = {'target': 'Named_In_Setting'}
+        built.models.append(holder)
+        refs = world.world_references(built, ['boz.get("secret"):hide()',
+                                              "for i = 1, 2 do boz.get('Lamp_' .. i):show() end"])
+        layout = world.lower(built, refs)
+        dynamic = {world.script_of(i)['name']: world.script_of(i)['dynamic'] for i in layout.instances}
+        self.assertEqual(dynamic, {'Plain': False, 'Secret': True, 'Lamp_1': True, 'Lamp_2': True,
+                                   'Named_In_Setting': True, 'Holder': False})
+        blockers = {world.script_of(i)['name']: world.script_of(i)['blocks'] for i in layout.instances}
+        self.assertEqual(blockers['Secret'], built.models[1].collision in ('block', 'solid'))
+        self.assertFalse(blockers['Plain'])
+        self.assertTrue(world.script_references(['boz.get("Vault_1")']).reaches('Vault_1.Door'))
+        self.assertFalse(world.script_references(['boz.get("Vault")']).reaches('Vault_1.Door'))
+
+    def test_lures(self):
+        # A Lure point compiles to a lure entity; every map gets the pool scripts point anywhere;
+        # scripts see a boz.Lure with the editor's settings over the defaults.
+        built = world.World('kino', inherit=True)
+        built.volumes = [world.Volume('Bait', 'lure', properties={'arrive': 'attack', 'zombies': 3})]
+        self.assertEqual(world.validate(built), [])
+        layout = world.lower(built)
+        lures = [world.script_of(e)['name'] for e in layout.entities if e.source == world.LURE_SOURCE]
+        self.assertEqual(lures, ['Bait'] + [world.LURE_POOL_NAME.format(i)
+                                            for i in range(1, world.LURE_POOL + 1)])
+        (entry,) = [d for d in world.describe(built) if d['name'] == 'Bait']
+        self.assertEqual(entry['class'], 'Lure')
+        self.assertEqual({k: v['value'] for k, v in entry['settings'].items()},
+                         {**world.LURE_SETTINGS, 'arrive': 'attack', 'zombies': 3})
+
     def test_describe_lists_scripts_and_volumes(self):
         built = world.World('kino', inherit=True, meshes=[crate_mesh()])
         built.prefabs = [vault()]

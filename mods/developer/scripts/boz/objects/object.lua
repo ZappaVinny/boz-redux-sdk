@@ -8,6 +8,7 @@
 local Class = require("boz.class")
 local engine = require("boz.engine.objects")
 
+---@class boz.Object
 local Object = Class:extend("Object")
 
 -- event name -> {lower object name -> {{fn, level}, ...}}: who listens (Object:on). Listeners a
@@ -69,6 +70,108 @@ function Object:stops_bullets()
     return stops and self:visible()
 end
 
+-- Moving and turning (boz.engine.motion). A prefab of yours moves around where it stands in
+-- the editor, with all its parts; anything else around itself.
+local motion = require("boz.engine.motion")
+
+-- What motion needs for it: the place a prefab of yours stands on and its parts (Prefab).
+function Object:_motion() return nil, nil end
+
+local function point(value, what)
+    if type(value) == "table" and type(value.position) == "function" then
+        value = value:position()
+    end
+    local p = motion.vec(value)
+    if not p then
+        error(what .. " needs a position {x =, y =, z =} or an object", 3)
+    end
+    return p
+end
+
+local function glide(self, target, options)
+    options = options or {}
+    if type(options) ~= "table" then
+        error("options must be a table such as {seconds = 2}", 3)
+    end
+    local done = options.done
+    target.seconds, target.ride = options.seconds, options.ride
+    target.done = done and function() done(self) end or nil
+    local origin, members = self:_motion()
+    if not motion.move(self.name, target, origin, members) then
+        log("boz: " .. self.name .. " cannot move: it is not in the level (or has nothing to move)")
+    end
+    return self
+end
+
+--- Moves it to a position or another object's, at once or over options.seconds. options:
+--- seconds, rotation (degrees about the vertical axis or a quaternion), ride (players standing
+--- on it ride along; default true), done(object) when it arrives. Returns the object.
+function Object:move_to(position, options)
+    local rotation = options and options.rotation
+    return glide(self, {position = point(position, "move_to"), rotation = rotation}, options)
+end
+
+--- Moves it by an offset {x, y, z} (centimetres; y is up), like move_to.
+function Object:move_by(offset, options)
+    local d = point(offset, "move_by")
+    local origin, members = self:_motion()
+    local place = motion.place(self.name, origin, members)
+    if not place then
+        return self
+    end
+    local p = place.position
+    return glide(self, {position = {x = p.x + d.x, y = p.y + d.y, z = p.z + d.z},
+                        rotation = options and options.rotation}, options)
+end
+
+--- Turns it to a rotation (degrees about the vertical axis, or a quaternion), like move_to.
+function Object:turn_to(rotation, options)
+    if motion.rotation(rotation) == nil then
+        error("turn_to needs degrees or a quaternion {x, y, z, w}", 2)
+    end
+    return glide(self, {rotation = rotation}, options)
+end
+
+--- Turns it by degrees about the vertical axis (positive turns left seen from above), like
+--- move_to.
+function Object:turn_by(degrees, options)
+    if type(degrees) ~= "number" then
+        error("turn_by needs a number of degrees", 2)
+    end
+    local origin, members = self:_motion()
+    local place = motion.place(self.name, origin, members)
+    if not place then
+        return self
+    end
+    local q, r = motion.rotation(degrees), place.rotation
+    local turned = {x = q.w * r.x + q.x * r.w + q.y * r.z - q.z * r.y,
+                    y = q.w * r.y - q.x * r.z + q.y * r.w + q.z * r.x,
+                    z = q.w * r.z + q.x * r.y - q.y * r.x + q.z * r.w,
+                    w = q.w * r.w - q.x * r.x - q.y * r.y - q.z * r.z}
+    return glide(self, {rotation = turned}, options)
+end
+
+--- Puts it at a position at once (move_to without seconds).
+function Object:set_position(position)
+    return self:move_to(position)
+end
+
+--- Turns it at once (turn_to without seconds).
+function Object:set_rotation(rotation)
+    return self:turn_to(rotation)
+end
+
+--- True while it glides (move_to and friends with seconds).
+function Object:moving()
+    return motion.moving(self.name)
+end
+
+--- Stops a glide where it is (its done is not called). Returns the object.
+function Object:stop()
+    motion.stop(self.name)
+    return self
+end
+
 --- Its name in the prefab it is part of ("Door" of "Vault.Door"), or nil.
 function Object:part_name()
     return self.name:match("%.([^.]+)$")
@@ -126,6 +229,10 @@ end
 
 --- Calls fn(object, ...) when the event happens to it ("use", "hit", "opened", ...).
 function Object:on(event, fn)
+    local check = require("boz.engine.check")
+    if not check.name(event, self.name .. ":on") or not check.fn(fn, self.name .. ":on") then
+        return fn
+    end
     local by_object = listeners[event] or {}
     listeners[event] = by_object
     local key = string.lower(self.name)

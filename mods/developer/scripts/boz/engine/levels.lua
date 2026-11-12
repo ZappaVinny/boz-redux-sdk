@@ -9,7 +9,7 @@ local levels = {}
 local AUTOSTART_KEY = "autostart_level"
 local AUTOSTART_VARS_KEY = "autostart_vars"   -- "Name=value;Name=value", set before the level starts
 local AUTOSTART_MODE_KEY = "autostart_mode"   -- "coop": the Wi-Fi co-op room for the level
-local LEVEL_NAME_OFFSET = 0x55                -- CLevelManager: the level the next match plays
+local LEVEL_NAME_OFFSET = require("boz.engine.core").offset("CLevelManager", "levelName")
 local SETTLE_FRAMES = 60
 
 local pending = nil      -- level waiting for the front end

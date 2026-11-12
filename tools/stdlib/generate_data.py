@@ -75,6 +75,13 @@ def symbols() -> str:
     for g in globals_:
         if g['name'].endswith('::s_table'):
             lines.append(f'        {g["name"][:-len("::s_table")]} = 0x{g["offset"]:x},')
+    # Struct fields the standard library reads (boz.core.offset): [struct] = {[field] = offset}
+    # and size, when known.
+    lines += ['    },', '    structs = {']
+    for st in sorted(data.get('struct', []), key=lambda st: st['name']):
+        fields = ', '.join(f'{f["name"]} = 0x{f["offset"]:x}' for f in st.get('field', []))
+        size = f', _size = 0x{st["size"]:x}' if st.get('size') else ''
+        lines.append(f'        [{lua_string(st["name"])}] = {{{fields}{size}}},')
     lines += ['    },', '}']
     return '\n'.join(lines) + '\n'
 

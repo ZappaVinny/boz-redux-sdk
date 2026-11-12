@@ -86,6 +86,19 @@ def map_volume_checks(anchor, door):
     check(box.hide_get() and sector.hide_get(), "Volumes off hides every volume")
     scene.boz_show_volumes = True
     check(not box.hide_get() and not sector.hide_get(), "and Volumes on brings them back")
+    # A Lure point: its settings are panel fields, written as the volume's settings.
+    bait = convert.volume_object(world.Volume("Bait", "lure", size=(60.0, 60.0, 60.0),
+                                              properties={"arrive": "attack", "zombies": 2}), scene)
+    bait.location = (anchor[0] + 2400.0, anchor[1], anchor[2] + 30.0)
+    check(bait.boz.volume == "lure" and bait.boz.lure_arrive == "attack" and bait.boz.lure_zombies == 2
+          and bait.boz.lure_enabled, "a Lure point reads its settings into the panel")
+    bait.boz.lure_seconds = 12.5
+    bait.boz.lure_enabled = False
+    lure = next(v for v in link.scene_to_world(scene, []).volumes if v.name == "Bait")
+    check(lure.kind_of == "lure" and lure.properties.get("arrive") == "attack"
+          and lure.properties.get("seconds") == 12.5 and lure.properties.get("enabled") is False
+          and lure.properties.get("zombies") == 2,
+          f"a Lure point is written with its settings ({lure.properties})")
 
 
 def build_and_compile(label):

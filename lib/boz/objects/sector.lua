@@ -11,6 +11,7 @@ local Object = require("boz.objects.object")
 local boxes = require("boz.objects.boxes")
 local engine = require("boz.engine.sectors")
 
+---@class boz.Sector : boz.Object
 local Sector = Object:extend("Sector")
 
 function Sector:init(name, entry)

@@ -12,6 +12,7 @@
 
 local Door = require("boz.objects.native").Door
 
+---@class boz.Debris : boz.Door
 local Debris = Door:extend("Debris")
 
 --- Bought at its Use volume (the volume took the cost): opens.

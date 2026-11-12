@@ -18,6 +18,7 @@ local pieces = require("boz.engine.pieces")
 local native = {}
 
 -- The game class a prefab is built on, and its piece handle (boz.pieces).
+---@class boz.Native : boz.Prefab
 local Native = Prefab:extend("Native")
 Native.game_class = nil
 
@@ -60,11 +61,13 @@ local function define(name, game_class)
 end
 
 --- Perk machine. Events: bought.
+---@class boz.Perk : boz.Native
 local Perk = define("Perk", "CPerk")
 --- Gives its perk to the player for free.
 function Perk:give() return self:use_free() end
 
 --- Door or debris. Events: opened.
+---@class boz.Door : boz.Native
 local Door = define("Door", "CDoor")
 --- Opens it without paying.
 function Door:open() return self:use_free() end
@@ -77,6 +80,7 @@ end
 function Door:zones() return self:links("zones") end
 
 --- Mystery box. Events: spun, weapon.
+---@class boz.MysteryBox : boz.Native
 local MysteryBox = define("MysteryBox", "CMysteryBox")
 --- Brings the box out here.
 function MysteryBox:bring_out() local p = self:_piece() return p ~= nil and p:spawn_box() end
@@ -84,16 +88,19 @@ function MysteryBox:bring_out() local p = self:_piece() return p ~= nil and p:sp
 function MysteryBox:send_away() local p = self:_piece() return p ~= nil and p:despawn_box() end
 
 --- Pack-a-Punch. Events: upgraded.
+---@class boz.PackAPunch : boz.Native
 local PackAPunch = define("PackAPunch", "CPackAPunch")
 function PackAPunch:bring_out() local p = self:_piece() return p ~= nil and p:spawn_pack_a_punch() end
 function PackAPunch:send_away() local p = self:_piece() return p ~= nil and p:despawn_pack_a_punch() end
 
 --- Power switch. Events: on.
+---@class boz.PowerSwitch : boz.Native
 local PowerSwitch = define("PowerSwitch", "CPowerSwitch")
 --- Turns the power on.
 function PowerSwitch:turn_on() return self:use_free() end
 
 --- Trap switch. Events: activated, cooled.
+---@class boz.TrapSwitch : boz.Native
 local TrapSwitch = define("TrapSwitch", "CTrapSwitch")
 --- Runs its traps without paying.
 function TrapSwitch:activate() return self:use_free() end
@@ -104,6 +111,7 @@ function TrapSwitch:busy()
 end
 
 --- Trap. Events: cooled.
+---@class boz.Trap : boz.Native
 local Trap = define("Trap", "CTrap")
 --- Runs the trap for seconds (default: its own time).
 function Trap:activate(seconds)
@@ -120,14 +128,17 @@ function Trap:activate(seconds)
 end
 
 --- Wall buy. Events: bought (a weapon or its ammo).
+---@class boz.WallBuy : boz.Native
 define("WallBuy", "CWeaponChalkOutline")
 
 --- Window barricade. Events: repaired.
+---@class boz.Barricade : boz.Native
 local Barricade = define("Barricade", "CBarricade")
 --- Puts one board back.
 function Barricade:repair() local p = self:_piece() return p ~= nil and p:fix_barricade() end
 
 --- Zombie spawn.
+---@class boz.ZombieSpawn : boz.Native
 local ZombieSpawn = define("ZombieSpawn", "CSpawnPoint")
 --- Lets zombies come out of it (true) or not (false).
 function ZombieSpawn:set_active(on)

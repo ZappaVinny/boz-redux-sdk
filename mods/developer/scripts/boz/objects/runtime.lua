@@ -39,7 +39,8 @@ local Zone = require("boz.objects.zone")
 local Sector = require("boz.objects.sector")
 
 local CLASSES = {Object = Object, Prefab = Prefab, Volume = require("boz.objects.volume"), Debris = Debris,
-                 Zone = Zone, Sector = Sector, Teleporter = require("boz.objects.teleporter")}
+                 Zone = Zone, Sector = Sector, Teleporter = require("boz.objects.teleporter"),
+                 Lure = require("boz.game.lure")}
 for name, class in pairs(native) do
     if name ~= "Native" then
         CLASSES[name] = class
@@ -59,6 +60,7 @@ local weapon_objects = {}
 runtime.saved = {}
 
 --- The object called name, as its class (nil for a name the map does not have).
+---@return boz.Object?
 function runtime.get(name)
     if type(name) ~= "string" then
         return nil
@@ -124,6 +126,10 @@ end
 
 --- Calls fn(data, name) on every boz.send(name) and game event of that name ("round_started").
 function runtime.on(name, fn)
+    local check = require("boz.engine.check")
+    if not check.name(name, "boz.on") or not check.fn(fn, "boz.on") then
+        return fn
+    end
     listeners[name] = listeners[name] or {}
     table.insert(listeners[name], fn)
     return fn
@@ -658,6 +664,9 @@ function runtime.start(list, all_names, weapon_list)
     Object.forget_level_listeners()
     Object._in_level = true
     timers.cancel_all()
+    require("boz.engine.motion").reset()
+    require("boz.game.lure").reset()
+    require("boz.game.match").reset()
     for k in pairs(runtime.saved) do
         runtime.saved[k] = nil
     end

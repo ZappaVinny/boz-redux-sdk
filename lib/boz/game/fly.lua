@@ -14,7 +14,9 @@ local core = require("boz.engine.core")
 
 local SUBJECT_PLAYER_FREE_MODE = 0xe8d65346   -- ids from gamedef/events
 local SUBJECT_PLAYER_ASCEND = 0x77f7c70e
-local FLYING, SPEED_VAR = 0x30, 0x34
+local FLYING, SPEED_VAR = core.offset("CPlayerFreeFly", "flying"), core.offset("CPlayerFreeFly", "speedVar")
+local VAR_VALUE = core.offset("CIwConsoleVar", "value")
+local INPUT_SUBJECT = core.offset("CInputManager", "subject")
 
 local function component()
     return components.on_player("CPlayerFreeFly::s_table")
@@ -23,7 +25,7 @@ end
 local function input_event(event)
     local input = core.singleton("CInputManager")
     if input then
-        core.call("CIsSubject::NotifyVirtual", input + 0x20, event, 0, 0, 0)
+        core.call("CIsSubject::NotifyVirtual", input + INPUT_SUBJECT, event, 0, 0, 0)
     end
 end
 
@@ -53,14 +55,14 @@ end
 --- Fly speed (FreeFlySpeed): distance per frame at full speed.
 function fly.speed()
     local c = component()
-    return c and game.read("f32", game.read("ptr", c + SPEED_VAR) + 0x10)
+    return c and game.read("f32", game.read("ptr", c + SPEED_VAR) + VAR_VALUE)
 end
 
 --- Sets the fly speed (FreeFlySpeed).
 function fly.set_speed(speed)
     local c = component()
     if c then
-        game.write("f32", game.read("ptr", c + SPEED_VAR) + 0x10, speed)
+        game.write("f32", game.read("ptr", c + SPEED_VAR) + VAR_VALUE, speed)
     end
 end
 
@@ -72,10 +74,10 @@ function fly.move_vertical(direction, dt)
         return
     end
     local var = game.read("ptr", c + SPEED_VAR)
-    local speed = game.read("f32", var + 0x10)
-    game.write("f32", var + 0x10, speed * 60 * dt * direction)
+    local speed = game.read("f32", var + VAR_VALUE)
+    game.write("f32", var + VAR_VALUE, speed * 60 * dt * direction)
     input_event(SUBJECT_PLAYER_ASCEND)
-    game.write("f32", var + 0x10, speed)
+    game.write("f32", var + VAR_VALUE, speed)
 end
 
 return fly

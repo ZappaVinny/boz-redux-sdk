@@ -11,10 +11,12 @@ local match_events = {}
 local core = require("boz.engine.core")
 local map = require("boz.engine.map")
 
-local ZOMBIE_TRANSFORM, ZOMBIE_KILLER, ZOMBIE_HIT_LOCATION, ZOMBIE_KILL_KIND = 0xc4, 0x138, 0x124, 0x22c
-local COMPONENT_ENTITY = 0xc
-local PERKS_OWNED = 0x58
-local STATE_EVENT_KIND = 0x18     -- CIsStateMachine vtable: the state event's kind (1: entering)
+local function ai(field) return core.offset("CAIControllerZombie", field) end
+local ZOMBIE_TRANSFORM, ZOMBIE_KILLER = ai("transform"), ai("killer")
+local ZOMBIE_HIT_LOCATION, ZOMBIE_KILL_KIND = ai("hitLocation"), ai("killKind")
+local COMPONENT_ENTITY = core.offset("CIsComponent", "entity")
+local PERKS_OWNED = core.offset("CPerkManager", "ownedBits")
+local STATE_EVENT_KIND = core.offset("CIsStateMachineVTable", "getEventType")   -- 1: entering
 
 local listeners = {}      -- name -> {fn = true}
 local any = {}            -- {fn = true}

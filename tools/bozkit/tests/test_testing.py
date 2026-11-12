@@ -20,6 +20,15 @@ class TestingTests(unittest.TestCase):
         path.write_text(text, encoding='utf-8')
         return path
 
+    def test_dark_screenshots_convert(self):
+        # Pixel bytes that look like whitespace (a dark frame) right after the header.
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            (folder / 'a.ppm').write_bytes(b'P6\n2 2\n255\n' + bytes([10, 32, 9, 0, 0, 0, 13, 12, 11, 1, 2, 3]))
+            self.assertTrue(testing._ppm_to_png(folder / 'a.ppm', folder / 'a.png'))
+            (folder / 'b.ppm').write_bytes(b'P6\n2 2\n255\n' + bytes(5))
+            self.assertFalse(testing._ppm_to_png(folder / 'b.ppm', folder / 'b.png'))
+
     def test_options_come_from_the_header_only(self):
         path = self.write('m/tests/a.lua', '--! timeout: 90\n-- about it\n--! touch: true\n'
                           '--! players: 2\n\nlocal x = 1\n--! arch: x64\n')

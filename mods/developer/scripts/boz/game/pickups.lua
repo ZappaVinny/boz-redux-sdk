@@ -17,8 +17,14 @@ pickups.TYPES = {"double_points", "insta_kill", "max_ammo", "nuke", "carpenter",
                  "deathmachine", "perkbottle", "lightningbolt"}
 local INDEX = {}
 for i, name in ipairs(pickups.TYPES) do INDEX[name] = i - 1 end
-local TIMERS = {insta_kill = 0xb8, double_points = 0xbc, firesale = 0xc0, deathmachine = 0xc4,
-                carpenter = 0xc8}
+local TIMERS = {insta_kill = core.offset("CPickupManager", "instaKillTimer"),
+                double_points = core.offset("CPickupManager", "doublePointsTimer"),
+                firesale = core.offset("CPickupManager", "firesaleTimer"),
+                deathmachine = core.offset("CPickupManager", "deathMachineTimer"),
+                carpenter = core.offset("CPickupManager", "carpenterTimer")}
+local LOCAL_ROTATION, LOCAL_POSITION = core.offset("CIsTransform", "localRotation"),
+    core.offset("CIsTransform", "localPosition")
+local SPAWN_OFFSET = core.offset("PickupSpawn", "offset")
 
 --- The pickup manager (CPickupManager), or nil outside a match.
 function pickups.manager()
@@ -44,12 +50,12 @@ function pickups.spawn(name, position)
     if not index then
         return false, "no power-up " .. tostring(name)
     end
-    scratch = scratch or game.alloc(0xd0)
-    -- A stand-in transform: position +0xa8, rotation +0x98 (none); then a zero offset at +0xc0.
-    for i, value in ipairs({0, 0, 0, 1}) do game.write("f32", scratch + 0x98 + 4 * (i - 1), value) end
-    core.write_vec3(scratch + 0xa8, position)
-    for i = 0, 2 do game.write("f32", scratch + 0xc0 + 4 * i, 0) end
-    core.call("CPickupManager::SpawnPickupAt", manager, index, scratch, scratch + 0xc0)
+    scratch = scratch or game.alloc(core.size("PickupSpawn"))
+    -- A stand-in transform: its position and rotation (none); then a zero offset.
+    for i, value in ipairs({0, 0, 0, 1}) do game.write("f32", scratch + LOCAL_ROTATION + 4 * (i - 1), value) end
+    core.write_vec3(scratch + LOCAL_POSITION, position)
+    for i = 0, 2 do game.write("f32", scratch + SPAWN_OFFSET + 4 * i, 0) end
+    core.call("CPickupManager::SpawnPickupAt", manager, index, scratch, scratch + SPAWN_OFFSET)
     return true
 end
 

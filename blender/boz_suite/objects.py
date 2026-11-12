@@ -611,18 +611,21 @@ class BOZ_MT_prefab_library(bpy.types.Menu):
 def _draw_in_game(layout, obj, context) -> None:
     """What the object does in the game, in three settings: Visible (the master: hidden, it
     stops and blocks nothing), Walking (players and zombies share the walkable area) and Stops
-    bullets (collision). Scripts can switch all three while the game runs."""
+    bullets (collision). Scripts can switch all three while the game runs: an object with a
+    script, or one a script names (the build finds the names)."""
     settings = obj.boz
     box = layout.box()
     box.label(text="In the game", icon="PLAY")
     box.prop(settings, "start_visible", toggle=True)
     if not settings.original:
+        # No checkbox: the build keeps an object changeable when it has a script or any of the
+        # map's scripts names it (older projects' Scripts can switch it is still honoured).
+        row = box.row()
+        row.enabled = False
         if convert.is_scripted(obj):
-            row = box.row()
-            row.enabled = False
             row.label(text="Scripts can switch it (it has a script)", icon="CHECKBOX_HLT")
         else:
-            box.prop(settings, "switchable")
+            row.label(text="Scripts can switch it when one names it", icon="INFO")
     column = box.column()
     column.active = settings.start_visible
     game_prefab = settings.role == "prefab" and bool(settings.source)
@@ -821,6 +824,15 @@ class BOZ_PT_object(Panel):
             elif settings.volume == "portal":
                 layout.label(text="A doorway: make it thin, with a sector on each side",
                              icon="INFO")
+            elif settings.volume == "lure":
+                layout.label(text="Zombies come here while a script runs it:", icon="INFO")
+                layout.label(text=f'boz.get("{convert.object_name(obj)}"):start()')
+                layout.prop(settings, "lure_zombies")
+                layout.prop(settings, "lure_radius")
+                layout.prop(settings, "lure_arrive")
+                layout.prop(settings, "lure_seconds")
+                layout.prop(settings, "lure_enabled")
+                layout.label(text="They walk on the walkable area: keep it reachable")
             else:
                 layout.prop(settings, "who", expand=True)
                 layout.prop(settings, "once")

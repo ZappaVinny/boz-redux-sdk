@@ -48,21 +48,25 @@ function components.on_player(table_name)
     return id and components.find(table_name, id)
 end
 
+local NODE_PARENT, NODE_LEFT = core.offset("StlRbNode", "parent"), core.offset("StlRbNode", "left")
+local NODE_RIGHT, NODE_KEY, NODE_VALUE = core.offset("StlRbNode", "right"), core.offset("StlRbNode", "key"),
+    core.offset("StlRbNode", "value")
+
 local function next_node(node)
-    local right = game.read("ptr", node + 0xc)
+    local right = game.read("ptr", node + NODE_RIGHT)
     if right ~= 0 then
         node = right
-        while game.read("ptr", node + 8) ~= 0 do
-            node = game.read("ptr", node + 8)
+        while game.read("ptr", node + NODE_LEFT) ~= 0 do
+            node = game.read("ptr", node + NODE_LEFT)
         end
         return node
     end
-    local parent = game.read("ptr", node + 4)
-    while node == game.read("ptr", parent + 0xc) do
+    local parent = game.read("ptr", node + NODE_PARENT)
+    while node == game.read("ptr", parent + NODE_RIGHT) do
         node = parent
-        parent = game.read("ptr", parent + 4)
+        parent = game.read("ptr", parent + NODE_PARENT)
     end
-    if game.read("ptr", node + 0xc) ~= parent then
+    if game.read("ptr", node + NODE_RIGHT) ~= parent then
         node = parent
     end
     return node
@@ -83,9 +87,9 @@ function components.each(table_name)
             local current = node
             node = next_node(node)
             steps = steps + 1
-            local component = game.read("ptr", current + 0x14)
+            local component = game.read("ptr", current + NODE_VALUE)
             if component ~= 0 then
-                return component, game.read("u32", current + 0x10)
+                return component, game.read("u32", current + NODE_KEY)
             end
         end
         return nil

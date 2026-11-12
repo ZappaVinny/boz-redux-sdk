@@ -9,6 +9,7 @@
 local Class = require("boz.class")
 local weapons = require("boz.engine.weapons")
 
+---@class boz.Weapon
 local Weapon = Class:extend("Weapon")
 
 function Weapon:init(name, entry)

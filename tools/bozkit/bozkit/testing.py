@@ -19,6 +19,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -192,11 +193,15 @@ def _client_ini(path: Path, enabled: list[str], all_mods: list[str]) -> None:
 
 def _ppm_to_png(source: Path, target: Path) -> bool:
     data = source.read_bytes()
-    parts = data.split(maxsplit=4)
-    if len(parts) < 5 or parts[0] != b'P6':
+    # The header is four tokens and one whitespace byte; the pixels after it are raw bytes, and
+    # dark ones look like whitespace (so no split over the whole file).
+    header = re.match(rb'P6\s+(\d+)\s+(\d+)\s+(\d+)\s', data)
+    if not header:
         return False
-    width, height = int(parts[1]), int(parts[2])
-    pixels = parts[4][:width * height * 3]
+    width, height = int(header.group(1)), int(header.group(2))
+    pixels = data[header.end():header.end() + width * height * 3]
+    if len(pixels) < width * height * 3:
+        return False
     rgba = bytearray(width * height * 4)
     rgba[0::4], rgba[1::4], rgba[2::4] = pixels[0::3], pixels[1::3], pixels[2::3]
     rgba[3::4] = b'\xff' * (width * height)

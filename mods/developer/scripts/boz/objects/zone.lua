@@ -15,6 +15,7 @@ local boxes = require("boz.objects.boxes")
 local core = require("boz.engine.core")
 local hash = require("boz.engine.hash")
 
+---@class boz.Zone : boz.Object
 local Zone = Object:extend("Zone")
 
 function Zone:init(name, entry)

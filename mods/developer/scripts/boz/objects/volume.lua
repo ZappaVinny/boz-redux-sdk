@@ -6,6 +6,7 @@
 
 local Prefab = require("boz.objects.prefab")
 
+---@class boz.Volume : boz.Prefab
 local Volume = Prefab:extend("Volume")
 
 local function entry(self)

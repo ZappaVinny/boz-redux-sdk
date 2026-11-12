@@ -25,12 +25,12 @@ local map = require("boz.engine.map")
 local objects = {}
 
 local COLLISION_CLASSES = {"CIsCollisionBox", "CIsCollisionSphere", "CIsCollisionCapsule", "CIsCollisionMesh"}
-local LEVEL_NAVMESH = 0x290     -- CLevelManager: the level's NavMesh resource
-local COMPONENT_ENTITY = 0xc
+local LEVEL_NAVMESH = core.offset("CLevelManager", "navMesh")
+local COMPONENT_ENTITY = core.offset("CIsComponent", "entity")
 local ENTITY_ID = 4
-local HIERARCHY_CHILDREN = 0x24
-local TRANSFORM_POSITION = 0x5c
-local TRANSFORM_AXES = 0x38      -- its world matrix: three rows, then the position
+local HIERARCHY_CHILDREN = core.offset("CIsHierarchy", "children")
+local TRANSFORM_POSITION = core.offset("CIsTransform", "worldPosition")
+local TRANSFORM_AXES = core.offset("CIsTransform", "worldAxes")   -- three rows, then the position
 
 local function find_component(class_name, entity)
     if entity == 0 then

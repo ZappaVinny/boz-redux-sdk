@@ -8,7 +8,9 @@ local core = require("boz.engine.core")
 local map = require("boz.engine.map")
 
 local BEHAVES_LIKE = {kino = true, ascension = true, callofthedead = true}
-local WAVE_HEALTH, WAVE_HEALTH_MULT, WAVE_START = 0x78, 0xa4, 0xac   -- CWaveRepeatable
+local WAVE_HEALTH = core.offset("CWaveRepeatable", "m_ZombieHealth")
+local WAVE_HEALTH_MULT = core.offset("CWaveRepeatable", "m_ZombieHealthMultiplier")
+local WAVE_START = core.offset("CWaveRepeatable", "m_StartingWave")
 
 local started = false
 local saved = {}          -- cvar -> the game's value before the map changed it

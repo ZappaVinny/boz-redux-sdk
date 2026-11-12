@@ -12,9 +12,10 @@ local sectors = {}
 local core = require("boz.engine.core")
 local hash = require("boz.engine.hash")
 
-local MAP, DRAW_ALL = 0x28, 0x53            -- CIsSectorManager: sectors by name hash; no culling
-local NODE_LEFT, NODE_RIGHT, NODE_KEY, NODE_VALUE = 0x8, 0xc, 0x10, 0x14
-local VISITED = 0xd4                        -- CIsSector: drawn this frame
+local MAP, DRAW_ALL = core.offset("CIsSectorManager", "sectors"), core.offset("CIsSectorManager", "drawAll")
+local NODE_LEFT, NODE_RIGHT = core.offset("StlRbNode", "left"), core.offset("StlRbNode", "right")
+local NODE_KEY, NODE_VALUE = core.offset("StlRbNode", "key"), core.offset("StlRbNode", "value")
+local VISITED = core.offset("CIsSector", "visited")         -- drawn this frame
 
 local function manager()
     return core.singleton("CIsSectorManager")

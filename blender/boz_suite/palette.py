@@ -248,7 +248,7 @@ def _land_at(obj, point) -> None:
 
 # A placed volume's first size (cm): a room for sectors and zones, a doorway for portals.
 VOLUME_SIZES = {"sector": (600.0, 300.0, 600.0), "zone": (600.0, 300.0, 600.0),
-                "portal": (20.0, 250.0, 150.0)}
+                "portal": (20.0, 250.0, 150.0), "lure": (60.0, 60.0, 60.0)}
 
 
 def _place_piece(scene, key: str, label: str, position, rotation):

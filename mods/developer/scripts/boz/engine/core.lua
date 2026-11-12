@@ -15,6 +15,48 @@ function core.sym(name)
     return offset and game.base() + offset or nil
 end
 
+--- A field's byte offset in a game struct, by its gamedef name: core.offset("CLevelManager",
+--- "player"). The game definition's structs first, then the reflected fields (with bases).
+--- An unknown name is an error: it is the library's bug, found when the module loads.
+function core.offset(struct, field)
+    local known = symbols.structs and symbols.structs[struct]
+    if known and known[field] then
+        return known[field]
+    end
+    local reflection = require("boz.engine.reflection_data")
+    local function find(name, base)
+        local info = reflection[name]
+        if not info then
+            return nil
+        end
+        local f = info.fields[field]
+        if f then
+            return base + f[1]
+        end
+        for _, b in ipairs(info.bases) do
+            local at = find(b[1], base + b[2])
+            if at then
+                return at
+            end
+        end
+        return nil
+    end
+    local at = find(struct, 0)
+    if not at then
+        error("boz: the game definition has no field " .. struct .. "." .. field, 2)
+    end
+    return at
+end
+
+--- A game struct's size in bytes (gamedef), for buffers passed to the game.
+function core.size(struct)
+    local known = symbols.structs and symbols.structs[struct]
+    if not known or not known._size then
+        error("boz: the game definition has no size for " .. struct, 2)
+    end
+    return known._size
+end
+
 --- A singleton's instance ("CWaveManager"), or nil while the game has none.
 function core.singleton(class_name)
     local at = core.sym(class_name .. "::s_instance")
@@ -85,11 +127,21 @@ function core.read_quat(at)
             z = game.read("f32", at + 12)}
 end
 
---- Calls fn(...) through pcall; an error is logged with the module's name and swallowed.
+local logged = {}   -- errors already logged (where .. error), at most 256
+
+--- Calls fn(...) through pcall; an error is logged with the module's name (each one once: a
+--- handler that fails every frame keeps the log readable) and swallowed.
 function core.safely(where, fn, ...)
     local ok, err = pcall(fn, ...)
     if not ok then
-        log(where .. ": " .. tostring(err))
+        local key = where .. ": " .. tostring(err)
+        if not logged[key] then
+            if next(logged) == nil or #logged < 256 then
+                logged[key] = true
+                logged[#logged + 1] = key
+            end
+            log(key)
+        end
     end
     return ok, err
 end

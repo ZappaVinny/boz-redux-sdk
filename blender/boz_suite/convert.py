@@ -20,6 +20,7 @@ One Blender unit is one game centimetre; Blender's Z is the game's Y.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from collections import defaultdict
@@ -531,7 +532,8 @@ def model_object(model: "world.Model", scene, parent=None, data=None):
 
 VOLUME_MESH = "BOZ Volume"
 VOLUME_COLOURS = {"trigger": (0.2, 0.85, 0.75), "hit": (1.0, 0.25, 0.15), "use": (0.35, 1.0, 0.3),
-                  "sector": (0.3, 0.45, 1.0), "zone": (1.0, 0.75, 0.1), "portal": (0.85, 0.3, 1.0)}
+                  "sector": (0.3, 0.45, 1.0), "zone": (1.0, 0.75, 0.1), "portal": (0.85, 0.3, 1.0),
+                  "lure": (1.0, 0.45, 0.8)}
 VOLUME_ALPHA = {"sector": 0.06, "zone": 0.06}   # big boxes: faint, the wire shows them
 
 
@@ -607,6 +609,15 @@ def volume_object(volume: "world.Volume", scene, parent=None):
     obj.boz.cost = volume.cost
     obj.boz.zone = volume.zone
     obj.boz.starting = volume.starting
+    if volume.kind_of == "lure":
+        given = {**world.LURE_SETTINGS, **volume.properties}
+        obj.boz.lure_zombies = int(given["zombies"])
+        obj.boz.lure_radius = float(given["radius"])
+        obj.boz.lure_arrive = given["arrive"] if given["arrive"] in ("wait", "attack") else "wait"
+        obj.boz.lure_seconds = float(given["seconds"])
+        obj.boz.lure_enabled = bool(given["enabled"])
+        volume = dataclasses.replace(volume, properties={k: v for k, v in volume.properties.items()
+                                                         if k not in world.LURE_SETTINGS})
     colour_volume(obj)
     _place(obj, volume, scene, parent)
     set_common(obj, volume)
@@ -1120,12 +1131,19 @@ def scene_to_world(scene, problems: list | None = None) -> "world.World":
                                block_margin=round(obj.boz.block_margin, 2),
                                start=start_of(obj), **common)
         if role == "volume":
-            return world.Volume(name, obj.boz.volume, position, rotation,
-                                size=tuple(round(c * world.TRIGGER_SIZE, 3) for c in scale),
-                                who=obj.boz.who, once=obj.boz.once, prompt=obj.boz.prompt,
-                                cost=obj.boz.cost,
-                                zone=obj.boz.zone if obj.boz.volume == "zone" else "",
-                                starting=obj.boz.starting and obj.boz.volume == "zone", **common)
+            volume = world.Volume(name, obj.boz.volume, position, rotation,
+                                  size=tuple(round(c * world.TRIGGER_SIZE, 3) for c in scale),
+                                  who=obj.boz.who, once=obj.boz.once, prompt=obj.boz.prompt,
+                                  cost=obj.boz.cost,
+                                  zone=obj.boz.zone if obj.boz.volume == "zone" else "",
+                                  starting=obj.boz.starting and obj.boz.volume == "zone", **common)
+            if obj.boz.volume == "lure":
+                volume.properties = {**volume.properties, "zombies": obj.boz.lure_zombies,
+                                     "radius": round(obj.boz.lure_radius, 1),
+                                     "arrive": obj.boz.lure_arrive,
+                                     "seconds": round(obj.boz.lure_seconds, 2),
+                                     "enabled": obj.boz.lure_enabled}
+            return volume
         if role != "prefab":
             return None
         if obj.boz.source:

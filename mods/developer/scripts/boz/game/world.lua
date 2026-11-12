@@ -10,10 +10,10 @@ local world = {}
 
 local NO_POWER = hash.name("boz_no_power")
 local POWER_ON = hash.name("power_switch_on")
-local PERK_POWER_SWITCH = 0x90          -- CPerk powerSwitch (reflected)
-local PERK_POWERED = 0x7c               -- checked by CPerk::Interact
-local PERK_LIT = 0x7d
-local PERK_SUBJECT = 0x20               -- the machine's CIsNetworkSubject
+local PERK_POWER_SWITCH = core.offset("CPerk", "powerSwitch")
+local PERK_POWERED = core.offset("CPerk", "powered")      -- checked by CPerk::Interact
+local PERK_LIT = core.offset("CPerk", "lit")
+local PERK_SUBJECT = core.offset("CPerk", "subject")
 -- What the game gives on other maps (the PlayerStartWeapon and PlayerStartAmmo defaults).
 local GAME_START_WEAPON, GAME_START_AMMO = "colt45", 40
 

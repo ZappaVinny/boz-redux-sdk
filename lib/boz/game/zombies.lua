@@ -18,20 +18,27 @@ local core = require("boz.engine.core")
 local hash = require("boz.engine.hash")
 local entities = require("boz.engine.entities")
 local components = require("boz.engine.components")
-local WAVE, BOSS = 0x50, 0xb4           -- CWaveManager: the current wave; George's entity
-local NAME_BASE, NAME_NEXT = 0xd4, 0xd8 -- g_game: spawned entities' name hashes (base + counter)
-local HEALTH, MAX_HEALTH, CRAWLER = 0x48, 0x44, 0x9d   -- CHealth health, its maximum now
-local SET_SPEED = 0x60     -- CAIControllerZombie vtable: the speed tier (CWaveManager::CreateZombie)
-local SUBJECT, STATE = 0x30, 0x158   -- its CIsSubject; its state machine (+0x150): the state
-local TURNED, FROZEN, BURNING = 0x234, 0xb7, 0x10c
-local LEVEL_LOOKS = 0x68   -- CLevel: the zombie looks (begin, end)
-local CONTROLLER_HEALTH = 0xd4   -- CAIControllerZombie: its CHealth
+local function ai(field) return core.offset("CAIControllerZombie", field) end
+local WAVE, BOSS = core.offset("CWaveManager", "wave"), core.offset("CWaveManager", "romero")
+local NAME_BASE, NAME_NEXT = core.offset("CGame", "nameBase"), core.offset("CGame", "nameNext")
+local HEALTH, MAX_HEALTH = core.offset("CHealth", "health"), core.offset("CHealth", "maxHealth")
+local CRAWLER = ai("m_isZombieCrawler")
+local SET_SPEED = core.offset("CAIControllerZombieVTable", "setSpeed")
+local SUBJECT, STATE = ai("subject"), ai("state")
+local TURNED, FROZEN, BURNING = ai("locatorGoal"), ai("frozen"), ai("burning")
+local LEVEL_LOOKS = core.offset("CLevel", "zombieLooks")
+local CONTROLLER_HEALTH = ai("health")
+local SPAWN_LOOK, SPAWN_POSITION, SPAWN_ROTATION = core.offset("ZombieSpawnInfo", "look"),
+    core.offset("ZombieSpawnInfo", "position"), core.offset("ZombieSpawnInfo", "rotation")
+local SPAWN_COUNTS, SPAWN_POWERED = core.offset("ZombieSpawnInfo", "counts"),
+    core.offset("ZombieSpawnInfo", "powered")
 local GEORGE = "george_romero"
 
 --- The kinds of AI and their controller classes.
 zombies.KINDS = {zombie = "CAIControllerZombie", dog = "CAIControllerHellhound",
                  monkey = "CAIControllerMonkey", george = "CAIControllerRomero"}
 
+---@class boz.Zombie
 local Zombie = require("boz.class"):extend("Zombie")   -- boz.Zombie
 zombies.Zombie = Zombie
 Zombie.zombie = true      -- tells it from a player in a volume's hooks
@@ -188,7 +195,7 @@ end
 --- True once it is dying (or dead).
 function Zombie:dying()
     local state = self:state()
-    return state == 15 or state == 0x15
+    return state == 15 or state == 21
 end
 
 --- True for a crawler (legs gone).
@@ -309,15 +316,15 @@ function zombies.spawn(spec, position, options)
     -- A ZombieSpawnInfo: +4 spec, +8 name, +0xc spawn animation, +0x10 spawn point, +0x14
     -- configuration, +0x18 speed share, +0x1c position, +0x28 rotation, +0x38 tracked by the
     -- round, +0x39 powered, +0x3a counts as spawned, +0x3c health, +0x40, +0x44 restoring a save.
-    local info = core.scratch("zombies.spawn", 0x48)
-    for at = 0, 0x44, 4 do game.write("u32", info + at, 0) end
+    local info = core.scratch("zombies.spawn", core.size("ZombieSpawnInfo"))
+    for at = 0, core.size("ZombieSpawnInfo") - 4, 4 do game.write("u32", info + at, 0) end
     game.write("u32", info + 4, spec_hash)
     game.write("u32", info + 8, name)
-    game.write("u32", info + 0x14, look or 0)
-    core.write_vec3(info + 0x1c, position)
-    core.write_quat(info + 0x28)
-    game.write("u8", info + 0x38, options.counts and 1 or 0)
-    game.write("u8", info + 0x39, options.powered and 1 or 0)
+    game.write("u32", info + SPAWN_LOOK, look or 0)
+    core.write_vec3(info + SPAWN_POSITION, position)
+    core.write_quat(info + SPAWN_ROTATION)
+    game.write("u8", info + SPAWN_COUNTS, options.counts and 1 or 0)
+    game.write("u8", info + SPAWN_POWERED, options.powered and 1 or 0)
     core.call("CWaveManager::OnSpawnZombie", manager, info)
     -- The new one carries the name hash it was given.
     local handle = nil
@@ -381,7 +388,7 @@ function zombies.spawn_george(position)
     if not entities.spec_loaded(george) then
         return nil, GEORGE .. " is not loaded (bundle it from Call of the Dead)"
     end
-    local at = core.scratch("zombies.spawn", 0x48)
+    local at = core.scratch("zombies.spawn", core.size("ZombieSpawnInfo"))
     core.write_vec3(at, position)
     core.write_quat(at + 12)
     core.call("WaveManager_SpawnBoss", manager, george, at, at + 12, 0, 0)

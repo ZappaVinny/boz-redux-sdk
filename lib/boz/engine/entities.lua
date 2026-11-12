@@ -19,8 +19,10 @@ local core = require("boz.engine.core")
 local hash = require("boz.engine.hash")
 local components = require("boz.engine.components")
 
-local ENTITY_ID, COMPONENT_ENTITY = 4, 0xc
-local LOCAL_POSITION, LOCAL_ROTATION, WORLD_POSITION = 0xa8, 0x98, 0x5c
+local ENTITY_ID, COMPONENT_ENTITY = core.offset("CIsEntity", "id"), core.offset("CIsComponent", "entity")
+local LOCAL_POSITION = core.offset("CIsTransform", "localPosition")
+local LOCAL_ROTATION = core.offset("CIsTransform", "localRotation")
+local WORLD_POSITION = core.offset("CIsTransform", "worldPosition")
 
 local function db()
     return core.singleton("CIsEntityDB")

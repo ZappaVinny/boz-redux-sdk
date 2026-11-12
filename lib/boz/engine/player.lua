@@ -26,8 +26,8 @@ function player.name_hash()
     return entity and require("boz.engine.entities").name_hash(entity) or nil
 end
 
-local HEALTH, MAX_HEALTH = 0x48, 0x44   -- CHealth: health; the most it can be now (Juggernog doubles it)
-local STANCE, STATE = 0x1f4, 0x1d4
+local HEALTH, MAX_HEALTH = core.offset("CHealth", "health"), core.offset("CHealth", "maxHealth")
+local STANCE, STATE = core.offset("CPlayerController", "stance"), core.offset("CPlayerController", "state")
 player.STANCES = {standing = 1, crouching = 2, prone = 4, downed = 8}
 player.SPEEDS = {"WalkSpeed", "AimWalkSpeed", "SprintSpeed", "CrouchSpeed", "AimCrouchSpeed",
                  "ProneSpeed", "AimProneSpeed", "PerkedWalkSpeed", "PerkedAimWalkSpeed",
@@ -37,7 +37,7 @@ player.SPEEDS = {"WalkSpeed", "AimWalkSpeed", "SprintSpeed", "CrouchSpeed", "Aim
 local PERK_ICONS = {"Perk_Deadshot_Image", "Perk_Double_Tap_Image", "Perk_Juggernog_Image",
                     "Perk_StaminUp_Image", "Perk_PHD_Flopper_Image", "Perk_Revival_Image",
                     "Perk_Speed_Cola_Image"}
-local OWNED_PERKS, OWNED_BITS = 0x4c, 0x58   -- CPerkManager: the owned perks (a network bool array) and their bits
+local OWNED_PERKS, OWNED_BITS = core.offset("CPerkManager", "owned"), core.offset("CPerkManager", "ownedBits")
 local JUGGERNOG = 3
 
 local function component(name)
@@ -91,8 +91,8 @@ function player.teleport(position)
     return entity ~= nil and require("boz.engine.entities").set_position(entity, position)
 end
 
-local MAY_MOVE, MAY_LOOK = 0x15a, 0x15b    -- CPlayerController: may move, may look (the wormhole clears both)
-local WORLD_MATRIX = 0x38                  -- CIsTransform: world rotation rows, then position
+local MAY_MOVE, MAY_LOOK = core.offset("CPlayerController", "mayMove"), core.offset("CPlayerController", "mayLook")
+local WORLD_MATRIX = core.offset("CIsTransform", "worldAxes")   -- world rotation rows, then position
 
 --- Stands the player on an entity, facing its way (the game's own teleport).
 function player.place_on(entity)
@@ -185,14 +185,14 @@ function player.downed()
         return false
     end
     local state = game.read("u32", controller + STATE)
-    return game.read("u32", controller + STANCE) == 8 and state ~= 0x14 and state ~= 0x15
+    return game.read("u32", controller + STANCE) == 8 and state ~= 20 and state ~= 21
 end
 
 --- True once the player died (the match is ending).
 function player.dead()
     local controller = component("CPlayerController")
     local state = controller and game.read("u32", controller + STATE)
-    return state == 0x14 or state == 0x15
+    return state == 20 or state == 21
 end
 
 --- Kills the player (the game's KillPlayer).

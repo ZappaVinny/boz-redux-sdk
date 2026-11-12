@@ -13,7 +13,9 @@ local physics = {}
 
 local core = require("boz.engine.core")
 
-local NODE_SIZE = 0x30      -- next, previous and the hit (position, normal, entity, shape, distance, material)
+local NODE_SIZE = core.size("RayHitNode")   -- next, previous and the hit
+local HIT_POSITION, HIT_NORMAL = core.offset("RayHitNode", "position"), core.offset("RayHitNode", "normal")
+local HIT_ENTITY = core.offset("RayHitNode", "entity")
 local DEFAULT_FILTER = 0xffffffef
 
 local buffer = nil
@@ -38,8 +40,8 @@ function physics.raycast_all(from, to, filter)
     sentinel = game.read("ptr", list)
     local hits, node, guard = {}, game.read("ptr", sentinel), 0
     while node ~= sentinel and node ~= 0 and guard < 256 do
-        local entity = game.read("ptr", node + 0x20)
-        table.insert(hits, {position = core.read_vec3(node + 8), normal = core.read_vec3(node + 0x14),
+        local entity = game.read("ptr", node + HIT_ENTITY)
+        table.insert(hits, {position = core.read_vec3(node + HIT_POSITION), normal = core.read_vec3(node + HIT_NORMAL),
                             entity = entity ~= 0 and entity or nil})
         local next_node = game.read("ptr", node)
         core.call("operator_delete_cpp", node)

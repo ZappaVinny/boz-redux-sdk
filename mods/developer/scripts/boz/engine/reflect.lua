@@ -12,7 +12,8 @@ local reflect = {}
 local classes = require("boz.engine.reflection_data")
 
 -- A field the game's reflection leaves out (CTrapSwitch's cost: read by its use and its prompt).
-classes.CTrapSwitch.fields.m_Cost = {0x88, 4, "unsigned int"}
+classes.CTrapSwitch.fields.m_Cost = {require("boz.engine.symbol_data").structs.CTrapSwitch.cost, 4,
+                                      "unsigned int"}
 
 local SCALAR = {
     ["unsigned int"] = "u32", int = "i32", short = "i16", ["unsigned short"] = "u16",

@@ -17,18 +17,21 @@ local hash = require("boz.engine.hash")
 local components = require("boz.engine.components")
 
 local weapons = {}
--- The slots: primary (in hand) +0x1e0, secondary +0x1e4, melee +0x1e8, grenade +0x1ec, tactical
--- (monkey bomb, Gersch, ...) +0x1f0; grenades left +0x1cc, tactical left +0x1d0.
-weapons.SLOTS = {primary = 0x1e0, secondary = 0x1e4, melee = 0x1e8, grenade = 0x1ec, tactical = 0x1f0}
-local GRENADES, TACTICALS = 0x1cc, 0x1d0
-local MANAGER_PLAYER = 0x48
-local MANAGER_IN_HAND = 0x1e0
-local WEAPON_NAME = 0x5c
-local WEAPON_UPGRADE = 0x60   -- CPlayerWeapon Upgrade: the Pack-a-Punched weapon's name hash
-local CLIP, RESERVE = 0x2c, 0x30
-local CLIP_SIZE, RESERVE_SIZE = 0x80, 0x84
-local FIRE_RATE = 0x200
-local DAMAGE = 0x20c
+-- The slots: primary (in hand), secondary, melee, grenade, tactical (monkey bomb, Gersch, ...);
+-- grenades and tactical grenades left (gamedef CWeaponManager).
+local function wm(field) return core.offset("CWeaponManager", field) end
+local function pw(field) return core.offset("CPlayerWeapon", field) end
+weapons.SLOTS = {primary = wm("primary"), secondary = wm("secondary"), melee = wm("melee"),
+                 grenade = wm("grenade"), tactical = wm("tactical")}
+local GRENADES, TACTICALS = wm("grenades"), wm("tacticals")
+local MANAGER_PLAYER = wm("player")
+local MANAGER_IN_HAND = wm("primary")
+local WEAPON_NAME = pw("m_name")
+local WEAPON_UPGRADE = pw("Upgrade")   -- the Pack-a-Punched weapon's name hash
+local CLIP, RESERVE = pw("clip"), pw("reserve")
+local CLIP_SIZE, RESERVE_SIZE = pw("m_clipSize"), pw("m_ammoSize")
+local FIRE_RATE = pw("autoROF")
+local DAMAGE, LIMB_DAMAGE = pw("damage"), pw("limbDamage")
 
 local names = {}        -- hash -> name, for the weapons the map knows
 
@@ -54,7 +57,7 @@ function weapons.manager()
     if not player then
         return nil
     end
-    -- On a child of the player entity: +0x48 points back at the player.
+    -- On a child of the player entity: it points back at the player.
     local only, count = nil, 0
     for manager in components.each("CWeaponManager") do
         if game.read("ptr", manager + MANAGER_PLAYER) == player then
@@ -107,14 +110,14 @@ end
 --- Damage per hit: head, torso, limbs.
 function Weapon:damage()
     return game.read("u32", self.pointer + DAMAGE + 4), game.read("u32", self.pointer + DAMAGE + 8),
-        game.read("u32", self.pointer + DAMAGE + 0xc)
+        game.read("u32", self.pointer + LIMB_DAMAGE)
 end
 
 --- Sets the damage per hit for this match (nil keeps one). Returns the weapon.
 function Weapon:set_damage(head, torso, limbs)
     if head then game.write("u32", self.pointer + DAMAGE + 4, head) end
     if torso then game.write("u32", self.pointer + DAMAGE + 8, torso) end
-    if limbs then game.write("u32", self.pointer + DAMAGE + 0xc, limbs) end
+    if limbs then game.write("u32", self.pointer + LIMB_DAMAGE, limbs) end
     return self
 end
 

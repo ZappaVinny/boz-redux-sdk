@@ -17,7 +17,7 @@ local core = require("boz.engine.core")
 local listeners = {}
 local capture = nil
 local value_buffer = game.alloc(2048)
-local VAR_TO_STRING = 0x10   -- CIwConsoleVar vtable: ToString(var, buffer, size)
+local VAR_TO_STRING = core.offset("CIwConsoleVarVTable", "toString")   -- ToString(var, buffer, size)
 
 hook.add(core.sym("Console_Print"), {before = function(call)
     -- The text is a printf format; "%%" (an escaped "%", as print from map scripts sends) is "%".

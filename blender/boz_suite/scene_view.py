@@ -46,6 +46,7 @@ SWITCH_HELP = {
 # The Volumes filter: your volume kinds (link.VOLUME_ITEMS) and the shipped level's shapes.
 VOLUME_KINDS = [("trigger", "Trigger", ""), ("use", "Use", ""), ("hit", "Hit", ""),
                 ("sector", "Sector", ""), ("zone", "Zone", ""), ("portal", "Portal", ""),
+                ("lure", "Lure", ""),
                 ("shipped", "Shipped level", "The shipped level's trigger and collision shapes")]
 # Scene switch -> object kinds it shows.
 SWITCHES = {

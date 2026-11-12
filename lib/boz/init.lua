@@ -41,6 +41,7 @@ boz.Sector = require("boz.objects.sector")
 boz.Teleporter = require("boz.objects.teleporter")
 boz.Player = require("boz.game.player")
 boz.Weapon = require("boz.game.weapon")
+boz.Lure = require("boz.game.lure")
 
 --- The object called name (its editor name; a part is "Prefab.Part"), as its class.
 boz.get = runtime.get
@@ -73,6 +74,13 @@ function boz.zombies(kind)
 end
 --- Spawns a zombie ("zombie", "zombie_dog", ...) at a position; options: health, speed.
 boz.spawn_zombie = zombies.spawn
+--- Ends the match (the game's game over and results); options: win (scripts hear match_ended
+--- with win = true; the game has no win screen of its own).
+boz.end_match = require("boz.game.match").finish
+
+--- Lures zombies to a place or an object (boz.Lure options: seconds, zombies, radius, arrive).
+boz.lure = boz.Lure.at
+
 --- The round number, and starting another.
 boz.round = rounds.current
 boz.start_round = rounds.go_to

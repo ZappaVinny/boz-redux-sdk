@@ -30,9 +30,12 @@ effects.TRIGGERS = {
     explode = {event = "SUBJECT_EXPLODE"},
 }
 
-local LINKED_TRANSFORM, RIGID, LIFETIME, OPENED, OWNER, SUBJECT = 0x7c, 0x80, 0xc0, 0xc7, 0x88, 0x28
-local BULLET_BODY = 0x34
-local AIM, AIM_ZOMBIE = 0xcc, 0xf0
+local function projectile(field) return core.offset("CProjectileEntity", field) end
+local LINKED_TRANSFORM, RIGID, LIFETIME = projectile("linkedTransform"), projectile("rigidBody"),
+    projectile("lifetime")
+local OPENED, OWNER, SUBJECT = projectile("opened"), projectile("owner"), projectile("subject")
+local BULLET_BODY = core.offset("CIsRigidBody", "body")
+local AIM, AIM_ZOMBIE = core.offset("CWeaponManager", "aim"), core.offset("CWeaponManager", "aimZombie")
 local PROJECTILE = "CProjectileEntity"
 local SETUP_FRAMES = 120          -- how long a new projectile may take to be set up by the game
 

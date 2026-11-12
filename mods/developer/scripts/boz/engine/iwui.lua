@@ -16,6 +16,13 @@ local iwui = {}
 
 local core = require("boz.engine.core")
 
+local function element_field(field) return core.offset("CIwUIElement", field) end
+local PARENT, CHILDREN, CHILD_COUNT = element_field("parent"), element_field("children"), element_field("childCount")
+local POSITION, SIZE, PROPERTIES = element_field("position"), element_field("size"), element_field("properties")
+local FIND_CHILD = core.offset("CIwUIElementVTable", "findChild")
+local PROPERTY_CHANGED = core.offset("CIwUIElementVTable", "propertyChanged")
+local PROPERTY_VALUE = core.offset("CIwProperty", "value")
+
 local function ptr(address)
     return game.read("ptr", address)
 end
@@ -32,13 +39,13 @@ end
 
 --- The element's parent, or nil.
 function iwui.parent(element)
-    local parent = ptr(element + 0x18)
+    local parent = ptr(element + PARENT)
     return parent ~= 0 and parent or nil
 end
 
 --- The element's children (list of addresses).
 function iwui.children(element)
-    local data, count = ptr(element + 0x1c), game.read("u32", element + 0x20)
+    local data, count = ptr(element + CHILDREN), game.read("u32", element + CHILD_COUNT)
     local list = {}
     if data ~= 0 and count < 256 then
         for i = 0, count - 1 do
@@ -67,16 +74,16 @@ function iwui.name_hash(element)
     return game.read("u32", element + 4)
 end
 
---- Position and size in the parent (pixels): +0x5c/+0x60 position, +0x64/+0x68 size.
+--- Position and size in the parent (pixels).
 function iwui.rect(element)
-    return game.read("i32", element + 0x5c), game.read("i32", element + 0x60),
-           game.read("i32", element + 0x64), game.read("i32", element + 0x68)
+    return game.read("i32", element + POSITION), game.read("i32", element + POSITION + 4),
+           game.read("i32", element + SIZE), game.read("i32", element + SIZE + 4)
 end
 
 --- Moves an element within its parent.
 function iwui.set_position(element, x, y)
-    game.write("i32", element + 0x5c, x)
-    game.write("i32", element + 0x60, y)
+    game.write("i32", element + POSITION, x)
+    game.write("i32", element + POSITION + 4, y)
 end
 
 --- True if the element's name is name.
@@ -97,7 +104,7 @@ end
 
 --- Renames an element (CIwManaged::SetName, vtable slot 9) so FindElement finds it.
 function iwui.set_name(element, name)
-    game.call(ptr(ptr(element) + 0x24), element, name)
+    game.call(ptr(ptr(element) + FIND_CHILD), element, name)
 end
 
 --- Shows or hides an element.
@@ -106,22 +113,22 @@ function iwui.set_visible(element, visible)
 end
 
 --- Sets a label's text. SetCaption only stores the "caption" property and skips the redraw in
---- some states, so the label is also told the property changed (vtable +0xb8).
+--- some states, so the label is also told the property changed (its vtable).
 function iwui.set_caption(label, text)
     core.call("CIwUILabel::SetCaption", label, text)
-    game.call(ptr(ptr(label) + 0xb8), label, hash.name("caption"))
+    game.call(ptr(ptr(label) + PROPERTY_CHANGED), label, hash.name("caption"))
 end
 
 --- Points a label at a string id (boz.text.add, or one of the game's like S_MENU_MUSIC). The
 --- game's labels show their localiseCaption string id rather than their caption. Changes only
 --- the label's own property (not one shared through its style). Returns false if it has none.
 function iwui.set_text_id(label, id)
-    local property = core.call("IwPropertySet_Find", label + 0xa0, hash.name("localiseCaption"), 0)
+    local property = core.call("IwPropertySet_Find", label + PROPERTIES, hash.name("localiseCaption"), 0)
     if property == 0 then
         return false
     end
-    game.write("u32", property + 0x14, hash.name(id))
-    game.call(ptr(ptr(label) + 0xb8), label, hash.name("localiseCaption"))
+    game.write("u32", property + PROPERTY_VALUE, hash.name(id))
+    game.call(ptr(ptr(label) + PROPERTY_CHANGED), label, hash.name("localiseCaption"))
     return true
 end
 

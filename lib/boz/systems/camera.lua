@@ -12,8 +12,11 @@ local camera = {}
 
 local core = require("boz.engine.core")
 
-local CONFIG, ENDLESS, LEFT, OFFSET, ROLL = 0x20, 0x24, 0x28, 0x34, 0x40
-local BASE_FOV, CURRENT_FOV, AIMING = 0xc4, 0xc0, 0xbc
+local function shake_field(field) return core.offset("CCameraShake", field) end
+local CONFIG, ENDLESS, LEFT = shake_field("config"), shake_field("endless"), shake_field("left")
+local OFFSET, ROLL = shake_field("offset"), shake_field("roll")
+local BASE_FOV, CURRENT_FOV = core.offset("CWeaponManager", "baseFov"), core.offset("CWeaponManager", "currentFov")
+local AIMING = core.offset("CWeaponManager", "aimingFov")
 
 --- The range of field of view the game handles well (degrees).
 camera.FOV_RANGE = {min = 20, max = 140, default = 50}

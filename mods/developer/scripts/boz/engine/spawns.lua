@@ -14,8 +14,8 @@ local spawns = {}
 local entities = require("boz.engine.entities")
 local reflect = require("boz.engine.reflect")
 
-local ACTIVE = 0x34       -- free: SUBJECT_SPAWNPOINT_ACTIVATE / DEACTIVATE (CSpawnPoint::OnEvent)
-local USERS = 0x2c        -- the AI configs allowed to spawn here
+local ACTIVE = require("boz.engine.core").offset("CSpawnPoint", "active")   -- free: SPAWNPOINT_(DE)ACTIVATE
+local USERS = require("boz.engine.core").offset("CSpawnPoint", "users")     -- AI configs allowed to spawn
 
 local Point = {}
 Point.__index = Point

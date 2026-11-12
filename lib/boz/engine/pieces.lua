@@ -117,7 +117,8 @@ function Piece:use_free()
     return true
 end
 
-local SWITCH_TRAPS, SWITCH_TRAPS_END, TRAP_MACHINE = 0x98, 0x9c, 0x6c   -- CTrapSwitch, CTrap
+local SWITCH_TRAPS, SWITCH_TRAPS_END = core.offset("CTrapSwitch", "traps"), core.offset("CTrapSwitch", "trapsEnd")
+local TRAP_MACHINE = core.offset("CTrap", "machine")
 local TRAP_RUNNING, TRAP_COOLING = 1, 2
 
 --- True while a trap of the trap switch (its entity) runs or cools down. The game only takes the

@@ -17,8 +17,10 @@ local function exec(line)
     return require("boz.systems.console").exec(line)
 end
 
-local NAME, PLAYER, LEVEL, DEAD_OPS, DIFFICULTY = 0x55, 0x1a0, 0x204, 0x208, 0x20c
-local NEAREST_POI, RESUMING = 0x214, 0x298
+local function lm(field) return core.offset("CLevelManager", field) end
+local NAME, PLAYER, LEVEL, DEAD_OPS, DIFFICULTY = lm("levelName"), lm("player"), lm("level"), lm("deadOps"),
+    lm("difficulty")
+local NEAREST_POI, RESUMING = lm("nearestPoi"), lm("resuming")
 local ENTITY_ID = 4
 map.DIFFICULTIES = {"easy", "normal", "hard"}
 

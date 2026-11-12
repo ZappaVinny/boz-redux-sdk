@@ -12,6 +12,7 @@ local engine = require("boz.engine.player")
 local score = require("boz.engine.score")
 local weapons = require("boz.engine.weapons")
 
+---@class boz.Player
 local Player = Class:extend("Player")
 
 function Player:init(entity)
@@ -21,9 +22,15 @@ end
 --- Points the player has.
 function Player:points() return score.get() end
 --- Gives points (negative takes them).
-function Player:give_points(points) return score.add(points) end
+function Player:give_points(points)
+    points = require("boz.engine.check").number(points, "give_points")
+    return points and score.add(points) or nil
+end
 --- Takes points if the player has enough; returns true when paid.
-function Player:spend(points) return score.spend(points) end
+function Player:spend(points)
+    points = require("boz.engine.check").number(points, "spend")
+    return points ~= nil and score.spend(points)
+end
 
 --- Health and the most it can have.
 function Player:health() return engine.health() end
@@ -33,7 +40,9 @@ function Player:set_health(value, raise_max) return engine.set_health(value, rai
 function Player:set_god(on) return engine.set_god(on) end
 
 --- Gives a perk by name ("Juggernog", "Quick Revive", ...).
-function Player:give_perk(name) return engine.give_perk(name) end
+function Player:give_perk(name)
+    return require("boz.engine.check").name(name, "give_perk") and engine.give_perk(name) or false
+end
 --- Takes a perk away.
 function Player:take_perk(name) return engine.take_perk(name) end
 --- True when the player has the perk.
@@ -42,7 +51,9 @@ function Player:has_perk(name) return (engine.perks() or {})[name] == true end
 function Player:perks() return engine.perks() or {} end
 
 --- Gives a weapon by name and puts it in hand.
-function Player:give_weapon(name) return weapons.give(name) end
+function Player:give_weapon(name)
+    return require("boz.engine.check").name(name, "give_weapon") and weapons.give(name) or false
+end
 --- Takes a weapon away.
 function Player:take_weapon(name) return weapons.take(name) end
 --- The weapon in hand (a boz.weapons handle), or nil.

@@ -13,13 +13,30 @@ from .hashing import iw_hash
 from .world import (BLOCK_MARGIN, CHALK_FIELD, COLLISION_PARTS, HIT_SOURCE, INGAME, Instance,
                     Layout, Mesh, Model, PLAYER_RADIUS, Placement, Prefab, TRIGGER_SIZE, TRIGGER_SOURCE, Texture, UNIT,
                     USE_SOURCE, Volume, WEAPON_FIELD, World, WorldError, describe, lower, object_names,
-                    script_of, validate, validate_layout, walk)
+                    script_of, validate, validate_layout, walk, world_references, LURE_SOURCE)
+
+def _moveable_poi(spec) -> bool:
+    """Lets the entity's point of interest (its use prompt) follow it when a script moves it:
+    the game keeps m_Moveable points in a list it checks where they are, the others in a grid
+    filed once at load (CPOI::Init). False when it has none."""
+    from . import reflect
+    poi = spec_fields.component(spec, 'CPOI')
+    if poi is None or poi.blob is None:
+        return False
+    prop = spec_fields.prop(poi.blob, 'm_Moveable')
+    if prop is None:
+        prop = reflect.Property(iw_hash('CPOI'), iw_hash('bool'), iw_hash('m_Moveable'), b'')
+        poi.blob.properties.append(prop)
+    reflect.set_typed_value(prop, True)
+    return True
+
 
 def compile_world(pack, name: str, world: World,
-                  fixed: group.Group | None = None, weapons=()) -> levels.LevelFiles:
+                  fixed: group.Group | None = None, weapons=(), scripts=()) -> levels.LevelFiles:
     """The game's groups for *world* under the level name *name* (format 3: lowered, then
     compiled). *weapons*: the project's bozkit.weapons.WeaponDef (edits, new and imported
-    weapons). files.runtime carries the start state and the scripted objects for boz.world."""
+    weapons). *scripts*: the project's Lua sources; objects they name stay changeable during
+    play (bozkit.world.world_references). files.runtime carries the start state and the scripted objects for boz.world."""
     problems = validate(world)
     unattached = sorted({item.asset for _full, item in walk(world.objects())
                          if isinstance(item, Model) and item.asset and not item.mesh})
@@ -27,7 +44,7 @@ def compile_world(pack, name: str, world: World,
         problems.append(f'assets {", ".join(unattached)} were not attached (bozkit.assets.attach)')
     if problems:
         raise WorldError('; '.join(problems))
-    layout = lower(world)
+    layout = lower(world, world_references(world, scripts))
     layout.weapons = list(weapons)
     # Prefabs of yours that links may name: debris counts as a door for "Opens with".
     from . import links as links_module
@@ -141,6 +158,7 @@ class GameModels:
 TRIGGER_TEMPLATE = 'levels/callofthedead/callofthedead_statics.group.bin'   # CSnowTrigger
 HIT_TEMPLATE = 'levels/kino/kino_statics.group.bin'                         # CEasterEgg skulls
 USE_TEMPLATE = 'levels/kino/kino_statics.group.bin'                         # barricade CPOI
+LURE_TEMPLATE = 'levels/callofthedead/callofthedead_statics.group.bin'       # AI goal (CLocator)
 HIT_SONG_FIELD = 0xc0c5b1df   # CEasterEgg's song path (unnamed in the reflection)
 HIT_SONG = 'boz/hit_volume'   # no such song: the group never completes
 
@@ -525,6 +543,7 @@ class _Level:
         self.area_names: dict[int, str] = {}     # CArea name hash -> its zone's name
         self.used: set[int] = set()       # entity names already placed
         self.copies = 0
+        self._lure_template = None
         self._loaded = None
         self.inherited = False
         self.moved: list[group.Resource] = []   # an inherited level's own entities, moved
@@ -609,6 +628,9 @@ class _Level:
     def entity(self, entity: Placement, move_existing: bool) -> None:
         from . import reflect, resources
 
+        if entity.source == LURE_SOURCE:
+            self._lure_point(entity)
+            return
         if entity.source == TRIGGER_SOURCE:
             self._trigger_volume(entity)
             return
@@ -721,6 +743,8 @@ class _Level:
         self._remember_links(entity, key, spec, resource)
         self._mark([entity.position])
         if entity.script and script_of(entity)['dynamic']:
+            if _moveable_poi(spec):
+                resource.body = resources.encode_entity_spec(spec)
             self._script_entity(entity, resource, spec)
 
     def _remember_links(self, entity: Placement, key: int, spec, resource) -> None:
@@ -781,6 +805,23 @@ class _Level:
         self.own.add(id(resource))
         self.script(entity)
 
+    def _lure_point(self, entity: Placement) -> None:
+        """A lure: a point zombies can be sent to (boz.lure), copied from Call of the Dead's AI
+        goals (a CLocator with its transform, name and navmesh target). It does nothing until a
+        script uses it: it starts inactive, and nothing walkable changes."""
+        from . import resources
+
+        if self._lure_template is None:
+            self._lure_template = self._template_spec(LURE_TEMPLATE, 'CLocator')
+        spec = copy.deepcopy(self._lure_template)
+        self.copies += 1
+        name = script_of(entity).get('name') or f'{self.name}_lure_{self.copies}'
+        self._name(spec, name)
+        spec_fields.set_transform(spec, entity.position, entity.quaternion())
+        resource = group.Resource(None, iw_hash(name), resources.encode_entity_spec(spec))
+        self.kept.append(resource)
+        self.own.add(id(resource))
+
     def _template_spec(self, path: str, component: str):
         from . import resources
 
@@ -836,6 +877,8 @@ class _Level:
                     poi.blob.properties.append(prop)
                 reflect.set_typed_value(prop, value)
         spec = copy.deepcopy(spec)
+        if script_of(entity).get('dynamic'):
+            _moveable_poi(spec)    # a script may move it: its use point follows
         self.copies += 1
         name = script_of(entity).get('name') or f'{self.name}_volume_{self.copies}'
         self._name(spec, name)

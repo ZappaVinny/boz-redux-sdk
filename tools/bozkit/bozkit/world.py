@@ -461,7 +461,7 @@ def empty_world(base: str = 'kino') -> 'World':
 
 FORMAT = 3
 OBJECT_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{0,47}$')
-VOLUME_KINDS = ('trigger', 'hit', 'use', 'sector', 'zone', 'portal')
+VOLUME_KINDS = ('trigger', 'hit', 'use', 'sector', 'zone', 'portal', 'lure')
 # Volumes that shape the map rather than send events: a sector (a room the game draws only when
 # it can see it), a zone (an area whose zombie spawns wake when a door opens it) and a portal (a
 # doorway between two sectors). They compile to the level's sectors and areas, not entities.
@@ -969,10 +969,67 @@ def _compose(parent, child):
             tuple(p_scale[i] * c_scale[i] for i in range(3)))
 
 
-def lower(world: World) -> Layout:
+@dataclass
+class ScriptRefs:
+    """The object names a map's scripts may reach: string literals ("Front_Door", "Vault.Lid")
+    and the prefixes of names a script puts together ("Light_" .. i)."""
+    exact: set = field(default_factory=set)
+    prefixes: set = field(default_factory=set)
+
+    def reaches(self, full: str) -> bool:
+        key = full.lower()
+        if key in self.exact:
+            return True
+        # A prefab's name reaches its parts (hide() and friends act on every part).
+        parts = key.split('.')
+        if any('.'.join(parts[:i]) in self.exact for i in range(1, len(parts))):
+            return True
+        return any(key.startswith(prefix) for prefix in self.prefixes)
+
+
+_LITERAL = re.compile(r'"([A-Za-z][A-Za-z0-9_.]{0,96})"(\s*\.\.)?|\'([A-Za-z][A-Za-z0-9_.]{0,96})\'(\s*\.\.)?')
+
+
+def script_references(texts) -> ScriptRefs:
+    """The object names in Lua sources (texts: strings). Only objects a script can name need to
+    stay changeable during play; the build bakes the rest, which keeps large maps light."""
+    refs = ScriptRefs()
+    for text in texts:
+        for match in _LITERAL.finditer(text):
+            word = (match.group(1) or match.group(3)).lower()
+            joined = match.group(2) or match.group(4)
+            (refs.prefixes if joined else refs.exact).add(word)
+    return refs
+
+
+def project_script_texts(scripts) -> list[str]:
+    """A project's own Lua (not its copy of the standard library)."""
+    folder = Path(scripts) if scripts else None
+    if not folder or not folder.is_dir():
+        return []
+    return [file.read_text(encoding='utf-8', errors='replace') for file in sorted(folder.rglob('*.lua'))
+            if file.relative_to(folder).parts[:1] != ('boz',)]
+
+
+def world_references(world: World, texts=()) -> ScriptRefs:
+    """What scripts can reach in *world*: names in its scripts (texts), in object settings (a
+    setting may hold an object's name) and the targets of links."""
+    values = list(texts)
+    for _full, item in walk(world.objects()):
+        values += [f'"{v}"' for v in getattr(item, 'properties', {}).values() if isinstance(v, str)]
+        for targets in (getattr(item, 'links', None) or {}).values():
+            for target in (targets if isinstance(targets, (list, tuple)) else [targets]):
+                if isinstance(target, str):
+                    values.append(f'"{target}"')
+    return script_references(values)
+
+
+def lower(world: World, refs: ScriptRefs | None = None) -> Layout:
     """The compiler's layout for a format 3 world: prefabs flattened into their parts (named
     '<Prefab>.<Part>'), every object named, and objects scripts may change marked dynamic (own
-    collision, tagged walkable area)."""
+    collision, tagged walkable area): ones with a script or a class, ones a script names (refs)
+    and ones marked switchable in older projects. The rest is baked into the level."""
+    refs = refs or ScriptRefs()
     layout = Layout(world.base, inherit=world.inherit, removed=list(world.removed))
     meshes = {mesh.name: mesh for mesh in world.meshes}
     variants: dict[tuple, str] = {}
@@ -992,8 +1049,18 @@ def lower(world: World) -> Layout:
 
     def script_for(full: str, item, dynamic: bool) -> dict:
         start = {**START_DEFAULTS, **getattr(item, 'start', {})}
+        named = dynamic and not item.script and not any(
+            start[k] != START_DEFAULTS[k] for k in START_DEFAULTS)
         dynamic = dynamic or bool(item.script) or any(
             start[k] != START_DEFAULTS[k] for k in START_DEFAULTS)
+        if named and not start['blocks']:
+            # Changeable only because a script names it: something that blocks walking keeps a
+            # tagged walkable area (as the editor sets for scripted objects), so
+            # set_blocks_walking and hide() can open it.
+            if isinstance(item, Model):
+                start['blocks'] = item.collision in ('block', 'solid')
+            elif getattr(item, 'is_game', False):
+                start['blocks'] = not start['walk_through'] and not getattr(item, 'base', False)
         return {'name': full, **start, 'dynamic': dynamic}
 
     def emit(item, transform, prefix: str, scripted_owner: bool) -> None:
@@ -1001,7 +1068,7 @@ def lower(world: World) -> Layout:
         position, rotation, scale = _compose(transform, (item.position, item.rotation,
                                                          getattr(item, 'scale', UNIT)))
         if isinstance(item, Model):
-            script = script_for(full, item, scripted_owner)
+            script = script_for(full, item, scripted_owner or refs.reaches(full))
             if item.mesh:
                 layout.instances.append(Instance(position, prop=prop_for(
                     item.mesh, item.collision, item.shape), rotation=rotation, scale=scale,
@@ -1021,7 +1088,8 @@ def lower(world: World) -> Layout:
             size = tuple(item.size[i] * scale[i] for i in range(3))
             layout.entities.append(Placement(VOLUME_SOURCES[item.kind_of], position, rotation=rotation,
                                              scale=tuple(c / TRIGGER_SIZE for c in size),
-                                             script={'name': full}))
+                                             script={'name': full,
+                                                     'dynamic': scripted_owner or refs.reaches(full)}))
         elif item.is_game:
             # Player spawns are found by their own names (spawn_player_1..4); everything else is
             # called what the world calls it (a base entity's name is its own already).
@@ -1031,17 +1099,22 @@ def lower(world: World) -> Layout:
                 prop=prop_for(item.mesh, 'none', 'box') if item.mesh else '', model=item.game,
                 fields=dict(item.fields), piece=item.piece, settings=dict(item.settings),
                 chalk_texture=item.chalk_texture, links=dict(item.links),
-                script=script_for(name, item, scripted_owner)))
+                script=script_for(name, item, scripted_owner or refs.reaches(name))))
         else:
             for part in item.parts:
-                # Parts of a prefab scripts drive (its script, its class, Scripts can switch
-                # it) are switchable: own collision, a tagged walkable area.
-                driven = bool(item.script) or bool(item.piece) or bool(item.start.get('switchable'))
+                # Parts of a prefab scripts drive (its script, its class, a script naming it, or
+                # Scripts can switch it in older projects) are switchable: own collision, a
+                # tagged walkable area.
+                driven = (bool(item.script) or bool(item.piece) or bool(item.start.get('switchable'))
+                          or refs.reaches(full))
                 emit(part, (position, rotation, scale), full + '.', scripted_owner or driven)
 
     origin = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), UNIT)
     for item in world.objects():
         emit(item, origin, '', False)
+    for number in range(1, LURE_POOL + 1):
+        layout.entities.append(Placement(LURE_SOURCE, (0.0, -100000.0, 0.0),
+                                         script={'name': LURE_POOL_NAME.format(number), 'dynamic': True}))
     return layout
 
 
@@ -1062,6 +1135,10 @@ def describe(world: World) -> list[dict]:
         settings: dict = {}
         if isinstance(item, Volume) and item.kind_of == 'sector':
             entry.update({'class': 'Sector', 'kind': 'sector'})
+        elif isinstance(item, Volume) and item.kind_of == 'lure':
+            entry.update({'class': 'Lure', 'kind': 'lure'})
+            settings = {key: {'value': item.properties.get(key, value)}
+                        for key, value in LURE_SETTINGS.items()}
         elif isinstance(item, Volume):
             entry['class'] = 'Volume'
             entry.update({'volume': item.kind_of, 'who': item.who, 'once': item.once,
@@ -1151,7 +1228,15 @@ def _module(script: str) -> str:
 TRIGGER_SOURCE = 'boz:trigger_volume'
 HIT_SOURCE = 'boz:hit_volume'
 USE_SOURCE = 'boz:use_volume'
-VOLUME_SOURCES = {'trigger': TRIGGER_SOURCE, 'hit': HIT_SOURCE, 'use': USE_SOURCE}
+LURE_SOURCE = 'boz:lure_point'
+VOLUME_SOURCES = {'trigger': TRIGGER_SOURCE, 'hit': HIT_SOURCE, 'use': USE_SOURCE, 'lure': LURE_SOURCE}
+# Lures scripts point anywhere (boz.lure): every map built with the SDK has these, out of sight.
+LURE_POOL = 4
+LURE_POOL_NAME = 'boz_lure_{}'
+# A Lure point's settings (the editor's, and boz.Lure's defaults): which zombies (0 all, else the
+# nearest that many), from how far (cm, 0 anywhere), what they do there ('wait' or 'attack'),
+# for how long (seconds, 0 until stopped), and whether it starts switched on.
+LURE_SETTINGS = {'zombies': 0, 'radius': 0.0, 'arrive': 'wait', 'seconds': 0.0, 'enabled': True}
 TRIGGER_SIZE = 100.0   # centimetres: a volume's size at scale 1
 WEAPON_FIELD = 'boz.weapon'   # a wall buy's weapon (Placement.fields)
 CHALK_FIELD = 'boz.chalk'     # a wall buy's chalk (Placement.settings): '' auto, 'none', an image

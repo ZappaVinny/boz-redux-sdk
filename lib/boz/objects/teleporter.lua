@@ -10,6 +10,7 @@
 
 local Prefab = require("boz.objects.prefab")
 
+---@class boz.Teleporter : boz.Prefab
 local Teleporter = Prefab:extend("Teleporter")
 
 --- Used at its Use volume (the volume took the cost): sends the player.

@@ -12,12 +12,16 @@ local rounds = {}
 local core = require("boz.engine.core")
 local hash = require("boz.engine.hash")
 
-local WAVE_NEXT = 0x84               -- a CWave: m_NextWave
-local SUBJECT = 0x20                 -- CWaveManager: its subject (SUBJECT_NEW_WAVE starts a round)
-local WAVE, ALIVE, ROUND, SPAWNED, KILLED = 0x50, 0x70, 0x78, 0x7c, 0x84
-local SPAWN_TIMER, NEXT_ROUND_TIMER, START_TIMER, POWER = 0x8c, 0x90, 0x94, 0xb8
-local SPECIAL_ROUND, SPECIAL_COUNT = 0x54, 0x58
-local GET_ZOMBIE_COUNT, GET_CLASS_NAME, IS_SPECIAL = 0x50, 0x4c, 0x88
+local function wm(field) return core.offset("CWaveManager", field) end
+local WAVE_NEXT = core.offset("CWave", "m_NextWave")
+local SUBJECT = wm("subject")          -- SUBJECT_NEW_WAVE starts a round
+local WAVE, ALIVE, ROUND, SPAWNED, KILLED = wm("wave"), wm("liveCount"), wm("round"), wm("spawned"), wm("killed")
+local SPAWN_TIMER, NEXT_ROUND_TIMER, START_TIMER, POWER = wm("spawnTimer"), wm("nextWaveTimer"),
+    wm("startTimer"), wm("powerOn")
+local SPECIAL_ROUND, SPECIAL_COUNT = wm("specialityRound"), wm("specialityCount")
+local GET_ZOMBIE_COUNT, GET_CLASS_NAME, IS_SPECIAL = core.offset("CWaveVTable", "getZombieCount"),
+    core.offset("CWaveVTable", "getClassName"), core.offset("CWaveVTable", "isSpecial")
+local INFO_NEXT, INFO_ROUND = core.offset("NewWaveInfo", "nextWave"), core.offset("NewWaveInfo", "round")
 
 --- The round manager (CWaveManager), or nil outside a match.
 function rounds.manager()
@@ -119,8 +123,8 @@ function rounds.special_history()
 end
 
 local function new_wave_info()
-    local info = core.scratch("rounds.info", 0x20)
-    for at = 0, 0x1c, 4 do
+    local info = core.scratch("rounds.info", core.size("NewWaveInfo"))
+    for at = 0, core.size("NewWaveInfo") - 4, 4 do
         game.write("u32", info + at, 0)
     end
     game.write("u32", info, core.sym("s_StartWaveInfoVtable"))
@@ -142,15 +146,15 @@ function rounds.start_next()
     end
     local info = new_wave_info()
     core.call("WaveManager_FillNextWave", manager, game.read("u8", manager + POWER), info)
-    game.write("u32", info + 0x14, game.read("u32", manager + ROUND))
+    game.write("u32", info + INFO_ROUND, game.read("u32", manager + ROUND))
     return send_new_wave(manager, info)
 end
 
 local function start(manager, wave_hash, next_hash, after_round)
     local info = new_wave_info()
     game.write("u32", info + 4, wave_hash)
-    game.write("u32", info + 0x10, next_hash)
-    game.write("u32", info + 0x14, after_round)
+    game.write("u32", info + INFO_NEXT, next_hash)
+    game.write("u32", info + INFO_ROUND, after_round)
     game.write("u32", manager + ROUND, after_round)   -- the event leaves a 0 round alone
     return send_new_wave(manager, info)
 end

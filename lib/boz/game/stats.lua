@@ -24,7 +24,7 @@ stats.ACHIEVEMENTS = {"BOCanYouFlyBobby", "BOCanineCaution", "BOChimpOnBarbie", 
                       "BOQuietOnSet", "BORagingRomero", "BORussianRoulette", "BOThrustMaster",
                       "BOWeHaveAProblem", "BOWhackAZombie"}
 
-local TARGET, PROGRESS = 0x24, 0x28
+local TARGET, PROGRESS = core.offset("CAchievement", "target"), core.offset("CAchievement", "progress")
 
 local singleton = core.singleton
 

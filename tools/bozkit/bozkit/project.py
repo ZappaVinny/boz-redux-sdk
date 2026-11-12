@@ -252,11 +252,22 @@ def copy_standard_library(project: Project) -> Path:
         'runtime.version': 'Lua 5.4',
         'runtime.path': ['?.lua', '?/init.lua'],
         'workspace.library': ['boz'],
+        # The client's globals are described in boz/types/client.lua; listed here too for
+        # editors that only read this file.
         'diagnostics.globals': ['mod', 'log', 'events', 'input', 'gamedef', 'game', 'hook',
-                                'settings', 'overlay', 'ui', 'assets', 'shared'],
+                                'settings', 'overlay', 'ui', 'assets', 'shared', 'client',
+                                'network', 'test'],
     }
     (project.scripts / '.luarc.json').write_text(json.dumps(luarc, indent=2) + '\n',
                                                  encoding='utf-8', newline='\n')
+    # The project folder itself (what Open folder opens): the same, with paths into scripts/.
+    relative = project.scripts.relative_to(project.root).as_posix() \
+        if project.scripts.is_relative_to(project.root) else None
+    if relative:
+        root_luarc = dict(luarc, **{'runtime.path': [f'{relative}/?.lua', f'{relative}/?/init.lua'],
+                                    'workspace.library': [f'{relative}/boz']})
+        (project.root / '.luarc.json').write_text(json.dumps(root_luarc, indent=2) + '\n',
+                                                  encoding='utf-8', newline='\n')
     return target
 
 
@@ -495,7 +506,7 @@ def compile_map(project: Project, game, fixed=None):
         start, reserve = weapons.load_start(source)
         layout = world.load(source)
         files = world_compile.compile_world(game, project.map_name, assets.attach(layout, source), fixed,
-                                    weapons=defs)
+                                    weapons=defs, scripts=world.project_script_texts(project.scripts))
         # The Sounds tab's replaced game sounds (the shared ones in a patched ingame group).
         sound.apply(source, game.read, files.groups, layout.base, project.map_name)
         # The project's own sounds under their names, for boz.audio.play("<name>") in scripts.
