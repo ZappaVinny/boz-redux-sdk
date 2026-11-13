@@ -19,6 +19,7 @@
 -- game: CAIControllerZombie::SetTarget, CAIControllerZombie::ChooseTarget (CLocator AI goals)
 
 local Object = require("boz.objects.object")
+local net = require("boz.engine.net")
 local core = require("boz.engine.core")
 local entities = require("boz.engine.entities")
 local engine = require("boz.engine.objects")
@@ -244,6 +245,10 @@ function Lure:start(options)
     if type(options) ~= "table" then
         error("start takes options such as {seconds = 10}", 2)
     end
+    -- Co-op: the host runs the zombies, so it runs the lure (a guest's own input asks it).
+    if not self._follow and net.route("lure_start", {name = self.name, options = options}, true) == "skip" then
+        return self
+    end
     if not self:enabled() then
         return nil, "switched off"
     end
@@ -280,6 +285,9 @@ end
 
 --- Stops luring: its zombies go back to the players. Returns the lure.
 function Lure:stop()
+    if net.route("lure_stop", {name = self.name}, true) == "skip" then
+        return self
+    end
     local key = string.lower(self.name)
     if running[key] then
         stop_run(key, running[key])
@@ -326,6 +334,10 @@ function Lure.at(target, options)
     if type(target) ~= "table" or (not target.x and type(target.position) ~= "function") then
         error("boz.lure needs a position {x, y, z} or an object", 2)
     end
+    local sent = target.x and {x = target.x, y = target.y, z = target.z} or {object = target.name}
+    if net.route("lure_at", {target = sent, options = options or {}}, true) == "skip" then
+        return nil, "the host runs lures"
+    end
     local runtime = require("boz.objects.runtime")
     for i = 1, POOL_SIZE do
         local name = string.format(POOL, i)
@@ -343,6 +355,20 @@ function Lure.at(target, options)
     log("boz.lure: " .. why)
     return nil, why
 end
+
+net.op("lure_start", function(args)
+    local lure = require("boz.objects.runtime").get(args.name)
+    if lure and lure.start then lure:start(args.options) end
+end, function(args) return require("boz.objects.runtime").knows(args.name) end)
+net.op("lure_stop", function(args)
+    local lure = require("boz.objects.runtime").get(args.name)
+    if lure and lure.stop then lure:stop() end
+end, function(args) return require("boz.objects.runtime").knows(args.name) end)
+net.op("lure_at", function(args)
+    local target = args.target or {}
+    if target.object then target = require("boz.objects.runtime").get(target.object) end
+    if target then Lure.at(target, args.options) end
+end, function() return require("boz.objects.runtime").running_map() end)
 
 --- Stops every lure (a level that starts again).
 function Lure.reset()

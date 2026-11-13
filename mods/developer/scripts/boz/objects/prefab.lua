@@ -68,11 +68,13 @@ function Prefab:parts()
 end
 
 function Prefab:set_visible(visible)
+    if self:_shared("visible", visible) then return self end
     each(self, function(handle) handle:set_visible(visible) end)
     return self
 end
 
 function Prefab:set_blocks_walking(blocks)
+    if self:_shared("walking", blocks) then return self end
     self.walking_blocked = blocks
     engine.set_navmesh(self.name, not blocks)
     each(self, function(handle) handle:set_blocks_walking(blocks) end)
@@ -80,6 +82,7 @@ function Prefab:set_blocks_walking(blocks)
 end
 
 function Prefab:set_stops_bullets(stops)
+    if self:_shared("bullets", stops) then return self end
     self.bullets_stopped = stops
     each(self, function(handle) handle:set_stops_bullets(stops) end)
     return self

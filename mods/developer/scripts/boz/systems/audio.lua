@@ -24,6 +24,13 @@ local scratch = nil
 
 --- Plays a sound spec by name or hash; at a position {x, y, z} when given. Returns true.
 function audio.play(name, position)
+    -- Co-op: what the host's scripts play, every player hears (a player's own input and
+    -- boz.local stay on that game).
+    local where = position and {x = position.x or position[1], y = position.y or position[2],
+                                z = position.z or position[3]} or nil
+    if require("boz.engine.net").route_view("audio_play", {name = name, position = where}) == "skip" then
+        return true
+    end
     local manager = singleton("CIwSoundManager")
     if not manager then
         return false
@@ -91,5 +98,7 @@ function audio.music_volume(volume)
     core.call("Music_SetVolume", manager, math.floor(math.max(0, math.min(1, volume)) * 4096))
     return true
 end
+
+require("boz.engine.net").op("audio_play", function(args) audio.play(args.name, args.position) end)
 
 return audio

@@ -61,6 +61,10 @@ end
 --- last), where the game writes "Reviving" (left of the crosshair), or at `x, y` (screen pixels,
 --- its left edge). Returns false outside a match.
 function hud.message(text, seconds, x, y)
+    -- Co-op: what the host's scripts say, every player sees (boz.local keeps it to one screen).
+    if require("boz.engine.net").route_view("hud_message", {text = text, seconds = seconds, x = x, y = y}) == "skip" then
+        return
+    end
     local label = message_label()
     if not label then
         return false
@@ -91,6 +95,10 @@ function hud.message(text, seconds, x, y)
 end
 
 --- Hides the message now.
+require("boz.engine.net").op("hud_message", function(args)
+    hud.message(args.text, args.seconds, args.x, args.y)
+end)
+
 function hud.clear_message()
     if require("boz.engine.iwui").find(MESSAGE_NAME) then
         hud.set_visible(MESSAGE_NAME, false)

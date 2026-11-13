@@ -262,7 +262,21 @@ end
 
 --- Spawns an effect at a position {x, y, z}. Options: rotation {x, y, z, w}, lifetime (seconds,
 --- then it is removed). Returns the effect, or nil and why.
+-- Co-op: the host spawns effects for every game (a guest's own action asks the host); what the
+-- options hold that cannot travel (functions) stays behind.
+local function shared(op, name, position, options)
+    local plain = {}
+    for key, value in pairs(options or {}) do
+        if type(value) ~= "function" and type(value) ~= "userdata" then plain[key] = value end
+    end
+    local at = position and {x = position.x, y = position.y, z = position.z} or nil
+    return require("boz.engine.net").route(op, {name = name, position = at, options = plain}) == "skip"
+end
+
 function effects.spawn(name, position, options)
+    if shared("effect_spawn", name, position, options) then
+        return nil, "the host spawns it"
+    end
     local effect, err = spawn_logged(name, position, options)
     if effect and options and options.lifetime then
         timed[effect] = options.lifetime
@@ -280,6 +294,9 @@ end
 --- the projectile, or nil and why.
 function effects.projectile(name, position, options)
     options = options or {}
+    if shared("effect_projectile", name, position, options) then
+        return nil, "the host spawns it"
+    end
     local effect, err = spawn_logged(name, position, {rotation = options.rotation,
                                                       lift = options.raise or options.lift or 10})
     if not effect then
@@ -320,8 +337,13 @@ end
 --- nil and why.
 function effects.explode(position, options)
     options = options or {}
+    if shared("effect_explode", nil, position, options) then
+        return nil, "the host spawns it"
+    end
     local spec = effects.EXPLOSIONS[options.kind or "frag"] or options.kind
-    local blast, err = effects.projectile(spec, position, {hidden = true, freeze = true, lift = 0})
+    local net = require("boz.engine.net")
+    local blast, err = net.local_only(effects.projectile, spec, position,
+                                      {hidden = true, freeze = true, lift = 0})
     if not blast then
         return nil, err
     end
@@ -388,5 +410,10 @@ events.on("frame", function(dt)
         end
     end
 end)
+
+local net_ops = require("boz.engine.net")
+net_ops.op("effect_spawn", function(args) effects.spawn(args.name, args.position, args.options) end)
+net_ops.op("effect_projectile", function(args) effects.projectile(args.name, args.position, args.options) end)
+net_ops.op("effect_explode", function(args) effects.explode(args.position, args.options) end)
 
 return effects

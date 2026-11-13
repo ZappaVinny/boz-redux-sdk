@@ -27,11 +27,18 @@ function match.finish(options)
     if not manager or not require("boz.engine.map").player() or ended == manager then
         return false
     end
+    -- Co-op: the host ends it on every game (a guest's own input asks the host).
+    if require("boz.engine.net").route("end_match", {win = options.win == true}) == "skip" then
+        return true
+    end
     ended = manager
     require("boz.objects.runtime").send("match_ended", {win = options.win == true})
     game_events.send(manager + LEVEL_SUBJECT, "SUBJECT_END_GAME")
     return true
 end
+
+require("boz.engine.net").op("end_match", function(args) match.finish(args) end,
+    function() return require("boz.objects.runtime").running_map() end)   -- the map's scripts hear it
 
 --- A level starts: its match can be ended again.
 function match.reset()

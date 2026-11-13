@@ -10,6 +10,11 @@
 --   end
 --   return SealedDoor
 
+local net = require("boz.engine.net")
+net.start()
+if type(mod) == "table" then
+    net.add_mod(mod.id, mod.version)     -- co-op: every player needs the same scripted mods
+end
 local runtime = require("boz.objects.runtime")
 local native = require("boz.objects.native")
 local timers = require("boz.engine.timers")
@@ -74,6 +79,22 @@ function boz.zombies(kind)
 end
 --- Spawns a zombie ("zombie", "zombie_dog", ...) at a position; options: health, speed.
 boz.spawn_zombie = zombies.spawn
+--- Co-op (boz.engine.net): true on the game that runs the match (single player too).
+boz.is_host = net.host
+--- Runs fn for this game alone: what it changes or shows is not shared with the other players.
+boz["local"] = net.local_only
+--- Scripts in co-op: send(name, data) to the other games, on(name, fn(data, from)) to hear them,
+--- shared() (every player runs these mods: the host runs the scripts), players(), private()
+--- (this mod is a tool each player may lack: left out of the check).
+boz.net = {
+    send = net.send,
+    on = net.on,
+    shared = net.shared,
+    host = net.host,
+    players = function() return runtime.players() end,
+    private = function() if type(mod) == "table" then net.private(mod.id) end end,
+}
+
 --- Ends the match (the game's game over and results); options: win (scripts hear match_ended
 --- with win = true; the game has no win screen of its own).
 boz.end_match = require("boz.game.match").finish

@@ -8,6 +8,7 @@
 -- levels, rounds, zombies, weapons, score, pickups, pieces, effects, map, spawns, deadops.
 
 local boz = require("boz")
+boz.net.private()   -- a tool: co-op does not need every player to have it
 local console, camera, fly, rounds = boz.console, boz.camera, boz.fly, boz.rounds
 local weapons, pickups, effects, map, deadops = boz.weapons, boz.pickups, boz.effects, boz.map, boz.deadops
 -- The low-level layer for what a developer tool reaches past the main surface.

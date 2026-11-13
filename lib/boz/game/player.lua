@@ -19,6 +19,55 @@ function Player:init(entity)
     self.entity = entity or 0
 end
 
+--- True for you; false for another player in co-op.
+function Player:is_local()
+    return true
+end
+
+-- Co-op: another game's player. Its methods run on that game (points, perks, teleports, ...);
+-- what they return is not known here (nil). Its position is the one its game reported last.
+local function send_value(value)
+    if type(value) == "table" and type(value.position) == "function" and value.name then
+        return {object = value.name}            -- an object: by name
+    end
+    return value
+end
+
+function Player.remote(tag)
+    local net = require("boz.engine.net")
+    return setmetatable({tag = tag, remote = true}, {__index = function(_, key)
+        if key == "position" then
+            return function() local peer = net.peers()[tag]; return peer and peer.position or nil end
+        elseif key == "is_local" then
+            return function() return false end
+        elseif key == "is_a" then
+            return function(_, class) return class == Player end
+        end
+        if type(Player[key]) ~= "function" then
+            return nil
+        end
+        return function(_, ...)
+            local args = table.pack(...)
+            for i = 1, args.n do args[i] = send_value(args[i]) end
+            net.tell(tag, "player", {method = key, args = args})
+            return nil
+        end
+    end})
+end
+
+-- Another game asked this one to do something to its player.
+require("boz.engine.net").op("player", function(args)
+    local runtime = require("boz.objects.runtime")
+    local list = args.args or {}
+    for i = 1, (list.n or #list) do
+        local value = list[i]
+        if type(value) == "table" and value.object then list[i] = runtime.get(value.object) end
+    end
+    local me = runtime.player()
+    local method = type(args.method) == "string" and me[args.method]
+    if type(method) == "function" then method(me, table.unpack(list, 1, list.n or #list)) end
+end, function() return require("boz.objects.runtime").running_map() end)
+
 --- Points the player has.
 function Player:points() return score.get() end
 --- Gives points (negative takes them).

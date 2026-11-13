@@ -20,6 +20,7 @@ local Prefab = require("boz.objects.prefab")
 local native = require("boz.objects.native")
 local Weapon = require("boz.game.weapon")
 local Player = require("boz.game.player")
+local net = require("boz.engine.net")
 
 local runtime = {}
 
@@ -49,6 +50,7 @@ end
 
 local objects = {}       -- lower name -> object (made on first boz.get, or at start)
 local started = false    -- a level's objects are known
+local clock = 0          -- seconds of frames since the level's objects started
 local entries = {}       -- lower name -> the map's entry for it (world_data objects)
 local volumes = {}       -- lower volume name -> its entry
 local by_hash = {}       -- name hash -> name
@@ -109,8 +111,12 @@ function runtime.each(class)
 end
 
 local function notify(name, data)
-    for _, fn in ipairs(listeners[name] or {}) do
-        core.safely("boz.on " .. name, fn, data, name)
+    local logic = net.runs_logic()
+    for _, listener in ipairs(listeners[name] or {}) do
+        -- Co-op: the host runs the scripts for everyone; {everyone = true} runs on every game.
+        if logic or listener.everyone then
+            core.safely("boz.on " .. name, listener.fn, data, name)
+        end
     end
 end
 
@@ -125,14 +131,29 @@ function runtime.send(name, data)
 end
 
 --- Calls fn(data, name) on every boz.send(name) and game event of that name ("round_started").
-function runtime.on(name, fn)
+--- In co-op the host runs it for everyone; options.everyone: every game runs it (for what each
+--- player sees alone).
+function runtime.on(name, fn, options)
     local check = require("boz.engine.check")
     if not check.name(name, "boz.on") or not check.fn(fn, "boz.on") then
         return fn
     end
     listeners[name] = listeners[name] or {}
-    table.insert(listeners[name], fn)
+    table.insert(listeners[name], {fn = fn, everyone = type(options) == "table" and options.everyone == true})
     return fn
+end
+
+--- True when this copy of the standard library runs the map (its objects are known).
+function runtime.running_map()
+    return started
+end
+
+--- True when this copy of the standard library runs the map called name has an object name.
+function runtime.knows(name)
+    if not started or type(name) ~= "string" then
+        return false
+    end
+    return entries[lower(name)] ~= nil or by_hash[hash.name(name)] ~= nil
 end
 
 -- Who set a volume off: the player (a boz.Player) or the zombie's info table.
@@ -149,9 +170,28 @@ function runtime.player()
     return runtime._player
 end
 
---- Every player in the match.
+--- Every player in the match: you first, then (co-op with shared scripts) the others.
 function runtime.players()
-    return {runtime.player()}
+    local out = {runtime.player()}
+    if net.shared() then
+        for tag in pairs(net.peers()) do
+            runtime._remote = runtime._remote or {}
+            runtime._remote[tag] = runtime._remote[tag] or Player.remote(tag)
+            out[#out + 1] = runtime._remote[tag]
+        end
+    end
+    return out
+end
+
+-- The player behind a request from another game (its tag), or you.
+local function sender()
+    local tag = net.from()
+    if not tag then
+        return runtime.player()
+    end
+    runtime._remote = runtime._remote or {}
+    runtime._remote[tag] = runtime._remote[tag] or Player.remote(tag)
+    return runtime._remote[tag]
 end
 
 -- Volumes
@@ -206,12 +246,25 @@ local function usable(entry, who)
     return false, reason
 end
 
-local function fire_volume(event, entry, info)
+local function fire_volume(event, entry, info, remote)
     if entry.once and entry._fired then
         return
     end
-    local who = who_of(info)
-    if event == "use" and (not usable(entry, who) or not pay(entry.cost)) then
+    local who = remote and sender() or who_of(info)
+    if event == "hit" and net.shared() then
+        -- Co-op: a guest's shot may reach the host twice (its request and the game's own sync).
+        if entry._last_hit and clock - entry._last_hit < 0.5 then
+            return
+        end
+        entry._last_hit = clock
+    end
+    if not remote and event == "use" and (not usable(entry, who) or not pay(entry.cost)) then
+        return
+    end
+    if not remote and not net.runs_logic() then
+        -- Co-op: a guest's own use, hit or step goes to the host, whose scripts run it (it paid).
+        net.request("fire", {event = event, name = entry.name})
+        entry._fired = entry.once or nil
         return
     end
     entry._fired = true
@@ -224,6 +277,11 @@ local function fire_volume(event, entry, info)
         volume:_emit(event, who)
     end
 end
+
+net.op("fire", function(args)
+    local entry = volumes[lower(args.name)]
+    if entry then fire_volume(args.event, entry, nil, true) end
+end, function(args) return runtime.knows(args.name) end)
 
 local function volume_event(event, handle, info)
     local entry = volumes[lower(handle.name)]
@@ -380,7 +438,7 @@ local REMEMBERED = {native.Perk, native.MysteryBox, native.PackAPunch, native.Tr
 local IN_USE = 3                 -- seconds
 local USE_MEMORY = 20            -- seconds a use counts (a perk's drink, the box's spin)
 local used = {}                  -- class -> {object, at}: what the player used last
-local clock = 0
+clock = 0
 
 --- Runs fn (which uses a piece) without the use reaching scripts again.
 function runtime.pass_use(fn)
@@ -411,11 +469,23 @@ local function on_game_use(info)
     end
     if object.on_use ~= native.Native.on_use then   -- its class changes what a use does
         info:skip()
-        object:_emit("use", runtime.player())
-    else
+        if net.runs_logic() then
+            object:_emit("use", runtime.player())
+        else
+            net.request("native_use", {name = object.name, emit = true})
+        end
+    elseif net.runs_logic() then
         object:_notify("use", runtime.player())
+    else
+        net.request("native_use", {name = object.name})
     end
 end
+
+net.op("native_use", function(args)
+    local object = runtime.get(args.name)
+    if not object then return end
+    if args.emit then object:_emit("use", sender()) else object:_notify("use", sender()) end
+end, function(args) return runtime.knows(args.name) end)
 
 -- Saves: boz.saved and each object's own fields (self.count = 3 is kept).
 local function saved_key()
@@ -508,6 +578,9 @@ local function in_use(class)
 end
 
 local function route(name, data)
+    if not net.runs_logic() then
+        return               -- co-op guests: the host's scripts hear the game's events
+    end
     local player = runtime.player()
     if name == "door_opened" then
         local door = data and data.door and runtime.get(data.door)
@@ -580,8 +653,9 @@ local function bridge()
     weapons.on_event(function(event, name, data)
         local object = weapon_objects[lower(name)]
         if object then
-            object:_emit(({given = "given", equipped = "equip", fired = "fire",
-                          reloaded = "reload"})[event] or event, data)
+            -- The player's own weapon: in co-op, what its script changes goes to the host.
+            net.as_input(object._emit, object, ({given = "given", equipped = "equip", fired = "fire",
+                                                 reloaded = "reload"})[event] or event, data)
         end
     end)
     hook.add(core.sym("CSaveManager::SaveGame"), {before = function()
@@ -604,8 +678,10 @@ local function bridge()
     events.on("frame", function(dt)
         clock = clock + (dt or 0)
         check_leaving(dt or 0)
-        check_zombies(dt or 0)
-        check_areas(dt or 0)
+        if net.runs_logic() then     -- co-op guests: the host watches zombies and players
+            check_zombies(dt or 0)
+            check_areas(dt or 0)
+        end
         if starting.pending then
             starting.waited = starting.waited + (dt or 0)
             if starting.waited > LOAD_WAIT then

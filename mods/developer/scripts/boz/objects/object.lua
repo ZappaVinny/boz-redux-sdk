@@ -7,6 +7,7 @@
 
 local Class = require("boz.class")
 local engine = require("boz.engine.objects")
+local net = require("boz.engine.net")
 
 ---@class boz.Object
 local Object = Class:extend("Object")
@@ -24,8 +25,27 @@ function Object:init(name, entry)
     self._handle = engine.get(name)
 end
 
+-- Co-op: a change the host makes goes to every game; a guest leaves it to the host
+-- (boz.engine.net). True when this game should not make it now.
+function Object:_shared(op, value)
+    return net.route(op, {name = self.name, value = value}) == "skip"
+end
+
+local function knows(args)
+    return require("boz.objects.runtime").knows(args.name)
+end
+
+for op, method in pairs({visible = "set_visible", walking = "set_blocks_walking",
+                          bullets = "set_stops_bullets"}) do
+    net.op(op, function(args)
+        local object = require("boz.objects.runtime").get(args.name)
+        if object then object[method](object, args.value) end
+    end, knows)
+end
+
 --- Shows (true) or hides (false) it. Hidden, it stops nothing and blocks nothing.
 function Object:set_visible(visible)
+    if self:_shared("visible", visible) then return self end
     self._handle:set_visible(visible)
     return self
 end
@@ -40,6 +60,7 @@ end
 
 --- Walking: true, players and zombies cannot walk through it (needs Walking: Blocks).
 function Object:set_blocks_walking(blocks)
+    if self:_shared("walking", blocks) then return self end
     self.walking_blocked = blocks
     self._handle:set_blocks_walking(blocks)
     return self
@@ -47,6 +68,7 @@ end
 
 --- Stops bullets: false, shots pass through it.
 function Object:set_stops_bullets(stops)
+    if self:_shared("bullets", stops) then return self end
     self.bullets_stopped = stops
     self._handle:set_stops_bullets(stops)
     return self
@@ -95,6 +117,10 @@ local function glide(self, target, options)
     end
     local done = options.done
     target.seconds, target.ride = options.seconds, options.ride
+    if net.route("move", {name = self.name, target = {position = target.position, rotation = target.rotation,
+                                                      seconds = target.seconds, ride = target.ride}}) == "skip" then
+        return self
+    end
     target.done = done and function() done(self) end or nil
     local origin, members = self:_motion()
     if not motion.move(self.name, target, origin, members) then
@@ -102,6 +128,11 @@ local function glide(self, target, options)
     end
     return self
 end
+
+net.op("move", function(args)
+    local object = require("boz.objects.runtime").get(args.name)
+    if object then glide(object, args.target, {seconds = args.target.seconds, ride = args.target.ride}) end
+end, knows)
 
 --- Moves it to a position or another object's, at once or over options.seconds. options:
 --- seconds, rotation (degrees about the vertical axis or a quaternion), ride (players standing
