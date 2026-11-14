@@ -17,8 +17,8 @@ from . import maps
 from .schema import sdk_root
 
 PROJECT_FILE = 'boz-project.toml'
-PROJECT_SCHEMA = 2
-SUPPORTED_SCHEMAS = (1, 2)
+PROJECT_SCHEMA = 3
+SUPPORTED_SCHEMAS = (1, 2, 3)   # 3: game.json round sets (bozkit.game.upgrade)
 KINDS = ('script', 'map')
 MAP_TEMPLATES = ('new',) + maps.SHIPPED   # a new map, or a remix of a shipped one
 GAME_VERSION = '1.0.11'

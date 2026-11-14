@@ -1,6 +1,7 @@
 """The editor (boz_suite app template) in background Blender. Run with run_suite_test.py, which
 builds the suite, makes a map project and starts Blender with it."""
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -244,7 +245,39 @@ def asset_checks(label):
         print(f"BOZ_SUITE_INFO idgun: {stats['high_triangles']} -> {stats['triangles']} triangles "
               f"({stats['see_through']}% see-through), "
               f"textures {stats['textures']}, warnings {stats['warnings']}")
+    bulk_import_checks(label)
     return name
+
+
+CUBE_OBJ = "\n".join(["v -50 -50 0", "v 50 -50 0", "v 50 50 0", "v -50 50 0", "v -50 -50 100",
+                      "v 50 -50 100", "v 50 50 100", "v -50 50 100",
+                      "f 1 2 3 4", "f 5 8 7 6", "f 1 5 6 2", "f 2 6 7 3", "f 3 7 8 4", "f 4 8 5 1"]) + "\n"
+
+
+def bulk_import_checks(label):
+    """Import a folder (models in subfolders too, a broken file that does not stop the others),
+    then several files at once; the PC preset unless another is picked; each made in turn."""
+    at = suite.assets_tab
+    folder = project.parent / f"bulk_{label}"
+    (folder / "props").mkdir(parents=True, exist_ok=True)
+    (folder / "Wooden Crate.obj").write_text(CUBE_OBJ, encoding="utf-8")
+    (folder / "props" / "barrel.obj").write_text(CUBE_OBJ, encoding="utf-8")
+    (folder / "broken.obj").write_text("this is not a model\n", encoding="utf-8")
+    (folder / "notes.txt").write_text("not a model either\n", encoding="utf-8")
+    bpy.ops.boz.asset_import_folder("EXEC_DEFAULT", directory=str(folder))
+    for name in ("Wooden_Crate", "barrel"):
+        asset = at.asset_def(name)
+        stats = at.stats_of(name)
+        check(asset is not None and asset.preset == "pc", f"{label}: bulk {name} imported with the PC preset")
+        check(stats and stats["triangles"] > 0, f"{label}: bulk {name} made ({stats})")
+    check(not at._state["queue"] and at._state["building"] is None, f"{label}: the queue ran to the end")
+    errors = at._state["import_errors"]
+    check(any("broken" in e for e in errors), f"{label}: the broken file is listed, the rest went on ({errors})")
+    check(at.asset_def("notes") is None, f"{label}: other files are left out")
+    bpy.ops.boz.asset_import("EXEC_DEFAULT", directory=str(folder), kind="prop",
+                             files=[{"name": "Wooden Crate.obj"}, {"name": "props/barrel.obj"}])
+    check(at.asset_def("Wooden_Crate_2") is not None and at.asset_def("barrel_2") is not None,
+          f"{label}: several files at once, named after their files")
 
 
 def own_model_checks(label, asset_name):
@@ -678,6 +711,14 @@ def sound_checks(label):
             panel.draw(fake, FakeContext(None, workspace))
         except Exception as exc:   # noqa: BLE001
             check(False, f"{label}: {panel.__name__} fails: {exc!r}")
+    folder = recording.parent
+    shutil.copyfile(recording, folder / "Growl.wav")
+    (folder / "broken.wav").write_bytes(b"not audio")
+    before = {d.name for d in tab.defs()}
+    bpy.ops.boz.sound_import("EXEC_DEFAULT", directory=str(folder),
+                             files=[{"name": "Growl.wav"}, {"name": "broken.wav"}, {"name": "Roar Take 2.wav"}])
+    added = {d.name for d in tab.defs()} - before
+    check(added == {"growl", "roar_take_2_2"}, f"{label}: several recordings at once, a broken one skipped ({added})")
     return target
 
 
@@ -720,82 +761,124 @@ def effect_checks(label):
 
 
 def game_checks(label):
-    """Game tab: the base level's rounds show, a change makes them the map's own, every game can
-    share them, a dog round, a zombie look, the economy and a hook stub."""
+    """Game tab: the base level's rounds show (view only), a new round set copies a mode and that
+    mode plays it, table edits and resets, the After that growth, a dog round, modes and their
+    multipliers, a zombie look, settings stored only when changed, problems as you edit."""
     tab = suite.game_tab
     gm = tab.game
+    source = suite.link.source_dir()
     if not LIBRARY:
         return False
     bpy.ops.boz.game_refresh("EXEC_DEFAULT")
+    check(len(scene.boz_game_modes) == 6, f"{label}: the modes table has six modes")
     check(len(scene.boz_game_rounds) >= 2, f"{label}: the base level's rounds show ({len(scene.boz_game_rounds)})")
-    check(not gm.load(suite.link.source_dir()).get("rounds"), f"{label}: nothing stored before a change")
+    check(scene.boz_game_rounds[-1].label == "After that", f"{label}: the last row is After that")
+    check(not gm.load(source).get("rounds"), f"{label}: nothing stored before a change")
+    bpy.ops.boz.game_set_add("EXEC_DEFAULT", source="mode:normal")
+    stored = gm.load(source)["rounds"]
+    check([s["name"] for s in stored["sets"]] == ["Standard"] and stored["modes"]["normal"]["set"] == "Standard"
+          and stored["modes"]["easy"]["set"] == "", f"{label}: New round set from normal: normal plays it ({stored['modes']})")
+    check(scene.boz_game_set == "Standard", f"{label}: the new set shows")
     scene.boz_game_round_index = 0
-    scene.boz_game_round.m_ZombieCount = 3
-    stored = gm.load(suite.link.source_dir())["rounds"]
-    check(stored["chains"]["normal"][0]["m_ZombieCount"] == 3, f"{label}: a changed round is stored")
-    bpy.ops.boz.game_rounds_copy("EXEC_DEFAULT")
-    stored = gm.load(suite.link.source_dir())["rounds"]
-    check(all(stored["chains"][k][0]["m_ZombieCount"] == 3 for k in gm.CHAIN_KEYS),
-          f"{label}: Use these rounds in every game")
-    before = len(stored["chains"]["normal"])
+    scene.boz_game_rounds[0].zombies = 3
+    stored = gm.load(source)["rounds"]
+    check(stored["sets"][0]["rounds"][0]["m_ZombieCount"] == 3, f"{label}: a table edit is stored")
+    base_first = tab.base_chain("normal")[0]["m_ZombieCount"]
+    bpy.ops.boz.game_reset("EXEC_DEFAULT", owner="boz_game_rounds[0]", attr="zombies", value=repr(base_first))
+    check(gm.load(source)["rounds"]["sets"][0]["rounds"][0]["m_ZombieCount"] == base_first, f"{label}: and reset")
+    scene.boz_game_rounds[0].zombies = 3
+    scene.boz_game_round.m_ZombieRun = 1.0
+    shares = [getattr(scene.boz_game_round, n) for n in gm.SPEEDS]
+    check(abs(sum(shares) - 1.0) < 0.01 and shares[2] == 1.0, f"{label}: the speed mix stays at 100% ({shares})")
+    before = len(gm.load(source)["rounds"]["sets"][0]["rounds"])
     bpy.ops.boz.game_round_add("EXEC_DEFAULT")
-    check(len(gm.load(suite.link.source_dir())["rounds"]["chains"]["normal"]) == before + 1, f"{label}: a round is added")
+    check(len(gm.load(source)["rounds"]["sets"][0]["rounds"]) == before + 1, f"{label}: a round is added")
     bpy.ops.boz.game_round_remove("EXEC_DEFAULT")
-    check(len(gm.load(suite.link.source_dir())["rounds"]["chains"]["normal"]) == before, f"{label}: and removed")
-    specials = len(gm.load(suite.link.source_dir())["rounds"].get("specials") or [])
+    check(len(gm.load(source)["rounds"]["sets"][0]["rounds"]) == before, f"{label}: and removed")
+    scene.boz_game_round_index = len(scene.boz_game_rounds) - 1
+    scene.boz_game_after_health = "grow"
+    scene.boz_game_round.m_ZombieHealthMultiplier = 1.2
+    after = gm.load(source)["rounds"]["sets"][0]
+    check(after["after_health"] == "grow" and after["rounds"][-1]["m_ZombieHealthMultiplier"] == 1.2
+          and after["rounds"][-1]["class"] == "CWaveRepeatable", f"{label}: After that grows health x 1.2")
+    specials = len(after.get("specials") or [])
     bpy.ops.boz.game_special_add("EXEC_DEFAULT")
-    check(len(gm.load(suite.link.source_dir())["rounds"]["specials"]) == specials + 1, f"{label}: a special round is added")
-    scene.boz_game_repeat_health = "grow"
-    check(gm.load(suite.link.source_dir())["rounds"]["repeat_health"] == "grow", f"{label}: repeating health")
+    check(len(gm.load(source)["rounds"]["sets"][0]["specials"]) == specials + 1, f"{label}: a dog round is added")
+    for key in gm.MODE_KEYS:
+        bpy.ops.boz.game_mode_set("EXEC_DEFAULT", mode=key, choice="Standard")
+    scene.boz_game_modes[5].zombies = 1.5
+    modes = gm.load(source)["rounds"]["modes"]
+    check(all(m["set"] == "Standard" for m in modes.values()) and modes["coop4"]["zombies"] == 1.5,
+          f"{label}: every mode plays Standard, co-op 4 with zombies x 1.5")
+    scene.boz_game_set_rename = "Main"
+    modes = gm.load(source)["rounds"]["modes"]
+    check(all(m["set"] == "Main" for m in modes.values()), f"{label}: renaming a set keeps the modes on it")
+    scene.boz_game_modes[0].health = 50.0          # clamped to the maximum
+    check(scene.boz_game_modes[0].health == gm.MULTIPLIER_RANGE[1], f"{label}: multipliers have a maximum")
+    scene.boz_game_modes[0].health = 1.0
     check(len(scene.boz_game_looks) >= 1, f"{label}: the zombie looks show")
-    scene.boz_game_looks[0].used = False
+    scene.boz_game_looks[0].used = not scene.boz_game_looks[0].used
     if len(scene.boz_game_looks) > 1:
-        check(scene.boz_game_looks[0].hash & 0xffffffff not in gm.load(suite.link.source_dir())["zombies"]["used"],
-              f"{label}: an unticked look is left out")
-    scene.boz_game_looks[0].used = True
+        check("zombies" in gm.load(source), f"{label}: a changed look is stored")
+    scene.boz_game_looks[0].used = not scene.boz_game_looks[0].used
+    check("zombies" not in gm.load(source), f"{label}: the base looks again: nothing stored")
     form = scene.boz_game_economy
-    form.set_StartingScore = True
     form.StartingScore = 2500
-    form.set_scores = True
-    form.set_box = True
+    form.score_SUBJECT_ZOMBIE_SCORE_HIT = 20
     form.box_m_Cost = 1200
-    economy = gm.load(suite.link.source_dir())["economy"]
-    check(economy["cvars"] == {"StartingScore": 2500} and economy["box"]["m_Cost"] == 1200
-          and economy["scores"]["SUBJECT_ZOMBIE_SCORE_HIT"] == 10, f"{label}: the economy is stored ({economy})")
+    form.pickup_nuke = 0
+    form.DoublePointsTime = 45.0
+    economy = gm.load(source)["economy"]
+    check(economy["cvars"] == {"StartingScore": 2500, "DoublePointsTime": 45000} and economy["box"] == {"m_Cost": 1200}
+          and economy["scores"] == {"SUBJECT_ZOMBIE_SCORE_HIT": 20} and economy["pickups"] == {"nuke": 0},
+          f"{label}: only changed settings are stored ({economy})")
+    form.DoublePointsTime = 30.0
+    check("DoublePointsTime" not in gm.load(source)["economy"]["cvars"], f"{label}: a setting back at the game's goes")
+    form.box_m_MinWeapons = 12
+    check(any("at least more weapons" in m for m, _n in link.problems_of(scene)),
+          f"{label}: a problem shows as you edit ({link.problems_of(scene)})")
+    form.box_m_MinWeapons = 4
+    check(not any(n == link.GAME_TAB for _m, n in link.problems_of(scene)), f"{label}: and goes when fixed")
     scene.boz_game_power_on = True
-    check(gm.load(suite.link.source_dir())["level"]["power_on"], f"{label}: power on at the start")
+    check(gm.load(source)["level"]["power_on"], f"{label}: power on at the start")
     bpy.ops.boz.game_hook("EXEC_DEFAULT", event="round_started")
     check((project / "scripts" / "hooks" / "round_started.lua").is_file(), f"{label}: a hook stub is made")
-    tab.draw_graph()
-    check(bpy.data.images.get(tab.GRAPH_IMAGE) is not None, f"{label}: the rounds graph is drawn")
     for panel in (tab.BOZ_PT_game_level, tab.BOZ_PT_game_rounds, tab.BOZ_PT_game_specials,
-                  tab.BOZ_PT_game_zombies, tab.BOZ_PT_game_economy, tab.BOZ_PT_game_hooks):
+                  tab.BOZ_PT_game_zombies, tab.BOZ_PT_game_points, tab.BOZ_PT_game_powerups,
+                  tab.BOZ_PT_game_box, tab.BOZ_PT_game_hooks):
         fake = type("Panel", (), {"layout": FakeLayout()})()
         try:
             panel.draw(fake, FakeContext(None, "Game"))
         except Exception as exc:   # noqa: BLE001
             check(False, f"{label}: {panel.__name__} fails: {exc!r}")
+    for ui_list, items in ((tab.BOZ_UL_game_rounds, scene.boz_game_rounds), (tab.BOZ_UL_game_looks, scene.boz_game_looks)):
+        try:
+            ui_list.draw_item(None, None, FakeLayout(), scene, items[0], 0, None, "", 0)
+        except Exception as exc:   # noqa: BLE001
+            check(False, f"{label}: {ui_list.__name__} fails: {exc!r}")
     return True
 
 
 def game_build_checks(label, data):
-    """The built map has its own rounds, score table, and boz.game gets its rules and hooks."""
+    """The built map plays its rounds per mode, has its score table, and boz.game gets its rules."""
     tab = suite.game_tab
     gm = tab.game
     built_project = link.sdk_project.load_project(project)
     output = next((project / "build").glob("*/assets"))
     statics = tab.group.parse((output / f"{built_project.map_name}_statics.group.bin").read_bytes())
     rounds = gm.read_rounds(statics)
-    check(all(rounds["chains"][k][0]["m_ZombieCount"] == 3 for k in gm.CHAIN_KEYS),
-          f"{label}: the built level starts every game with the map's first round")
+    check(all(rounds["chains"][k][0]["m_ZombieCount"] == 3 for k in gm.CHAIN_KEYS[:5]),
+          f"{label}: the built level starts every mode with the set's first round")
+    check(rounds["chains"]["coop4"][0]["m_ZombieCount"] == 4 and rounds["chains"]["coop4"][-1]["class"] == "CWaveRepeatable",
+          f"{label}: co-op 4 has zombies x 1.5 ({rounds['chains']['coop4'][0]['m_ZombieCount']})")
     names = {r.in_group_hash for t in statics.types() for r in t.resources}
     check(world.iw_hash(gm.score_table_name(built_project.map_name)) in names, f"{label}: the map's score table")
-    check("StartingScore = 2500" in data and "power_on = true" in data and "grow_health = true" in data,
-          f"{label}: boz.game gets the rules")
+    check("StartingScore = 2500" in data and "power_on = true" in data and "repeating" in data
+          and '"Main"' in data, f"{label}: boz.game gets the rules")
     check('"round_started"' in data, f"{label}: the hook is started")
     scripts = output.parent / "scripts"
-    check((scripts / "boz" / "engine" / "game.lua").is_file() and (scripts / "boz" / "engine" / "hooks.lua").is_file()
-          and (scripts / "hooks" / "round_started.lua").is_file(), f"{label}: boz.game, boz.hooks and the hook ship")
+    check((scripts / "boz" / "engine" / "game.lua").is_file() and (scripts / "boz" / "game" / "rules.lua").is_file()
+          and (scripts / "hooks" / "round_started.lua").is_file(), f"{label}: boz.game, boz.rules and the hook ship")
 
 
 def effect_build_checks(label, used, data):

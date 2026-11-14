@@ -112,7 +112,7 @@ local SYSTEMS = {audio = "boz.systems.audio", camera = "boz.systems.camera",
                  console = "boz.systems.console", cvars = "boz.systems.cvars",
                  menu = "boz.systems.pause_settings", text = "boz.systems.text",
                  screen = "boz.systems.screen", effects = "boz.game.effects",
-                 pickups = "boz.game.pickups", rounds = "boz.game.rounds",
+                 pickups = "boz.game.pickups", rounds = "boz.game.rounds", rules = "boz.game.rules",
                  stats = "boz.game.stats", fly = "boz.game.fly", deadops = "boz.game.deadops",
                  weapons = "boz.engine.weapons", map = "boz.engine.map",
                  sectors = "boz.engine.sectors", online = "boz.systems.online"}

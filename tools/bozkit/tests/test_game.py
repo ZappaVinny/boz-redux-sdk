@@ -54,6 +54,7 @@ def statics():
                                        'm_StartingWave': 3}, 0),
         (game.WAVE_CLASSES[2], iw_hash('dogs'), {'class': 'CWaveSpeciality', 'm_HellhoundWave': True,
                                                   'm_players2ZombieNumber': [6, 12, 16, 18],
+                                                  'm_ZombieTypes': [iw_hash('zombie_dog')], 'm_healthBase': [300],
                                                   'm_waveType': 1, 'm_MaxActive': 3}, 0),
     ]
     wave_type = group.ResourceType(game.WAVE, 0, 1, [
@@ -81,18 +82,83 @@ class Rounds(unittest.TestCase):
         self.assertEqual(normal[0]['m_StartingTimer'], 1000)            # a default filled in
         self.assertEqual(rounds['specials'][0]['m_players2ZombieNumber'], [6, 12, 16, 18])
 
-    def test_write_round_trip_and_own_names(self):
+    def test_base_rounds_untouched_without_changes(self):
+        self.assertFalse(game.changes_rounds({'sets': [], 'modes': game.default_modes()}))
         level = statics()
-        rounds = game.read_rounds(level)
-        rounds['chains']['hard'] = [dict(rounds['chains']['hard'][0], m_ZombieCount=99)] + \
-            rounds['chains']['hard'][1:]
-        game.write_rounds(level, rounds)
+        before = group.encode(level)
+        with tempfile.TemporaryDirectory() as temp:
+            game.apply({'rounds': {'sets': [], 'modes': game.default_modes()}}, Path(temp),
+                       {'mymap_statics.group.bin': level}, 'mymap')
+        self.assertEqual(group.encode(level), before)
+
+    def test_a_set_for_some_modes_the_base_for_the_rest(self):
+        level = statics()
+        base = game.read_rounds(level)
+        harder = game.normalize_set({'name': 'Harder', 'from': 'normal',
+                                     'rounds': [dict(w, m_ZombieCount=w['m_ZombieCount'] * 2)
+                                                for w in base['chains']['normal']],
+                                     'specials': [{k: v for k, v in base['specials'][0].items() if k != 'm_waveType'}]})
+        modes = game.default_modes()
+        modes['coop2'] = {'set': 'Harder', 'zombies': 1.0, 'health': 1.0}
+        modes['hard'] = {'set': '', 'zombies': 1.5, 'health': 2.0}
+        repeating = game.write_rounds(level, {'sets': [harder], 'modes': modes})
         again = game.read_rounds(group.parse(group.encode(level)))
-        self.assertEqual(again, rounds)
+        self.assertEqual([w['m_ZombieCount'] for w in again['chains']['coop2']], [12, 20, 40])
+        self.assertEqual([w['m_ZombieCount'] for w in again['chains']['normal']], [6, 10, 20])  # the base
+        self.assertEqual([w['m_ZombieCount'] for w in again['chains']['hard']], [9, 15, 30])
+        self.assertEqual([w['m_ZombieHealth'] for w in again['chains']['hard']], [300, 500, 600])
+        self.assertEqual(again['chains']['coop2'][-1]['class'], 'CWaveRepeatable')
+        # coop2 has the set's dog round; normal (base, m_waveType 1) keeps the base's.
+        types = sorted(int(w['m_waveType']) for w in again['specials'])
+        self.assertEqual(types, [1, 3])
+        # hard's repeating round: the game's formula times 2.
+        self.assertEqual(repeating, {iw_hash('boz_hard_3'): {'grow': False, 'scale': 2.0}})
         names = {r.in_group_hash for t in level.types() if t.class_hash == game.WAVE for r in t.resources}
-        self.assertIn(iw_hash('boz_hard_1'), names)
-        self.assertIn(iw_hash('boz_special_1'), names)
+        self.assertIn(iw_hash('boz_coop2_s1'), names)
         self.assertNotIn(iw_hash('wave1'), names)
+
+    def test_old_chains_become_sets(self):
+        base = game.read_rounds(statics())
+        chains = {k: [dict(w) for w in base['chains']['normal']] for k in game.CHAIN_KEYS}
+        chains['easy'][0]['m_ZombieHealth'] = 75
+        specials = [dict(base['specials'][0], m_waveType=1), dict(base['specials'][0], m_waveType=0, m_chance=7)]
+        data = game.upgrade({'rounds': {'chains': chains, 'specials': specials, 'repeat_health': 'grow'}})
+        sets = {s['name']: s for s in data['rounds']['sets']}
+        # Normal has a dog round, hard and co-op none: three sets, nothing lost.
+        self.assertEqual(sorted(sets), ['Easy', 'Hard', 'Standard'])
+        self.assertEqual(data['rounds']['modes']['coop4']['set'], 'Hard')
+        self.assertEqual(data['rounds']['modes']['normal']['set'], 'Standard')
+        self.assertEqual(data['rounds']['modes']['easy']['set'], 'Easy')
+        self.assertEqual(sets['Easy']['specials'][0]['m_chance'], 7)
+        self.assertNotIn('m_waveType', sets['Standard']['specials'][0])
+        self.assertEqual(sets['Standard']['after_health'], 'grow')
+        self.assertEqual(game.check(data), [])
+
+    def test_copies_of_the_base_fold_back(self):
+        base = game.read_rounds(statics())
+        chains = {k: [dict(w) for w in base['chains'][k]] for k in game.CHAIN_KEYS}
+        chains['coop4'][0]['m_ZombieCount'] = 99
+        specials = [dict(w) for w in base['specials']]
+        data = game.simplify(game.upgrade({'rounds': {'chains': chains, 'specials': specials}}), base)
+        modes = data['rounds']['modes']
+        self.assertEqual(modes['coop4']['set'], 'Co-op 4')
+        self.assertTrue(all(modes[k]['set'] == '' for k in game.CHAIN_KEYS if k != 'coop4'))
+        self.assertEqual([s['name'] for s in data['rounds']['sets']], ['Co-op 4'])
+        own = {'sets': [game.normalize_set({'name': 'Mine', 'from': 'normal', 'rounds': base['chains']['normal']})],
+               'modes': dict(game.default_modes(), normal={'set': 'Mine', 'zombies': 1.0, 'health': 1.0})}
+        kept = game.simplify({'rounds': own}, base)['rounds']
+        self.assertEqual((kept['modes']['normal']['set'], len(kept['sets'])), ('Mine', 1))   # a new set stays
+
+    def test_summary(self):
+        self.assertEqual(game.summary({}), "the base map's rounds")
+        modes = {k: {'set': 'Standard', 'zombies': 1.0, 'health': 1.0} for k in game.CHAIN_KEYS}
+        data = {'rounds': {'sets': [{'name': 'Standard', 'rounds': [{}], 'specials': [{}, {}]}], 'modes': modes},
+                'economy': {'cvars': {'StartingScore': 900}}}
+        self.assertEqual(game.summary(data), 'Standard rounds for all modes, 2 special rounds, 1 setting changed')
+        modes['coop4'] = {'set': '', 'zombies': 2.0, 'health': 1.0}
+        self.assertEqual(game.summary(data).split(', 2 special')[0],
+                         "Standard rounds: solo easy, solo normal, solo hard, co-op 2, co-op 3; "
+                         "the base map's (zombies x2) rounds: co-op 4")
 
     def test_round_values_like_the_game(self):
         chain = game.read_rounds(statics())['chains']['normal']
@@ -104,14 +170,24 @@ class Rounds(unittest.TestCase):
         self.assertEqual(game.round_values(chain, 2)['health'], 250)
 
     def test_check(self):
-        rounds = game.read_rounds(statics())
-        rounds['chains']['easy'] = []
-        rounds['chains']['normal'][0]['m_MaxActive'] = 0
-        problems = game.check({'rounds': rounds, 'economy': {'cvars': {'Bogus': 1}, 'pickups': [1]}})
-        self.assertTrue(any('easy' in p for p in problems))
-        self.assertTrue(any('at once' in p for p in problems))
-        self.assertTrue(any('Bogus' in p for p in problems))
-        self.assertTrue(any('power-up' in p for p in problems))
+        base = game.read_rounds(statics())
+        broken = game.normalize_set({'name': 'Mine', 'rounds': [dict(base['chains']['normal'][0], m_MaxActive=0)],
+                                     'specials': [dict(base['specials'][0], m_minNormalWavesInterval=9,
+                                                       m_maxNormalWavesInterval=2)]})
+        modes = game.default_modes()
+        modes['easy'] = {'set': 'Gone', 'zombies': 1.0, 'health': 50.0}
+        problems = game.check({'rounds': {'sets': [broken, dict(broken)], 'modes': modes},
+                               'economy': {'cvars': {'Bogus': 1, 'maxSpawnedZombies': 99},
+                                           'pickups': {'nuke': 500}, 'box': {'m_MinWeapons': 12}}})
+        for words in ('at once', 'Bogus', 'Power-ups', '"Gone"', 'health x', 'two round sets',
+                      '"at least" (9)', 'Zombies alive at most', 'at least more weapons'):
+            self.assertTrue(any(words in p for p in problems), (words, problems))
+
+    def test_pickups_store_only_changes(self):
+        economy = {'pickups': {'nuke': 0}}
+        self.assertEqual(game.pickup_weights(economy), [10, 10, 10, 0, 10, 10, 10, 10, 0])
+        self.assertEqual(game.pickup_weights({'pickups': [1] * 9}), [1] * 9)
+        self.assertIsNone(game.pickup_weights({}))
 
 
 class Rest(unittest.TestCase):
@@ -154,6 +230,11 @@ class Rest(unittest.TestCase):
             self.assertEqual(game.load(Path(temp)), {})
             game.save(Path(temp), {'level': {'power_on': True}})
             self.assertEqual(game.load(Path(temp)), {'level': {'power_on': True}})
+            manifest = Path(temp, 'boz-project.toml')
+            source = Path(temp, 'source')
+            manifest.write_text('schema = 2\n[mod]\n', encoding='utf-8')
+            game.save(source, {})
+            self.assertIn('schema = 3', manifest.read_text(encoding='utf-8'))
 
     def test_every_field_documented(self):
         for field in game.FIELDS:

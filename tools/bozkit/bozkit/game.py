@@ -33,6 +33,7 @@ Project file: ``source/game.json``. Absent sections keep the base level's own da
 """
 from __future__ import annotations
 
+import copy
 import json
 import struct
 from dataclasses import dataclass
@@ -143,6 +144,21 @@ _PARENT = {'CWave': None, 'CWaveRepeatable': 'CWave', 'CWaveSpeciality': 'CWaveR
            'CWaveMonkey': 'CWaveSpeciality'}
 
 
+# The most each field may be (the editor's slider ends; check() reports anything above).
+MAXIMA = {
+    'm_ZombieCount': 1000, 'm_ZombieHealth': 1_000_000, 'm_MaxActive': 64, 'm_StartingZombies': 64,
+    'm_ZombieWalk': 1.0, 'm_ZombieWalkFast': 1.0, 'm_ZombieRun': 1.0, 'm_ZombieSprint': 1.0,
+    'm_TimeOut': 60_000, 'm_WaveTimeout': 600_000, 'm_StartingTimer': 600_000,
+    'm_PoweredZombieCount': 1000, 'm_PoweredZombieHealthMult': 100.0,
+    'm_ZombieCountMultiplier': 10.0, 'm_PoweredZombieCountMultiplier': 10.0,
+    'm_MaxActiveMultiplier': 10.0, 'm_ZombieHealthMultiplier': 10.0, 'm_TimeOutMultiplier': 10.0,
+    'm_StartingWave': 1000, 'm_healthBase': 1_000_000, 'm_players2ZombieNumber': 1000,
+    'm_repeatTimes': 100, 'm_minNormalWavesInterval': 100_000, 'm_maxNormalWavesInterval': 100_000,
+    'm_chance': 100,
+}
+SPEEDS = ('m_ZombieWalk', 'm_ZombieWalkFast', 'm_ZombieRun', 'm_ZombieSprint')
+
+
 def fields_of(class_name: str) -> list[Field]:
     """The fields a wave class has (its own and inherited), in the order above."""
     chain, c = set(), class_name
@@ -176,6 +192,21 @@ CVARS = {
     'EndWaveGrenades': ('Grenades per round', 'grenades',
                         'Grenades each player gets back at the end of a round.', 2),
 }
+CVAR_MAX = {'StartingScore': 1_000_000, 'PlayerDownScorePenalty': 1.0, 'PickupPointsThreshold': 1_000_000,
+            'PickupKillThreshold': 10_000, 'PickupDropOnDeathProbability': 100, 'MaxPickupsPerWave': 100,
+            'DoublePointsTime': 600_000, 'InstaKillTime': 600_000, 'FireSaleTime': 600_000,
+            'DeathMachineTime': 600_000, 'MTXReviveCost': 1_000_000, 'baseZombieHealth': 100_000,
+            'maxSpawnedZombies': 32, 'EndWaveGrenades': 20}
+# Where each setting shows in the Game tab.
+CVAR_SECTIONS = {
+    'zombies': ('baseZombieHealth', 'maxSpawnedZombies'),
+    'points': ('StartingScore', 'PlayerDownScorePenalty', 'MTXReviveCost', 'EndWaveGrenades'),
+    'powerups': ('PickupPointsThreshold', 'PickupKillThreshold', 'PickupDropOnDeathProbability',
+                 'MaxPickupsPerWave', 'DoublePointsTime', 'InstaKillTime', 'FireSaleTime',
+                 'DeathMachineTime'),
+}
+SCORE_MAX = 100_000
+PICKUP_MAX = 100
 # Power-up weights (ProbabilityOfSpawningEachPickup), in the game's order (CPickupManager).
 PICKUPS = ['double_points', 'insta_kill', 'max_ammo', 'nuke', 'carpenter', 'firesale',
            'deathmachine', 'perkbottle', 'lightningbolt']
@@ -353,37 +384,206 @@ def read_rounds(statics: group.Group) -> dict:
             'specials': [{k: v for k, v in w.items() if k != 'next'} for w in specials]}
 
 
-def write_rounds(statics: group.Group, rounds: dict) -> None:
-    """Replace the level's rounds: every chain and special round becomes the map's own waves
-    (boz_<chain>_<n>, boz_special_<n>) and the CLevel starts each chain."""
+# Round sets (game.json "rounds"):
+#   {"sets": [{"name", "from", "rounds": [wave, ...], "specials": [wave, ...],
+#              "after_health": "game" | "grow"}],
+#    "modes": {mode: {"set": name | "", "zombies": x, "health": x}}}
+# A mode on set "" plays the base level's own rounds for that mode. A set's last round is its
+# "After that" round (a CWaveRepeatable: it repeats, growing each round); the others are CWave.
+# "from" is the base mode the set was copied from (the editor greys values still equal to it).
+# Special rounds belong to a set; the build gives each mode that uses the set its own copies.
+MODES = CHAINS
+MODE_KEYS = CHAIN_KEYS
+BASE_SET = ''
+MULTIPLIER_RANGE = (0.1, 10.0)
+SET_NAME_MAX = 32
+
+
+def default_modes() -> dict:
+    return {key: {'set': BASE_SET, 'zombies': 1.0, 'health': 1.0} for key in MODE_KEYS}
+
+
+def normalize_set(entry: dict) -> dict:
+    """A set with its round classes in order: CWave, ..., CWaveRepeatable (the "After that")."""
+    rounds = [dict(w) for w in entry.get('rounds') or []]
+    for i, wave in enumerate(rounds):
+        wave['class'] = 'CWaveRepeatable' if i == len(rounds) - 1 else 'CWave'
+    out = dict(entry, rounds=rounds, specials=[dict(w) for w in entry.get('specials') or []])
+    out.setdefault('after_health', 'game')
+    out.setdefault('from', '')
+    return out
+
+
+def upgrade(data: dict) -> dict:
+    """game.json of an older SDK (six round chains) in today's shape (round sets and modes).
+    Identical chains become one set; the one normal play uses is "Standard"."""
+    rounds = data.get('rounds')
+    if not rounds or 'chains' not in rounds:
+        return data
     chains = rounds.get('chains') or {}
-    missing = [k for k in CHAIN_KEYS if not chains.get(k)]
-    if missing:
-        raise GameError(f'rounds: no rounds for {", ".join(missing)}')
+    specials = rounds.get('specials') or []
+    health = rounds.get('repeat_health') or 'game'
+    def own_specials(key):
+        index = MODE_KEYS.index(key)
+        return [{k: v for k, v in w.items() if k != 'm_waveType'} for w in specials
+                if int(w.get('m_waveType', 1)) == index]
+
+    # Modes become one set only when their rounds and their special rounds are the same.
+    groups: list[list[str]] = []
+    for key in MODE_KEYS:
+        for members in groups:
+            if chains.get(members[0]) == chains.get(key) and own_specials(members[0]) == own_specials(key):
+                members.append(key)
+                break
+        else:
+            groups.append([key])
+    labels = {'easy': 'Easy', 'normal': 'Standard', 'hard': 'Hard', 'coop2': 'Co-op 2',
+              'coop3': 'Co-op 3', 'coop4': 'Co-op 4'}
+    sets, modes = [], {}
+    for members in groups:
+        name = 'Standard' if 'normal' in members else labels[members[0]]
+        own = own_specials(members[0])
+        sets.append(normalize_set({'name': name, 'from': members[0], 'rounds': chains.get(members[0]) or [],
+                                   'specials': own, 'after_health': health, 'converted': True}))
+        for key in members:
+            modes[key] = {'set': name, 'zombies': 1.0, 'health': 1.0}
+    out = dict(data)
+    out['rounds'] = {'sets': sets, 'modes': modes}
+    return out
+
+
+def _same_rounds(a: list, b: list) -> bool:
+    strip = lambda waves: [{k: v for k, v in w.items() if k not in ('m_waveType', 'class')} for w in waves]
+    return strip(a) == strip(b)
+
+
+def simplify(data: dict, base: dict | None) -> dict:
+    """Modes on a set converted from an older project (which copied all six chains on the first
+    edit) that holds exactly the base level's rounds for the mode play the base's own again;
+    converted sets no mode uses then go. Sets made in the Rules tab are left alone."""
+    rounds = (data or {}).get('rounds')
+    if not rounds or not base or 'sets' not in rounds:
+        return data
+    sets = {s.get('name'): normalize_set(s) for s in rounds.get('sets') or []}
+    for key in MODE_KEYS:
+        mode = mode_of(rounds, key)
+        entry = sets.get(mode['set'])
+        if entry is None or not entry.get('converted') or entry.get('after_health', 'game') != 'game':
+            continue
+        index = MODE_KEYS.index(key)
+        base_specials = [w for w in base.get('specials') or [] if int(w.get('m_waveType', 1)) == index]
+        if _same_rounds(entry['rounds'], base['chains'].get(key) or []) and \
+                _same_rounds(entry['specials'], base_specials):
+            rounds.setdefault('modes', {})[key] = dict(mode, set=BASE_SET)
+    used = {mode_of(rounds, key)['set'] for key in MODE_KEYS}
+    rounds['sets'] = [s for s in rounds.get('sets') or [] if s.get('name') in used or not s.get('converted')]
+    return data
+
+
+def set_named(rounds: dict, name: str) -> dict | None:
+    return next((s for s in rounds.get('sets') or [] if s.get('name') == name), None)
+
+
+def mode_of(rounds: dict, key: str) -> dict:
+    mode = dict(default_modes()[key])
+    mode.update((rounds.get('modes') or {}).get(key) or {})
+    return mode
+
+
+def changes_rounds(rounds: dict | None) -> bool:
+    """True when the map's rounds differ from the base level's (a set or a multiplier in use)."""
+    if not rounds:
+        return False
+    for key in MODE_KEYS:
+        mode = mode_of(rounds, key)
+        if mode['set'] != BASE_SET or float(mode['zombies']) != 1.0 or float(mode['health']) != 1.0:
+            return True
+    return False
+
+
+def _scaled(wave: dict, zombies: float, health: float) -> dict:
+    out = dict(wave)
+
+    def scale(name, by):
+        value = out.get(name, FIELD[name].default)
+        if isinstance(value, (list, tuple)):
+            out[name] = [max(1 if v else 0, round(int(v) * by)) for v in value]
+        else:
+            out[name] = max(1 if value else 0, round(int(value) * by))
+
+    special = out.get('class') in SPECIAL_CLASSES
+    if zombies != 1.0:
+        scale('m_ZombieCount', zombies)
+        scale('m_PoweredZombieCount', zombies)
+        if special:
+            scale('m_players2ZombieNumber', zombies)
+    if health != 1.0:
+        scale('m_ZombieHealth', health)
+        if special:
+            scale('m_healthBase', health)
+    return out
+
+
+def mode_rounds(rounds: dict, key: str, base: dict) -> tuple[list[dict], list[dict], str]:
+    """What mode *key* plays: (rounds, special rounds, after health), multipliers applied. *base*
+    is read_rounds of the base level."""
+    mode = mode_of(rounds, key)
+    index = MODE_KEYS.index(key)
+    if mode['set'] == BASE_SET:
+        chain = base['chains'].get(key) or []
+        specials = [w for w in base.get('specials') or [] if int(w.get('m_waveType', 1)) == index]
+        health = 'game'
+    else:
+        entry = set_named(rounds, mode['set'])
+        if entry is None:
+            raise GameError(f'rounds: {dict(MODES)[key]} uses the round set "{mode["set"]}", which does not exist')
+        entry = normalize_set(entry)
+        chain, specials, health = entry['rounds'], entry['specials'], entry['after_health']
+    zombies, hp = float(mode['zombies']), float(mode['health'])
+    return ([_scaled(w, zombies, hp) for w in chain],
+            [_scaled(dict(w, m_waveType=index), zombies, hp) for w in specials], health)
+
+
+def wave_name(key: str, number: int) -> str:
+    return f'boz_{key}_{number}'
+
+
+def write_rounds(statics: group.Group, rounds: dict) -> dict:
+    """Replace the level's rounds with what each mode plays (boz_<mode>_<n>, its special rounds
+    boz_<mode>_s<n>) and start each mode at its first. Returns what boz.game needs for the
+    repeating rounds' health: {wave name hash: {"grow": bool, "scale": health x}}."""
+    base = read_rounds(statics)
     wave_types = _types(statics, WAVE)
     if not wave_types:
         raise GameError('the level has no CWave resources to replace')
+    plans = {key: mode_rounds(rounds, key, base) for key in MODE_KEYS}
+    for key, (chain, _specials, _health) in plans.items():
+        if not chain:
+            raise GameError(f'rounds: {dict(MODES)[key]} has no rounds')
     wave_type = wave_types[0]
     for section in statics.sections:
         if section.types is not None:
             section.types[:] = [t for t in section.types if t is wave_type or t.class_hash != WAVE]
     wave_type.resources.clear()
-    firsts = []
-    for key in CHAIN_KEYS:
-        chain = chains[key]
-        names = [iw_hash(f'boz_{key}_{i + 1}') for i in range(len(chain))]
+    firsts, repeating = [], {}
+    for key in MODE_KEYS:
+        chain, specials, health = plans[key]
+        names = [iw_hash(wave_name(key, i + 1)) for i in range(len(chain))]
         for i, wave in enumerate(chain):
             if wave.get('class') in SPECIAL_CLASSES:
-                raise GameError(f'rounds: {key} round {i + 1} is a special round')
+                raise GameError(f'rounds: {dict(MODES)[key]} round {i + 1} is a special round')
             body = encode_wave(wave, names[i + 1] if i + 1 < len(names) else 0)
-            wave_type.resources.append(group.Resource(iw_hash(wave.get('class', 'CWave')),
-                                                      names[i], body))
+            wave_type.resources.append(group.Resource(iw_hash(wave.get('class', 'CWave')), names[i], body))
+        last = chain[-1]
+        scale = float(mode_of(rounds, key)['health'])
+        if last.get('class') == 'CWaveRepeatable' and (health == 'grow' or scale != 1.0):
+            repeating[names[-1]] = {'grow': health == 'grow', 'scale': 1.0 if health == 'grow' else scale}
+        for i, wave in enumerate(specials):
+            if wave.get('class') not in SPECIAL_CLASSES:
+                raise GameError(f'special round {i + 1} is not a special round class')
+            wave_type.resources.append(group.Resource(iw_hash(wave['class']), iw_hash(f'boz_{key}_s{i + 1}'),
+                                                      encode_wave(wave)))
         firsts.append(names[0])
-    for i, wave in enumerate(rounds.get('specials') or []):
-        if wave.get('class') not in SPECIAL_CLASSES:
-            raise GameError(f'special round {i + 1} is not a special round class')
-        wave_type.resources.append(group.Resource(iw_hash(wave['class']),
-                                                  iw_hash(f'boz_special_{i + 1}'), encode_wave(wave)))
     resource, blob = _level(statics)
     values = {iw_hash('m_StartingWavesSP'): firsts[:3], iw_hash('m_StartingWavesMP'): firsts[3:]}
     present = set()
@@ -398,6 +598,7 @@ def write_rounds(statics: group.Group, rounds: dict) -> None:
             blob.properties.append(reflect.Property(LEVEL, iw_hash('std::list<unsigned int>'),
                                                     name_hash, struct.pack(f'<I{len(v)}I', len(v), *v)))
     resource.body = resources.encode_reflected(blob)
+    return repeating
 
 
 def round_values(chain: list[dict], round_number: int, power_on: bool = False,
@@ -509,6 +710,7 @@ def write_zombie_types(statics: group.Group, used: list[int]) -> None:
 BOX_FIELDS = {'m_Cost': ('Box cost', 950), 'm_FireSaleCost': ('Fire sale cost', 10),
               'm_MinWeapons': ('Weapons shown at least', 4),
               'm_MaxWeapons': ('Weapons shown at most', 10)}
+BOX_MAX = {'m_Cost': 1_000_000, 'm_FireSaleCost': 1_000_000, 'm_MinWeapons': 50, 'm_MaxWeapons': 50}
 
 
 def apply_box(groups: dict, box: dict) -> int:
@@ -647,7 +849,7 @@ def path(source: Path) -> Path:
 
 
 def load(source: Path) -> dict:
-    """source/game.json ({} when there is none)."""
+    """source/game.json ({} when there is none), in today's shape (see upgrade)."""
     file = path(source)
     if not file.is_file():
         return {}
@@ -657,7 +859,7 @@ def load(source: Path) -> dict:
         raise GameError(f'game.json: {exc}') from None
     if not isinstance(data, dict):
         raise GameError('game.json: not an object')
-    return data
+    return upgrade(data)
 
 
 def save(source: Path, data: dict) -> None:
@@ -665,74 +867,233 @@ def save(source: Path, data: dict) -> None:
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n', encoding='utf-8',
                     newline='\n')
+    _raise_schema(Path(source).parent)
+
+
+def _raise_schema(root: Path) -> None:
+    """Round sets need project schema 3: an older SDK then refuses the project instead of
+    misreading its rounds."""
+    import re
+    from .project import PROJECT_FILE, PROJECT_SCHEMA
+    manifest = root / PROJECT_FILE
+    if not manifest.is_file():
+        return
+    text = manifest.read_text(encoding='utf-8')
+    found = re.search(r'^schema = (\d+)$', text, re.M)
+    if found and int(found.group(1)) < PROJECT_SCHEMA:
+        manifest.write_text(text[:found.start(1)] + str(PROJECT_SCHEMA) + text[found.end(1):],
+                            encoding='utf-8', newline='\n')
+
+
+def pickup_weights(economy: dict) -> list[int] | None:
+    """The nine power-up weights the map sets (None: the game's). Stored as {power-up: weight}
+    for the changed ones (older projects: a list of all nine)."""
+    weights = economy.get('pickups')
+    if weights is None:
+        return None
+    if isinstance(weights, list):
+        return [int(w) for w in weights]
+    return [int(weights.get(key, default)) for key, default in zip(PICKUPS, PICKUP_WEIGHTS)]
+
+
+def scores_of(economy: dict) -> tuple[dict, dict] | None:
+    """The whole score table (points, per-round limits) with the map's changes, or None."""
+    scores, limits = economy.get('scores') or {}, economy.get('score_limits') or {}
+    if not scores and not limits:
+        return None
+    table = {action: points for action, _l, points in SCORES}
+    table.update(scores)
+    caps = {action: limit for action, _l, limit in SCORE_LIMITS}
+    caps.update(limits)
+    return table, caps
+
+
+def _number(value, low, high, whole) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if whole and not isinstance(value, int):
+        return False
+    return low <= value <= high
+
+
+def _check_wave(problems: list, where: str, wave: dict, special: bool) -> None:
+    for field in fields_of(wave.get('class', 'CWave')):
+        if field.name not in wave or field.name not in MAXIMA:
+            continue
+        value, top = wave[field.name], MAXIMA[field.name]
+        values = value if isinstance(value, list) else [value]
+        if not all(_number(v, 0, top, field.type != 'float') for v in values):
+            problems.append(f'{where}: {field.label} must be from 0 to {top:,}')
+    if not special:
+        if sum(float(wave.get(n, FIELD[n].default)) for n in SPEEDS) <= 0:
+            problems.append(f'{where}: no zombie speeds (walkers, runners, ... are all 0)')
+        if int(wave.get('m_MaxActive', 0)) <= 0 and int(wave.get('m_ZombieCount', 0)) > 0:
+            problems.append(f'{where}: at once must be at least 1')
+    else:
+        low, high = int(wave.get('m_minNormalWavesInterval', 3)), int(wave.get('m_maxNormalWavesInterval', 5))
+        if low > high:
+            problems.append(f'{where}: "at least" ({low}) is more than "at most" ({high}) rounds')
+        counts = wave.get('m_players2ZombieNumber') or []
+        if not 1 <= len(counts) <= 4:
+            problems.append(f'{where}: count by players needs 1 to 4 numbers (1, 2, 3, 4 players)')
+        if wave.get('m_ZombieTypes') and not wave.get('m_healthBase'):
+            problems.append(f'{where}: give the special zombies a health')
+        if not wave.get('m_ZombieTypes') and wave.get('class') != 'CWaveMonkey':
+            problems.append(f'{where}: pick what spawns (zombie types)')
 
 
 def check(data: dict) -> list[str]:
-    """Problems with the Game tab's data (the build stops on them)."""
+    """Problems with the Game tab's data (shown as you edit; the build stops on them)."""
     problems = []
+    data = upgrade(data)
     rounds = data.get('rounds')
     if rounds:
-        for key in CHAIN_KEYS:
-            chain = (rounds.get('chains') or {}).get(key) or []
-            if not chain:
-                problems.append(f'Rounds: {dict(CHAINS)[key]} has no rounds')
-            for i, wave in enumerate(chain):
-                shares = sum(float(wave.get(n, FIELD[n].default)) for n in
-                             ('m_ZombieWalk', 'm_ZombieWalkFast', 'm_ZombieRun', 'm_ZombieSprint'))
-                if shares <= 0:
-                    problems.append(f'Rounds: {dict(CHAINS)[key]} round {i + 1}: no zombie speeds')
-                if int(wave.get('m_MaxActive', 0)) <= 0 and int(wave.get('m_ZombieCount', 0)) > 0:
-                    problems.append(f'Rounds: {dict(CHAINS)[key]} round {i + 1}: '
-                                    'at once must be at least 1')
-    for name, value in (data.get('economy', {}).get('cvars') or {}).items():
+        names = [s.get('name', '') for s in rounds.get('sets') or []]
+        for name in names:
+            if not name.strip() or len(name) > SET_NAME_MAX:
+                problems.append(f'Rounds: a round set needs a name of 1 to {SET_NAME_MAX} letters')
+            elif names.count(name) > 1:
+                problems.append(f'Rounds: two round sets are called "{name}"')
+        for entry in rounds.get('sets') or []:
+            label = f'Rounds: "{entry.get("name", "")}"'
+            if not entry.get('rounds'):
+                problems.append(f'{label} has no rounds')
+            for i, wave in enumerate(entry.get('rounds') or []):
+                last = i == len(entry['rounds']) - 1
+                _check_wave(problems, f'{label} {"after that" if last else f"round {i + 1}"}', wave, False)
+            for i, wave in enumerate(entry.get('specials') or []):
+                _check_wave(problems, f'Special rounds: "{entry.get("name", "")}" {i + 1}', wave, True)
+            if entry.get('after_health', 'game') not in ('game', 'grow'):
+                problems.append(f'{label}: after-that health must be "game" or "grow"')
+        low, high = MULTIPLIER_RANGE
+        for key, label in MODES:
+            mode = mode_of(rounds, key)
+            if mode['set'] != BASE_SET and mode['set'] not in names:
+                problems.append(f'Rounds: {label} uses the round set "{mode["set"]}", which does not exist')
+            for what in ('zombies', 'health'):
+                if not _number(mode[what], low, high, False):
+                    problems.append(f'Rounds: {label} {what} x must be from {low} to {high}')
+    economy = data.get('economy') or {}
+    for name, value in (economy.get('cvars') or {}).items():
         if name not in CVARS:
-            problems.append(f'Economy: unknown setting {name}')
-        elif not isinstance(value, (int, float)) or value < 0:
-            problems.append(f'Economy: {CVARS[name][0]} must be a number of 0 or more')
-    if rounds and rounds.get('repeat_health', 'game') not in ('game', 'grow'):
-        problems.append('Rounds: repeat health must be "game" or "grow"')
-    for name, value in ((data.get('economy') or {}).get('box') or {}).items():
-        if name not in BOX_FIELDS or not isinstance(value, int) or value < 0:
-            problems.append(f'Economy: box setting {name} must be a whole number of 0 or more')
+            problems.append(f'Settings: unknown setting {name}')
+        elif not _number(value, 0, CVAR_MAX[name], not isinstance(CVARS[name][3], float)):
+            problems.append(f'{_section_label(name)}: {CVARS[name][0]} must be from 0 to {CVAR_MAX[name]:,}')
+    box = economy.get('box') or {}
+    for name, value in box.items():
+        if name not in BOX_FIELDS or not _number(value, 0, BOX_MAX[name], True):
+            top = BOX_MAX.get(name, 0)
+            problems.append(f'Mystery box: {BOX_FIELDS.get(name, (name,))[0]} must be a whole number from 0 to {top:,}')
+    shown_min = box.get('m_MinWeapons', BOX_FIELDS['m_MinWeapons'][1])
+    shown_max = box.get('m_MaxWeapons', BOX_FIELDS['m_MaxWeapons'][1])
+    if isinstance(shown_min, int) and isinstance(shown_max, int) and shown_min > shown_max:
+        problems.append('Mystery box: it shows at least more weapons than at most')
     if (data.get('level') or {}).get('behaves_like', '') not in BEHAVES_LIKE:
-        problems.append('Level info: behaves like must be one of ' + ', '.join(repr(k) for k in BEHAVES_LIKE))
-    for name, value in ((data.get('economy') or {}).get('score_limits') or {}).items():
-        if not isinstance(value, int) or value < 0:
-            problems.append(f'Economy: the limit for {name} must be a whole number of 0 or more')
-    weights = data.get('economy', {}).get('pickups')
-    if weights is not None and (len(weights) != len(PICKUPS) or
-                                any(not isinstance(w, int) or w < 0 for w in weights)):
-        problems.append('Economy: power-up weights must be 9 whole numbers of 0 or more')
+        problems.append('Level: behaves like must be one of ' + ', '.join(repr(k) for k in BEHAVES_LIKE))
+    for kind, table in (('points', economy.get('scores') or {}), ('limit', economy.get('score_limits') or {})):
+        for name, value in table.items():
+            if not _number(value, 0, SCORE_MAX, True):
+                problems.append(f'Points: the {kind} for {name} must be a whole number from 0 to {SCORE_MAX:,}')
+    weights = economy.get('pickups')
+    if weights is not None:
+        if isinstance(weights, list):
+            ok = len(weights) == len(PICKUPS) and all(_number(w, 0, PICKUP_MAX, True) for w in weights)
+        else:
+            ok = all(k in PICKUPS and _number(w, 0, PICKUP_MAX, True) for k, w in weights.items())
+        if not ok:
+            problems.append(f'Power-ups: weights must be whole numbers from 0 to {PICKUP_MAX}')
+        elif sum(pickup_weights(economy)) <= 0:
+            problems.append('Power-ups: every weight is 0 (nothing can drop; use "Drops per round" 0 instead)')
     return problems
 
 
-def runtime(data: dict, map_name: str) -> dict:
-    """What boz.game applies when the map starts: {"cvars": {name: value}, "power_on": bool}."""
+def _section_label(cvar: str) -> str:
+    for section, names in CVAR_SECTIONS.items():
+        if cvar in names:
+            return {'zombies': 'Zombies', 'points': 'Points', 'powerups': 'Power-ups'}[section]
+    return 'Settings'
+
+
+SHORT_MODES = {'easy': 'solo easy', 'normal': 'solo normal', 'hard': 'solo hard',
+               'coop2': 'co-op 2', 'coop3': 'co-op 3', 'coop4': 'co-op 4'}
+
+
+def summary(data: dict, base: dict | None = None) -> str:
+    """One line about the map's rules (the desktop app shows it); *base*: read_rounds of the base
+    level, to fold copies of its rounds (see simplify)."""
+    data = simplify(upgrade(copy.deepcopy(data)), base)
+    rounds = data.get('rounds') or {}
+    parts = []
+    if not changes_rounds(rounds):
+        parts.append("the base map's rounds")
+    else:
+        used = {}
+        for key, _label in MODES:
+            label = SHORT_MODES[key]
+            mode = mode_of(rounds, key)
+            name = mode['set'] or "the base map's"
+            extra = []
+            if float(mode['zombies']) != 1.0:
+                extra.append(f'zombies x{float(mode["zombies"]):g}')
+            if float(mode['health']) != 1.0:
+                extra.append(f'health x{float(mode["health"]):g}')
+            used.setdefault(name + (f' ({", ".join(extra)})' if extra else ''), []).append(label)
+        if len(used) == 1:
+            parts.append(f'{next(iter(used))} rounds for all modes')
+        else:
+            parts.append('; '.join(f'{name} rounds: {", ".join(labels)}' for name, labels in used.items()))
+        specials = sum(len(s.get('specials') or []) for s in rounds.get('sets') or [])
+        if specials:
+            parts.append(f'{specials} special round{"s" if specials != 1 else ""}')
+    economy = data.get('economy') or {}
+    changed = len(economy.get('cvars') or {}) + len(economy.get('box') or {}) + \
+        len(economy.get('scores') or {}) + len(economy.get('score_limits') or {}) + \
+        (1 if economy.get('pickups') is not None else 0)
+    if changed:
+        parts.append(f'{changed} setting{"s" if changed != 1 else ""} changed')
+    if (data.get('zombies') or {}).get('used'):
+        parts.append(f'{len(data["zombies"]["used"])} zombie looks')
+    return ', '.join(parts)
+
+
+def runtime(data: dict, map_name: str, repeating: dict | None = None) -> dict:
+    """What boz.game applies when the map starts: cvars, power_on, the repeating rounds' health,
+    behaves_like, and the rules summary boz.rules reads."""
+    data = upgrade(data)
     economy = data.get('economy') or {}
     cvars = dict(economy.get('cvars') or {})
-    if economy.get('pickups') is not None:
-        cvars['ProbabilityOfSpawningEachPickup'] = '{' + ','.join(str(int(w)) for w in economy['pickups']) + '}'
-    if economy.get('scores'):
+    weights = pickup_weights(economy)
+    if weights is not None:
+        cvars['ProbabilityOfSpawningEachPickup'] = '{' + ','.join(str(w) for w in weights) + '}'
+    if scores_of(economy):
         cvars['ScoreConfigName'] = score_table_name(map_name)
     level = data.get('level') or {}
     rounds = data.get('rounds') or {}
-    return {'cvars': cvars, 'power_on': bool(level.get('power_on')), 'level': map_name,
-            'grow_health': rounds.get('repeat_health') == 'grow',
-            'behaves_like': level.get('behaves_like', '')}
+    out = {'cvars': cvars, 'power_on': bool(level.get('power_on')), 'level': map_name,
+           'behaves_like': level.get('behaves_like', ''),
+           'rules': {'sets': [s.get('name', '') for s in rounds.get('sets') or []],
+                     'modes': {key: dict(mode_of(rounds, key)) for key in MODE_KEYS}}}
+    if repeating:
+        out['repeating'] = {f'{h:08x}': v for h, v in repeating.items()}
+    return out
 
 
 def apply(data: dict, project_root: Path, groups: dict, map_name: str, read=None, pack=None) -> dict:
     """Put the Game tab's data into the map's groups; returns the runtime part (see runtime)."""
+    data = upgrade(data)
     problems = check(data)
     if problems:
         raise GameError('; '.join(problems))
     statics = groups.get(f'{map_name}_statics.group.bin')
-    if data.get('rounds'):
+    if statics is not None and data.get('rounds'):
+        data = simplify(copy.deepcopy(data), read_rounds(statics))
+    repeating = None
+    if changes_rounds(data.get('rounds')):
         if statics is None:
             raise GameError('the map has no statics group for its rounds')
-        write_rounds(statics, data['rounds'])
-    scores = (data.get('economy') or {}).get('scores')
-    if scores:
+        repeating = write_rounds(statics, data['rounds'])
+    table = scores_of(data.get('economy') or {})
+    if table:
         if statics is None:
             raise GameError('the map has no statics group for its score table')
         types = _types(statics, SCORE_CONFIG)
@@ -744,7 +1105,7 @@ def apply(data: dict, project_root: Path, groups: dict, map_name: str, read=None
         key = iw_hash(score_table_name(map_name))
         score_type.resources[:] = [r for r in score_type.resources if r.in_group_hash != key]
         score_type.resources.append(group.Resource(None if score_type.names_omitted else key, key,
-                                                   score_config(scores, (data.get('economy') or {}).get('score_limits'))))
+                                                   score_config(*table)))
     zombies = data.get('zombies') or {}
     if zombies.get('used'):
         if statics is None:
@@ -779,7 +1140,7 @@ def apply(data: dict, project_root: Path, groups: dict, map_name: str, read=None
         fixed = groups.get('fixed.group.bin')
         if fixed is not None:
             point_loading_screen(fixed, map_name)
-    return runtime(data, map_name)
+    return runtime(data, map_name, repeating)
 
 
 def _add_type(target: group.Group, resource_type: group.ResourceType) -> None:

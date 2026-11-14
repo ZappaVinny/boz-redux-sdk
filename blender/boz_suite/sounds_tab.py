@@ -434,14 +434,38 @@ def _clean_name(text: str) -> str:
     return name[:32]
 
 
+def import_sound_file(source: Path, path: Path, wanted: str = "") -> str:
+    """Bring in one recording as a sound to shape; returns its name (raises on unreadable files)."""
+    name = _clean_name(wanted or path.stem)
+    pack = game.game_pack()
+    if pack is not None:
+        try:   # a game sound's name stays the game's: this one plays as imported_<name>
+            name = sound.playable_name(name, sound.game_spec_hashes(pack.read))
+        except (sound.SoundError, OSError, KeyError, ValueError) as exc:
+            print(f"boz_suite: sounds: {exc}")
+    taken = {d.name for d in defs()}
+    base, number = name, 1
+    while name in taken:
+        number += 1
+        name = f"{base[:29]}_{number}"
+    channels, rate = read_recording(path)
+    settings = sound.Settings(rate=11025 if rate <= 11025 else 22050)
+    sound.import_recording(source, sound.SoundDef(name, str(path), settings), channels, rate)
+    return name
+
+
 class BOZ_OT_sound_import(Operator):
     bl_idname = "boz.sound_import"
     bl_label = "Import…"
-    bl_description = "Bring in a recording (WAV, MP3, OGG, FLAC, ...) to shape and save as a game sound"
+    bl_description = ("Bring in recordings (WAV, MP3, OGG, FLAC, ...; one or several) to shape and "
+                      "save as game sounds")
 
     filepath: StringProperty(subtype="FILE_PATH")
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={"HIDDEN", "SKIP_SAVE"})
+    directory: StringProperty(subtype="DIR_PATH", options={"HIDDEN", "SKIP_SAVE"})
     filter_glob: StringProperty(default=";".join(f"*{t}" for t in AUDIO_TYPES), options={"HIDDEN"})
-    name: StringProperty(name="Name", description="The sound's name (empty: from the file)")
+    name: StringProperty(name="Name", description="The sound's name (empty: from the file; several "
+                                                  "files are named after their files)")
 
     def invoke(self, context, event):
         if link.source_dir() is None:
@@ -452,31 +476,28 @@ class BOZ_OT_sound_import(Operator):
 
     def execute(self, context):
         source = link.source_dir()
-        path = Path(self.filepath)
-        if source is None or not path.is_file():
+        if self.files and any(f.name for f in self.files):
+            folder = Path(self.directory or Path(self.filepath).parent)
+            paths = [folder / f.name for f in self.files if f.name]
+        else:
+            paths = [Path(self.filepath)]
+        if source is None or not any(p.is_file() for p in paths):
             self.report({"ERROR"}, "Pick an audio file")
             return {"CANCELLED"}
-        name = _clean_name(self.name or path.stem)
-        pack = game.game_pack()
-        if pack is not None:
-            try:   # a game sound's name stays the game's: this one plays as imported_<name>
-                name = sound.playable_name(name, sound.game_spec_hashes(pack.read))
-            except (sound.SoundError, OSError, KeyError, ValueError) as exc:
-                print(f"boz_suite: sounds: {exc}")
-        taken = {d.name for d in defs()}
-        base, number = name, 1
-        while name in taken:
-            number += 1
-            name = f"{base[:29]}_{number}"
-        try:
-            channels, rate = read_recording(path)
-            settings = sound.Settings(rate=11025 if rate <= 11025 else 22050)
-            sound.import_recording(source, sound.SoundDef(name, str(path), settings), channels, rate)
-        except Exception as exc:  # noqa: BLE001 - aud raises plain errors for unreadable files
-            self.report({"ERROR"}, f"Cannot read {path.name}: {exc}")
+        imported, errors = [], []
+        for path in paths:
+            try:
+                imported.append(import_sound_file(source, path, self.name if len(paths) == 1 else ""))
+            except Exception as exc:  # noqa: BLE001 - aud raises plain errors for unreadable files
+                errors.append(f"{path.name}: {exc}")
+                link.append_log(f"sound import {path.name}: {exc}")
+        if not imported:
+            self.report({"ERROR"}, f"Cannot read {errors[0]}" if errors else "Nothing to import")
             return {"CANCELLED"}
-        refresh_sounds(context, keep=name)
-        self.report({"INFO"}, f"Imported {name}: shape it, Preview, then Save")
+        refresh_sounds(context, keep=imported[0])
+        extra = f"; {len(errors)} could not be read (see the log)" if errors else ""
+        what = imported[0] if len(imported) == 1 else f"{len(imported)} sounds"
+        self.report({"WARNING" if errors else "INFO"}, f"Imported {what}: shape, Preview, then Save{extra}")
         return {"FINISHED"}
 
 

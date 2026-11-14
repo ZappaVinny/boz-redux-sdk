@@ -94,6 +94,25 @@ def kind_icon(kind: str, size: int = 48) -> QIcon:
     return QIcon(pixmap)
 
 
+def rules_summary(project) -> str:
+    """The map's game rules in one line (read only; the editor's Game tab changes them)."""
+    from . import game as game_rules, group, library, world
+    source = project.root / 'source'
+    base = None
+    try:
+        pack = library.open_game()
+        level = world.load(source).base
+        if pack is not None:
+            base = game_rules.read_rounds(group.parse(pack.read(f'levels/{level}/{level}_statics.group.bin')))
+    except Exception:       # no asset library, or an unreadable world: the rules as stored
+        base = None
+    try:
+        text = game_rules.summary(game_rules.load(source), base)
+    except game_rules.GameError as exc:
+        return f'game.json: {exc}'
+    return text[:1].upper() + text[1:] if text else '—'
+
+
 def project_icon(listed: sdkhome.ListedProject) -> QIcon:
     if listed.icon:
         return QIcon(str(listed.icon))
@@ -483,6 +502,9 @@ class ProjectPage(QWidget):
         self.description = QPlainTextEdit()
         self.description.setFixedHeight(60)
         self.template = QLabel()
+        self.rules = QLabel()
+        self.rules.setWordWrap(True)
+        self.rules.setToolTip('The map\'s game rules (change them in the editor\'s Game tab)')
         self.folder = QLabel()
         self.folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         form.addRow('Id', self.mod_id)
@@ -491,6 +513,8 @@ class ProjectPage(QWidget):
         form.addRow('Author', self.author)
         form.addRow('Description', self.description)
         form.addRow('Template', self.template)
+        self.rules_label = QLabel('Rules')
+        form.addRow(self.rules_label, self.rules)
         form.addRow('Folder', self.folder)
         save = QHBoxLayout()
         save.addStretch(1)
@@ -529,6 +553,9 @@ class ProjectPage(QWidget):
         self.description.setPlainText(project.mod.description)
         template = project.map_template if project.kind == 'map' else ''
         self.template.setText(template or '—')
+        self.rules.setText(rules_summary(project) if project.kind == 'map' else '')
+        self.rules.setVisible(project.kind == 'map')
+        self.rules_label.setVisible(project.kind == 'map')
         self.folder.setText(str(project.root))
         while self.actions.count():
             widget = self.actions.takeAt(0).widget()

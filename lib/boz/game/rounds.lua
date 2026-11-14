@@ -159,14 +159,19 @@ local function start(manager, wave_hash, next_hash, after_round)
     return send_new_wave(manager, info)
 end
 
---- The level's first wave (its name hash): the level's starting wave for the difficulty
---- (CLevel m_StartingWavesSP: easy, normal, hard), else "wave1".
+--- The level's first wave (its name hash): the level's starting wave for the mode (CLevel
+--- m_StartingWavesSP by difficulty: easy, normal, hard; m_StartingWavesMP in co-op by players:
+--- 2, 3, 4), else "wave1".
 function rounds.first_wave()
     local map = require("boz.engine.map")
     local info = map.level_info()
     if info then
-        local ok, starts = pcall(require("boz.engine.reflect").get, info, "CLevel", "m_StartingWavesSP")
-        local first = ok and type(starts) == "table" and starts[(map.difficulty_index() or 0) + 1]
+        local mode = require("boz.game.rules").mode() or "normal"
+        local coop = mode:match("^coop(%d)$")
+        local field = coop and "m_StartingWavesMP" or "m_StartingWavesSP"
+        local index = coop and tonumber(coop) - 1 or (map.difficulty_index() or 0) + 1
+        local ok, starts = pcall(require("boz.engine.reflect").get, info, "CLevel", field)
+        local first = ok and type(starts) == "table" and starts[index]
         if first and first ~= 0 then
             return first
         end

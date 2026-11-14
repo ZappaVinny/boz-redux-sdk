@@ -93,8 +93,8 @@ def setup_area(area, workspace_name: str, screen=None) -> None:
     if space.type == "VIEW_3D" and space.shading.type == "SOLID" and \
             space.shading.color_type == "TEXTURE" and space.clip_end == 200000.0:
         space.shading.type = "MATERIAL"   # maps saved before game materials were shown
-    if area.type == "IMAGE_EDITOR" and workspace_name in ("Audio", "Game") and space.image is None:
-        space.image = view_image(workspace_name)     # the wave view / the rounds graph
+    if area.type == "IMAGE_EDITOR" and workspace_name == "Audio" and space.image is None:
+        space.image = view_image(workspace_name)     # the wave view
     if _configured(space):
         return
     if area.type == "VIEW_3D":
@@ -176,7 +176,7 @@ def add_palette_area(window) -> None:
     window.workspace[PALETTE_KEY] = "done"
 
 
-SCRIPTS_KEY = "boz_scripts_layout3"  # Scripts: the next layout step, "done" or "failed"
+SCRIPTS_KEY = "boz_scripts_layout4"  # Scripts: the next layout step, "done" or "failed"
 
 
 def script_area(screen):
@@ -247,18 +247,16 @@ def _scripts_editors(window, screen) -> None:
     space.text = text if text is not None and text.name != LOG_TEXT else None
     space.show_line_numbers = True
     space.show_syntax_highlight = True
+    space.show_region_ui = True          # the sidebar: hook scripts (game_tab.BOZ_PT_game_hooks)
 
 
-AUDIO_KEY = "boz_audio_layout1"   # Audio, Effects: the next layout step, "done" or "failed"
+AUDIO_KEY = "boz_audio_layout2"   # Audio, Effects: the next layout step, "done" or "failed"
 AUDIO_LAST = 3
-FORMS_LAYOUTS = {"Audio": True, "Effects": False, "Game": True}   # forms + log (+ the wave/graph view)
+FORMS_LAYOUTS = {"Audio": True, "Effects": False, "Game": False}   # forms + log (+ the wave view)
 
 
 def view_image(workspace_name: str):
-    """The image a forms tab shows on its right: the Audio tab's wave, the Game tab's rounds graph."""
-    if workspace_name == "Game":
-        from . import game_tab
-        return game_tab.graph_image()
+    """The image a forms tab shows on its right: the Audio tab's wave."""
     from . import sounds_tab
     return sounds_tab.wave_image()
 

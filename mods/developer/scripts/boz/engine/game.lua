@@ -46,7 +46,7 @@ local function set_cvars(cvars, ours)
     end
 end
 
---- Applies the map's rules (world_data.game: {cvars, power_on, grow_health, behaves_like, level}).
+--- Applies the map's rules (world_data.game: {cvars, power_on, repeating, behaves_like, level, rules}).
 function game_rules.start(data)
     if started or type(data) ~= "table" then
         return
@@ -58,20 +58,42 @@ function game_rules.start(data)
         active = wanted == "" or level_name() == wanted
         set_cvars(cvars, active)
     end})
-    if data.grow_health then
+    -- Repeating rounds' health: the game's own 10 x round^2 - 150, times the mode's health x
+    -- ("scale"), or the round's health growing by its multiplier ("grow"). Older builds:
+    -- grow_health = true grows every repeating round.
+    local wanted, by_wave, resolved = data.repeating or {}, {}, false
+    hook.add(core.sym("Level_Load"), {before = function() resolved = false end})
+    if data.grow_health or next(wanted) then
         hook.add(core.sym("CWaveRepeatable::GetZombieHealth"), {after = function(call)
             if not active then
                 return
             end
-            local wave, round = call:arg(1), call:arg(2)
-            local base = game.read("u32", wave + WAVE_HEALTH)
-            local start = game.read("u32", wave + WAVE_START)
-            if round > start then
-                base = base * game.read("f32", wave + WAVE_HEALTH_MULT) ^ (round - start)
+            if not resolved then
+                resolved, by_wave = true, {}
+                for name, rule in pairs(wanted) do
+                    local wave = core.call("Wave_Find", tonumber(name, 16)) or 0
+                    if wave ~= 0 then by_wave[wave] = rule end
+                end
             end
-            call:set_result(math.max(1, math.floor(base)))
+            local wave, round = call:arg(1), call:arg(2)
+            local rule = data.grow_health and {grow = true} or by_wave[wave]
+            if not rule then
+                return
+            end
+            local health
+            if rule.grow then
+                health = game.read("u32", wave + WAVE_HEALTH)
+                local start = game.read("u32", wave + WAVE_START)
+                if round > start then
+                    health = health * game.read("f32", wave + WAVE_HEALTH_MULT) ^ (round - start)
+                end
+            else
+                health = call:result() * (rule.scale or 1)
+            end
+            call:set_result(math.max(1, math.floor(health)))
         end})
     end
+    require("boz.game.rules").set_data(data.rules)
     local like = string.lower(data.behaves_like or "")
     if BEHAVES_LIKE[like] then
         -- The level manager's own checks of the level's name (String_Equals: Ascension's round

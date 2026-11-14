@@ -131,7 +131,7 @@ class SdkHomeTests(unittest.TestCase):
         loaded = project.load_project(root)
         self.assertEqual((loaded.schema, loaded.kind), (1, 'script'))
         renamed = sdkhome.update_metadata(loaded, name='Older')
-        self.assertEqual((renamed.schema, renamed.mod.name), (2, 'Older'))
+        self.assertEqual((renamed.schema, renamed.mod.name), (project.PROJECT_SCHEMA, 'Older'))
 
     def test_rename_and_duplicate(self) -> None:
         original = project.create_project(self.root / 'a', 'a_map', 'A', 'Me', kind='map')

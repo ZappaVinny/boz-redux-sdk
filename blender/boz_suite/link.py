@@ -275,6 +275,21 @@ scene_to_world = convert.scene_to_world
 world_to_scene = convert.world_to_scene
 
 
+GAME_TAB = "Game tab"       # problems of the Game tab's rules (their button opens the tab)
+
+
+def game_problems() -> list:
+    """game.check's problems with the map's rules, as (message, GAME_TAB)."""
+    from ._bozkit import game
+    project = current_project()
+    if project is None:
+        return []
+    try:
+        return [(m, GAME_TAB) for m in game.check(game.load(project.root / "source"))]
+    except game.GameError as exc:
+        return [(str(exc), GAME_TAB)]
+
+
 def write_source(scene) -> list:
     """Write the scene into the project's source folder; returns the problems found."""
     project = current_project()
@@ -288,7 +303,7 @@ def write_source(scene) -> list:
         convert.tidy_removed(scene, result.removed)
     from . import prefab_links
     link_problems, warnings = prefab_links.check(scene)
-    problems += link_problems
+    problems += link_problems + game_problems()
     scene["boz_problems"] = [f"{message}\t{name}" for message, name in problems]
     scene["boz_warnings"] = [f"{message}\t{name}" for message, name in warnings]
     return problems
@@ -471,6 +486,11 @@ class BOZ_OT_select_problem(Operator):
     name: StringProperty()
 
     def execute(self, context):
+        if self.name == GAME_TAB:
+            workspace = bpy.data.workspaces.get("Game")
+            if workspace is not None:
+                context.window.workspace = workspace
+            return {"FINISHED"}
         obj = map_scene().objects.get(self.name)
         if obj is None:
             return {"CANCELLED"}
@@ -492,7 +512,7 @@ class BOZ_OT_check(Operator):
         scene = map_scene()
         scene_to_world(scene, problems)
         link_problems, warnings = prefab_links.check(scene)
-        problems += link_problems
+        problems += link_problems + game_problems()
         scene["boz_problems"] = [f"{m}\t{n}" for m, n in problems]
         scene["boz_warnings"] = [f"{m}\t{n}" for m, n in warnings]
         self.report({"INFO"} if not problems else {"WARNING"},
@@ -605,14 +625,24 @@ def _set_texture(material, image) -> None:
     node.image = image
 
 
+def _slot_image_name(material) -> str:
+    nodes = material.node_tree.nodes if material is not None and material.use_nodes else ()
+    node = next((n for n in nodes if n.type == "TEX_IMAGE" and n.name != "BOZ Lightmap" and n.image), None)
+    return node.image.name if node is not None else ""
+
+
 class BOZ_OT_texture_file(Operator):
     bl_idname = "boz.texture_file"
     bl_label = "Replace texture"
-    bl_description = "Use an image file (PNG or JPG; power-of-two sides up to 1024) as this texture"
+    bl_description = ("Use an image file (PNG or JPG; power-of-two sides up to 1024) as this texture; "
+                      "pick several to fill the slots whose texture or material has the file's name "
+                      "(the rest fill the slots from this one on)")
     bl_options = {"REGISTER", "UNDO"}
 
     slot: IntProperty()
     filepath: StringProperty(subtype="FILE_PATH")
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={"HIDDEN", "SKIP_SAVE"})
+    directory: StringProperty(subtype="DIR_PATH", options={"HIDDEN", "SKIP_SAVE"})
     filter_glob: StringProperty(default="*.png;*.jpg;*.jpeg", options={"HIDDEN"})
 
     def invoke(self, context, event):
@@ -621,11 +651,40 @@ class BOZ_OT_texture_file(Operator):
 
     def execute(self, context):
         obj = context.object
-        material = obj.material_slots[self.slot].material if self.slot < len(obj.material_slots) else None
-        if material is None:
+        if self.files and len([f for f in self.files if f.name]) > 1:
+            folder = Path(self.directory or Path(self.filepath).parent)
+            paths = [folder / f.name for f in self.files if f.name]
+        else:
+            paths = [Path(self.filepath)]
+        slots = list(range(len(obj.material_slots))) if obj is not None else []
+        if not slots or self.slot >= len(slots) or obj.material_slots[self.slot].material is None:
             self.report({"ERROR"}, "This slot has no material")
             return {"CANCELLED"}
-        _set_texture(material, bpy.data.images.load(self.filepath, check_existing=True))
+        if len(paths) == 1:
+            _set_texture(obj.material_slots[self.slot].material, bpy.data.images.load(str(paths[0]), check_existing=True))
+            return {"FINISHED"}
+        free = [i for i in slots if obj.material_slots[i].material is not None]
+        placed, left = 0, []
+        for path in paths:
+            stem = path.stem.lower()
+            match = next((i for i in free if stem in obj.material_slots[i].material.name.lower()
+                          or stem in Path(_slot_image_name(obj.material_slots[i].material)).stem.lower()), None)
+            if match is None:
+                left.append(path)
+                continue
+            free.remove(match)
+            _set_texture(obj.material_slots[match].material, bpy.data.images.load(str(path), check_existing=True))
+            placed += 1
+        for path in left:
+            later = [i for i in free if i >= self.slot]
+            if not later:
+                break
+            free.remove(later[0])
+            _set_texture(obj.material_slots[later[0]].material, bpy.data.images.load(str(path), check_existing=True))
+            placed += 1
+        skipped = len(paths) - placed
+        self.report({"WARNING" if skipped else "INFO"},
+                    f"{placed} textures replaced" + (f"; {skipped} had no slot left" if skipped else ""))
         return {"FINISHED"}
 
 

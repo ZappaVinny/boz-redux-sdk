@@ -1,6 +1,7 @@
 """The Assets tab: your own models and textures, made game-ready.
 
-Import a high-quality model (.blend, FBX, glTF, OBJ) as a Prop or a Weapon; Make game version
+Import high-quality models (.blend, FBX, glTF, OBJ; one, several, or a whole folder) as Props or
+Weapons, with the PC preset unless another is picked; each is made in turn (a queue). Make game version
 reduces it to the preset's triangle budget and texture size in a background Blender
 (asset_build.py, bozkit.assets). The tab has a scene of its own (link.ASSET_SCENE) showing the
 high-quality model, the game version, or both side by side, the game version drawn the way the
@@ -18,6 +19,7 @@ from pathlib import Path
 import bpy
 from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, IntProperty,
                        PointerProperty, StringProperty)
+from bpy.types import OperatorFileListElement
 from bpy.types import Menu, Operator, Panel, PropertyGroup, UIList
 
 from . import link
@@ -29,7 +31,8 @@ GAME_OBJECT = "BOZ asset game"
 HIGH_ROOT = "BOZ asset high"
 VIEW_KEY = "boz_asset_view"          # Assets workspace: its viewport is set up
 _state: dict = {"process": None, "building": None, "refreshing": False, "frame": False,
-                "shown": None}
+                "shown": None, "queue": [], "import_errors": []}
+DEFAULT_PRESET = "pc"      # imports use the PC budgets unless another preset is picked
 
 
 def defs() -> list:
@@ -210,6 +213,23 @@ def make(name: str, wait: bool = False) -> bool:
     return True
 
 
+def queue_make(name: str) -> None:
+    """Make *name*'s game version now, or after the ones already queued."""
+    if _state["process"] is None and _state["building"] is None and not _state["queue"]:
+        make(name)
+    elif name not in _state["queue"] and name != _state["building"]:
+        _state["queue"].append(name)
+        link.append_log(f"asset {name}: queued ({len(_state['queue'])} waiting)")
+
+
+def _next_in_queue() -> None:
+    while _state["queue"] and _state["process"] is None:
+        name = _state["queue"].pop(0)
+        if asset_def(name) is not None:
+            make(name)
+            return
+
+
 def _poll():
     process = _state["process"]
     if process is None:
@@ -246,6 +266,9 @@ def _finish(name: str, output: str) -> None:
         rebuild_palette()
     except (ReferenceError, RuntimeError, AttributeError) as exc:
         print(f"boz_suite: after making {name}: {exc}")
+    if "BOZ_ASSET_OK " not in output:
+        _state["import_errors"].append(f"{name}: could not be made (see the log)")
+    _next_in_queue()
 
 
 def _images(name: str) -> list:
@@ -525,22 +548,105 @@ def _clean_name(text: str) -> str:
     return name[:40]
 
 
+def import_files(paths: list[Path], kind: str, preset: str, name: str = "") -> tuple[list[str], list[str]]:
+    """Bring in model files as assets (names from the file names) and queue their game versions.
+    Returns (imported names, errors); a file that fails does not stop the others."""
+    root = link.project_root()
+    taken = {a.name.lower() for a in defs()}
+    imported, errors = [], []
+    for path in paths:
+        if path.suffix.lower() not in assets.SOURCE_TYPES or not path.is_file():
+            errors.append(f"{path.name}: not a .blend, .fbx, .glb, .gltf or .obj file")
+            continue
+        wanted = _clean_name(name if name and len(paths) == 1 else path.stem)
+        unique, number = wanted, 1
+        while unique.lower() in taken:
+            number += 1
+            unique = f"{wanted[:36]}_{number}"
+        try:
+            copy = assets.copy_source(root, unique, path)
+            assets.save_def(root / "source", assets.AssetDef(unique, kind, copy, str(path), preset=preset))
+        except (assets.AssetError, OSError) as exc:
+            errors.append(f"{path.name}: {exc}")
+            continue
+        taken.add(unique.lower())
+        imported.append(unique)
+    _state["import_errors"] = list(errors)        # making adds the ones that fail
+    for error in errors:
+        link.append_log(f"asset import {error}")
+    if imported:
+        refresh_list(keep=imported[0])
+    for unique in imported:
+        queue_make(unique)
+    return imported, errors
+
+
+def _report_import(op, imported: list[str], errors: list[str]) -> set:
+    if not imported:
+        op.report({"ERROR"}, errors[0] if errors else "Nothing to import")
+        return {"CANCELLED"}
+    text = imported[0] if len(imported) == 1 else f"{len(imported)} models"
+    extra = f"; {len(errors)} files could not be imported (see the Assets list)" if errors else ""
+    op.report({"WARNING" if errors else "INFO"}, f"Imported {text}: making the game versions{extra}")
+    return {"FINISHED"}
+
+
+KIND_ITEMS = [("prop", "Prop", "A model to place in maps"),
+              ("weapon", "Weapon", "A gun (its bones are kept)")]
+
+
+def _preset_items():
+    return [(k, assets.PRESET_LABELS[k], "") for k in (DEFAULT_PRESET,) + tuple(p for p in assets.PRESETS if p != DEFAULT_PRESET)]
+
+
 class BOZ_OT_asset_import(Operator):
     bl_idname = "boz.asset_import"
     bl_label = "Import…"
-    bl_description = ("Bring in a high-quality model (.blend, FBX, glTF, OBJ) and make its game "
-                      "version")
+    bl_description = ("Bring in high-quality models (.blend, FBX, glTF, OBJ; pick one or several) "
+                      "and make their game versions")
 
     filepath: StringProperty(subtype="FILE_PATH")
+    files: CollectionProperty(type=OperatorFileListElement, options={"HIDDEN", "SKIP_SAVE"})
+    directory: StringProperty(subtype="DIR_PATH", options={"HIDDEN", "SKIP_SAVE"})
     filter_glob: StringProperty(default="*.blend;*.fbx;*.glb;*.gltf;*.obj", options={"HIDDEN"})
-    kind: EnumProperty(name="Kind",
-                       description="What the asset is used as in the game",
-                       items=[("prop", "Prop", "A model to place in maps"),
-                                           ("weapon", "Weapon", "A gun (its bones are kept)")])
-    preset: EnumProperty(name="Preset",
+    kind: EnumProperty(name="Kind", description="What the assets are used as in the game", items=KIND_ITEMS)
+    preset: EnumProperty(name="Preset", default=DEFAULT_PRESET,
                          description="How hard the converter works: triangle and texture budgets",
-                         items=[(k, assets.PRESET_LABELS[k], "") for k in assets.PRESETS])
-    name: StringProperty(name="Name", description="The asset's name (empty: from the file)")
+                         items=_preset_items())
+    name: StringProperty(name="Name", description="The asset's name (empty: from the file; several "
+                                                  "files are named after their files)")
+
+    def invoke(self, context, event):
+        if link.project_root() is None:
+            self.report({"ERROR"}, "Open a project first")
+            return {"CANCELLED"}
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        if link.project_root() is None:
+            return {"CANCELLED"}
+        if self.files and any(f.name for f in self.files):
+            folder = Path(self.directory or Path(self.filepath).parent)
+            paths = [folder / f.name for f in self.files if f.name]
+        else:
+            paths = [Path(self.filepath)]
+        return _report_import(self, *import_files(paths, self.kind, self.preset, self.name))
+
+
+class BOZ_OT_asset_import_folder(Operator):
+    bl_idname = "boz.asset_import_folder"
+    bl_label = "Import a folder…"
+    bl_description = "Bring in every model in a folder (and its subfolders) and make their game versions"
+
+    directory: StringProperty(subtype="DIR_PATH")
+    filter_folder: BoolProperty(default=True, options={"HIDDEN"})
+    recursive: BoolProperty(name="Subfolders too", default=True,
+                            description="Also import the models in the folder's subfolders")
+    kind: EnumProperty(name="Kind", description="What the assets are used as in the game", items=KIND_ITEMS)
+    preset: EnumProperty(name="Preset", default=DEFAULT_PRESET,
+                         description="How hard the converter works: triangle and texture budgets",
+                         items=_preset_items())
 
     def invoke(self, context, event):
         if link.project_root() is None:
@@ -551,26 +657,28 @@ class BOZ_OT_asset_import(Operator):
 
     def execute(self, context):
         root = link.project_root()
-        path = Path(self.filepath)
-        if path.suffix.lower() not in assets.SOURCE_TYPES or not path.is_file():
-            self.report({"ERROR"}, "Pick a .blend, .fbx, .glb, .gltf or .obj file")
+        folder = Path(self.directory)
+        if root is None or not folder.is_dir():
+            self.report({"ERROR"}, "Pick a folder")
             return {"CANCELLED"}
-        name = _clean_name(self.name or path.stem)
-        taken = {a.name.lower() for a in defs()}
-        base, number = name, 1
-        while name.lower() in taken:
-            number += 1
-            name = f"{base}_{number}"
-        try:
-            copy = assets.copy_source(root, name, path)
-            assets.save_def(root / "source", assets.AssetDef(name, self.kind, copy, str(path),
-                                                             preset=self.preset))
-        except (assets.AssetError, OSError) as exc:
-            self.report({"ERROR"}, str(exc))
+        found = folder.rglob("*") if self.recursive else folder.iterdir()
+        inside = root.resolve()
+        paths = sorted(p for p in found if p.is_file() and p.suffix.lower() in assets.SOURCE_TYPES
+                       and inside not in p.resolve().parents)      # not the project's own copies
+        if not paths:
+            self.report({"ERROR"}, f"No .blend, .fbx, .glb, .gltf or .obj files in {folder.name}")
             return {"CANCELLED"}
-        refresh_list(context, keep=name)
-        make(name)
-        self.report({"INFO"}, f"Imported {name}: making its game version")
+        return _report_import(self, *import_files(paths, self.kind, self.preset))
+
+
+class BOZ_OT_asset_errors_clear(Operator):
+    bl_idname = "boz.asset_errors_clear"
+    bl_label = "Clear"
+    bl_description = "Hide the list of files that were not imported"
+    bl_options = {"INTERNAL"}
+
+    def execute(self, context):
+        _state["import_errors"] = []
         return {"FINISHED"}
 
 
@@ -592,9 +700,7 @@ class BOZ_OT_asset_make(Operator):
         item = selected()
         if item is None:
             return {"CANCELLED"}
-        if not make(item.name):
-            self.report({"WARNING"}, "An asset is being made: wait for it to finish")
-            return {"CANCELLED"}
+        queue_make(item.name)
         return {"FINISHED"}
 
 
@@ -839,9 +945,22 @@ class BOZ_PT_assets(_AssetsPanel, Panel):
         column.operator(BOZ_OT_asset_remove.bl_idname, text="", icon="REMOVE")
         column.separator()
         column.operator(BOZ_OT_assets_refresh.bl_idname, text="", icon="FILE_REFRESH")
-        layout.operator(BOZ_OT_asset_import.bl_idname, icon="IMPORT")
+        row = layout.row(align=True)
+        row.operator(BOZ_OT_asset_import.bl_idname, icon="IMPORT")
+        row.operator(BOZ_OT_asset_import_folder.bl_idname, icon="FILE_FOLDER")
         if _state["building"]:
-            layout.label(text=f"Making {_state['building']}…", icon="SORTTIME")
+            waiting = len(_state["queue"])
+            layout.label(text=f"Making {_state['building']}…" + (f" ({waiting} more waiting)" if waiting else ""),
+                         icon="SORTTIME")
+        if _state["import_errors"]:
+            box = layout.box()
+            row = box.row()
+            row.label(text="Not imported or not made:", icon="ERROR")
+            row.operator(BOZ_OT_asset_errors_clear.bl_idname, text="", icon="X")
+            for error in _state["import_errors"][:12]:
+                box.label(text=error)
+            if len(_state["import_errors"]) > 12:
+                box.label(text=f"... and {len(_state['import_errors']) - 12} more (see the log)")
 
 
 class BOZ_PT_asset_settings(_AssetsPanel, Panel):
@@ -977,7 +1096,8 @@ def on_load() -> None:
     bpy.app.timers.register(later, first_interval=0.6)
 
 
-CLASSES = (BOZ_AssetItem, BOZ_AssetSettings, BOZ_UL_assets, BOZ_OT_asset_import, BOZ_OT_asset_make,
+CLASSES = (BOZ_AssetItem, BOZ_AssetSettings, BOZ_UL_assets, BOZ_OT_asset_import,
+           BOZ_OT_asset_import_folder, BOZ_OT_asset_errors_clear, BOZ_OT_asset_make,
            BOZ_OT_asset_refresh_source, BOZ_OT_asset_remove, BOZ_OT_asset_fix,
            BOZ_OT_asset_save_edits, BOZ_OT_asset_place, BOZ_OT_assets_refresh, BOZ_MT_my_assets,
            BOZ_PT_assets, BOZ_PT_asset_settings, BOZ_PT_asset_checks)
