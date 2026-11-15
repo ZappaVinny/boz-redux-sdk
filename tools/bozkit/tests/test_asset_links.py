@@ -19,15 +19,15 @@ class LinkedFiles(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_obj_mtl(self):
-        (self.src / 'm.mtl').write_text('newmtl x\nmap_Kd _images/a_c.png\nmap_Bump -bm 1 _images/a_n.png\n')
-        (self.src / 'm.obj').write_text('mtllib m.mtl\nv 0 0 0\n')
+        (self.src / 'm.mtl').write_text('newmtl x\nmap_Kd _images/a_c.png\nmap_Bump -bm 1 _images/a_n.png\n', encoding='utf-8')
+        (self.src / 'm.obj').write_text('mtllib m.mtl\nv 0 0 0\n', encoding='utf-8')
         names = sorted(f.name for f in assets.referenced_files(self.src / 'm.obj'))
         self.assertEqual(names, ['a_c.png', 'a_n.png', 'm.mtl'])
 
     def test_gltf(self):
         (self.src / 'm.bin').write_bytes(b'\0')
         (self.src / 'm.gltf').write_text(json.dumps({'buffers': [{'uri': 'm.bin'}],
-                                                     'images': [{'uri': '_images/b_c.png'}, {'uri': 'data:x'}]}))
+                                                     'images': [{'uri': '_images/b_c.png'}, {'uri': 'data:x'}]}), encoding='utf-8')
         self.assertEqual(sorted(f.name for f in assets.referenced_files(self.src / 'm.gltf')), ['b_c.png', 'm.bin'])
 
     def test_binary_paths_copied_beside(self):

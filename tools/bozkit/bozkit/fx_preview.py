@@ -9,7 +9,6 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import fx
 
 
 @dataclass
@@ -61,7 +60,6 @@ class Simulation:
     def step_moving(self, ms: float, radius: float = 150.0, speed: float = 300.0) -> None:
         """A step with the effect moving round a circle (units, units a second): trails show as
         they do behind a projectile."""
-        import math
         self.travelled += speed * ms / 1000
         angle = self.travelled / radius
         self.origin = [radius * math.cos(angle), 0.0, radius * math.sin(angle)]
@@ -123,7 +121,6 @@ def render(sim: Simulation, sprites: list, size: int = 256, span: float = 300.0)
     """The particles as an RGBA uint8 image (numpy) of size x size showing span units across.
     *sprites*: per emitter, a list of frame images (PIL RGBA, tinted)."""
     import numpy
-    from PIL import Image
     canvas = numpy.zeros((size, size, 3), dtype=numpy.float32)
     alpha_canvas = numpy.zeros((size, size), dtype=numpy.float32)
     per_unit = size / span

@@ -1351,7 +1351,6 @@ class BOZ_PT_game_level(_GamePanel, Panel):
 
 class BOZ_UL_game_rounds(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index=0):
-        scene = link.map_scene()
         entry = current_set(load())
         base = base_wave(game.normalize_set(entry) if entry else None, item.index)
         editable = entry is not None

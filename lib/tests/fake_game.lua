@@ -85,6 +85,8 @@ function fake.install(options)
               off = function() end}
     log = function(message) print("log: " .. message) end
     settings = settings or {get = function(_, default) return default end, set = function() end}
+    shared = shared or {}            -- the client's table every mod shares (boz.net keeps its state there)
+    input = input or {bind = function() end, unbind = function() end}
     return fake
 end
 

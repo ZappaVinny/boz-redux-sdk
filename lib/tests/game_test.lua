@@ -15,7 +15,15 @@ game = {
         return memory[at] or 0
     end,
 }
-hook = {add = function(target, h) hooks_added[target] = h end}
+-- Several handlers on one function run in turn, as the client chains them.
+hook = {add = function(target, h)
+    local before = hooks_added[target]
+    if not before then hooks_added[target] = h return end
+    hooks_added[target] = {
+        before = function(...) if before.before then before.before(...) end if h.before then h.before(...) end end,
+        after = function(...) if before.after then before.after(...) end if h.after then h.after(...) end end,
+    }
+end}
 events = {on = function(name, fn) if name == "frame" then table.insert(frames, fn) end end}
 function log(message) print("log: " .. message) end
 package.loaded["boz.systems.console"] = {
