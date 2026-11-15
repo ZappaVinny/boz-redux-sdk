@@ -238,7 +238,8 @@ the `likely` confidence level of the [game definition](contributing.md#conventio
 
 | Field | Key | Unit | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Projectile | `m_projectileName` |  | 0 | What a launcher or grenade throws (an entity of weapon_projectiles). |
+| Projectile | `m_projectileName` |  | 0 | What a launcher (fire mode Launcher) or grenade throws: one of your projectiles (Effects tab) or the game's (any map's: the build brings it). |
+| Fires its projectile | `boz_fires_projectile` |  | False | Every shot launches the projectile below instead of bullets, whatever the fire mode (automatic, shotgun, single shot). Set by BOZ Redux, not the game. |
 | Launch force | `m_projectileLaunchForce` |  | 0.0 | Speed the projectile leaves with (Thundergun 3000). *Likely (from the shipped weapons).* |
 
 #### Pack-a-Punch fields
