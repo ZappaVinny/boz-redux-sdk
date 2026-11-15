@@ -99,6 +99,13 @@ boz.net = {
 --- with win = true; the game has no win screen of its own).
 boz.end_match = require("boz.game.match").finish
 
+--- Script classes for your effects and projectiles (Effects tab: Script).
+boz.Effect = require("boz.game.effect_script").Effect
+boz.Projectile = require("boz.game.projectile").Projectile
+
+--- A charged shot for a launcher (boz.game.charge): boz.charge("staff", {levels = {...}, ...}).
+boz.charge = function(weapon, options) return require("boz.game.charge").new(weapon, options) end
+
 --- Lures zombies to a place or an object (boz.Lure options: seconds, zombies, radius, arrive).
 boz.lure = boz.Lure.at
 
@@ -115,7 +122,8 @@ local SYSTEMS = {audio = "boz.systems.audio", camera = "boz.systems.camera",
                  pickups = "boz.game.pickups", rounds = "boz.game.rounds", rules = "boz.game.rules",
                  stats = "boz.game.stats", fly = "boz.game.fly", deadops = "boz.game.deadops",
                  weapons = "boz.engine.weapons", map = "boz.engine.map",
-                 sectors = "boz.engine.sectors", online = "boz.systems.online"}
+                 sectors = "boz.engine.sectors", online = "boz.systems.online",
+                 animation = "boz.engine.animation"}
 
 return setmetatable(boz, {__index = function(_, key)
     local path = SYSTEMS[key]

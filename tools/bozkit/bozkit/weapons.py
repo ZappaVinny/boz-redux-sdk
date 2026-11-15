@@ -55,7 +55,7 @@ class Field:
     key: str            # field name, or "<struct field>.<inner field>"
     label: str
     group: str
-    kind: str           # int, float, bool, enum, weapon, sound, readonly
+    kind: str           # int, float, bool, enum, weapon, sound, projectile, readonly
     unit: str = ''
     description: str = ''
     default: object = 0
@@ -72,6 +72,14 @@ RECOILS = ((0, 'None'), (1, 'Light'), (2, 'Medium'), (3, 'Heavy'))
 AMMO_ICONS = ((0, 'None'), (1, 'Rifle'), (3, 'Shotgun shells'), (4, 'Grenade launcher'),
               (8, 'Belt / large'), (9, 'Pistol'), (10, 'Grenade'), (11, 'Claymore'),
               (12, 'Monkey bomb'))
+
+# A weapon that fires a projectile (bozkit.fx: the Ray Gun's bolt with your values): fire mode
+# Launcher (CSingleShotLauncherBehaviour: fire type 1 launches m_projectileName with
+# m_projectileLaunchForce), the launcher crosshair and ammo icon.
+LAUNCHER = {'behaviour': 9, 'm_accuracy.m_crosshairType': 2, 'ammoIcon': 4,
+            'm_projectileLaunchForce': 3000.0}
+OWN_PROJECTILE_PREFIX = 'boz_proj_'      # an own projectile's stored name: boz_proj_<name>
+SDK_FIELD_PREFIX = 'boz_'                # fields BOZ Redux applies at runtime, not in the game data
 
 FIELDS = (
     # Firing
@@ -143,8 +151,12 @@ FIELDS = (
           'Field of view while aiming down sights (MP40 40, AK-74u 30); 0 keeps the normal view.',
           0.0),
     # Projectile
-    Field('m_projectileName', 'Projectile', 'Projectile', 'readonly', '',
-          'What a launcher or grenade throws (an entity of weapon_projectiles).', 0),
+    Field('m_projectileName', 'Projectile', 'Projectile', 'projectile', '',
+          'What a launcher (fire mode Launcher) or grenade throws: one of your projectiles (Effects '
+          'tab) or the game\'s (any map\'s: the build brings it).', 0),
+    Field('boz_fires_projectile', 'Fires its projectile', 'Projectile', 'bool', '',
+          'Every shot launches the projectile below instead of bullets, whatever the fire mode '
+          '(automatic, shotgun, single shot). Set by BOZ Redux, not the game.', False),
     Field('m_projectileLaunchForce', 'Launch force', 'Projectile', 'float', '',
           'Speed the projectile leaves with (Thundergun 3000).', 0.0, confirmed=False),
     # Pack-a-Punch and the box
@@ -209,7 +221,7 @@ def value_or_default(blob, key: str):
 
 
 _TYPE_OF = {'int': 'unsigned int', 'float': 'float', 'bool': 'bool', 'weapon': 'unsigned int',
-            'sound': 'unsigned int'}
+            'sound': 'unsigned int', 'projectile': 'unsigned int'}
 _ENUM_TYPES = {'behaviour': 'CParsableEnumManager::WeaponBehaviourType',
                'recoil': 'CParsableEnumManager::RecoilType',
                'ammoIcon': 'CParsableEnumManager::WeaponAmmoIconType',
@@ -253,8 +265,8 @@ def set_value(blob, key: str, value) -> None:
         value = bool(value)
     elif spec.kind == 'float':
         value = float(value)
-    elif spec.kind in ('weapon', 'sound', 'int'):
-        value = hash_of(value) if spec.kind == 'weapon' else int(value)
+    elif spec.kind in ('weapon', 'sound', 'int', 'projectile'):
+        value = hash_of(value) if spec.kind in ('weapon', 'projectile') else int(value)
     reflect.set_typed_value(target, value)
 
 
@@ -615,7 +627,8 @@ def apply(game, groups: dict, base_level: str, defs: list[WeaponDef], bundle=Non
         spec = resources.decode_entity_spec(resource.body)
         blob = weapon_blob(spec)
         for key, value in weapon.fields.items():
-            set_value(blob, key, value)
+            if not key.startswith(SDK_FIELD_PREFIX):
+                set_value(blob, key, value)
         resource.body = resources.encode_entity_spec(spec)
     # 4. Your own models and animations.
     for weapon in defs:
@@ -842,13 +855,15 @@ def apply_model(groups: dict, weapon: WeaponDef, resource) -> None:
         lengths = {state: length_ms(entry) for state, entry in clips.items()
                    if entry.get('arms') or entry.get('gun')}
 
-        # The gun's animations: all of them on its own skeleton; your clips on either.
+        # The gun's animations: all of them on its own skeleton; your clips on either. Extra
+        # clips (states the game does not have) become new states of the state machine.
         mine_gun = {state: entry['gun'] for state, entry in clips.items() if 'gun' in entry}
         if gun_asm is not None and (asset or mine_gun):
+            gun_body = _with_extra(gun_asm.body, set(mine_gun), lengths)
             changes, made = {}, {}
-            for state, at, second in anim.asm_anim_offsets(gun_asm.body):
+            for state, at, second in anim.asm_anim_offsets(gun_body):
                 for offset, is_primary in ((at, True), (second, False)):
-                    source_hash = struct.unpack_from('<I', gun_asm.body, offset)[0]
+                    source_hash = struct.unpack_from('<I', gun_body, offset)[0]
                     stock = anims.get(source_hash)
                     clip = mine_gun.get(state) if is_primary else None
                     if stock is None and clip is None:
@@ -871,9 +886,9 @@ def apply_model(groups: dict, weapon: WeaponDef, resource) -> None:
                         body = made[key]
                     _put(weapons_group, 'CIwAnim', key, body)
                     changes[offset] = key
-            changes.update(anim.asm_lengths(gun_asm.body, lengths))
+            changes.update(anim.asm_lengths(gun_body, lengths))
             name = f'{weapon.name}_gun'
-            _put(weapons_group, 'CIsAnimStateMachine', iw_hash(name), _patch_offsets(gun_asm.body, changes))
+            _put(weapons_group, 'CIsAnimStateMachine', iw_hash(name), _patch_offsets(gun_body, changes))
             _set_reference(blob, 'm_weaponAsm', name)
 
         # The arms: your clips and where the arms sit, in a copy of the arms' state machine.
@@ -889,10 +904,11 @@ def apply_model(groups: dict, weapon: WeaponDef, resource) -> None:
                 raise WeaponError(f'weapon {weapon.name}: no arms state machine {arms_asm_name}')
             arm_skel_hash, arm_skel = next(iter(arm_skels.items()))
             arm_bones = anim.decode_skel(arm_skel.body)
+            arms_body = _with_extra(arms_asm.body, set(mine_arms), lengths)
             changes = {}
-            for state, at, _second in anim.asm_anim_offsets(arms_asm.body):
+            for state, at, _second in anim.asm_anim_offsets(arms_body):
                 clip = mine_arms.get(state)
-                source_hash = struct.unpack_from('<I', arms_asm.body, at)[0]
+                source_hash = struct.unpack_from('<I', arms_body, at)[0]
                 stock = arm_anims.get(source_hash)
                 stock_anim = anim.decode_anim(stock.body) if stock is not None else None
                 if clip is None:
@@ -910,14 +926,27 @@ def apply_model(groups: dict, weapon: WeaponDef, resource) -> None:
                                                           if str(i).isdigit()}, template)
                 _put(arms_group, 'CIwAnim', key, body)
                 changes[at] = key
-            changes.update(anim.asm_lengths(arms_asm.body, lengths))
+            changes.update(anim.asm_lengths(arms_body, lengths))
             name = f'{weapon.name}_arms'
-            _put(arms_group, 'CIsAnimStateMachine', iw_hash(name), _patch_offsets(arms_asm.body, changes))
+            _put(arms_group, 'CIsAnimStateMachine', iw_hash(name), _patch_offsets(arms_body, changes))
             _set_reference(blob, 'm_armsAsm', name)
     except (weapon_model.WeaponModelError, weapon_anim.WeaponAnimError, anim.AnimError,
             ValueError) as exc:
         raise WeaponError(f'weapon {weapon.name}: {exc}') from None
     resource.body = resources.encode_entity_spec(spec)
+
+
+def _with_extra(body: bytes, states: set, lengths: dict) -> bytes:
+    """A weapon's state machine with its extra clips' states added (named by the clip; until a
+    clip is built into it, the state plays the idle clip)."""
+    from . import anim
+    have, default = anim.decode_asm(body)
+    names = {s.name for s in have}
+    new = sorted(s for s in states if s not in names)
+    if not new:
+        return body
+    idle = have[default].anim if 0 <= default < len(have) else 0
+    return anim.append_states(body, [(s, idle, max(1, int(lengths.get(s, 1000)))) for s in new])
 
 
 def limit_box_pools(groups: dict, index: list[str], start: str = DEFAULT_START,
@@ -991,6 +1020,8 @@ def runtime(defs: list[WeaponDef], index: list[str]) -> list[dict]:
     for name in dict.fromkeys(list(index) + [d.name for d in defs]):
         weapon = by_name.get(name)
         entry = {'name': name, 'script': _module(weapon.script) if weapon else ''}
+        if weapon and weapon.fields.get('boz_fires_projectile'):
+            entry['fires_projectile'] = True
         if weapon and weapon.display:
             entry['display'] = weapon.display
         out.append(entry)

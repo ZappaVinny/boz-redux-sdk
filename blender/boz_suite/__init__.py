@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import bpy
 
-from . import (assets_tab, effects_tab, game_tab, link, objects, palette, placeholders, prefab_links,
+from . import (assets_tab, effects_tab, fx_tab, game_tab, link, objects, palette, placeholders, prefab_links,
                preview, scene_view, shapes, shell, shipped_maps, sounds_tab, weapons_tab)
 
 
@@ -36,6 +36,7 @@ def register():
     assets_tab.register()
     sounds_tab.register()
     effects_tab.register()
+    fx_tab.register()
     game_tab.register()
     palette.register()
     preview.register()
@@ -51,6 +52,7 @@ def unregister():
     preview.unregister()
     palette.unregister()
     game_tab.unregister()
+    fx_tab.unregister()
     effects_tab.unregister()
     sounds_tab.unregister()
     assets_tab.unregister()

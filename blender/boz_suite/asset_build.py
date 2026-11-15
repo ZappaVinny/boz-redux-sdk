@@ -47,7 +47,29 @@ def load_source(asset) -> list:
         before = set(bpy.data.objects)
         getattr(getattr(bpy.ops, module), op)(filepath=str(path))
         objects = [obj for obj in bpy.data.objects if obj not in before]
+    fixed = relink_images(asset, root)
+    if fixed:
+        log(f"found {fixed} textures the model links to beside it")
     return objects
+
+
+def relink_images(asset, project_root) -> int:
+    """Points the source's images whose files are not where they link to at the copies in the
+    asset's folder (or beside the original, copied in); returns how many it fixed."""
+    from pathlib import Path as _Path
+    fixed = 0
+    for image in bpy.data.images:
+        if image.source not in ("FILE", "SEQUENCE", "TILED") or image.packed_file or not image.filepath:
+            continue
+        current = _Path(bpy.path.abspath(image.filepath, library=image.library))
+        if current.is_file():
+            continue
+        found = assets.find_linked(_Path(project_root), asset, _Path(bpy.path.basename(image.filepath)).name)
+        if found is not None:
+            image.filepath = str(found)
+            image.reload()
+            fixed += 1
+    return fixed
 
 
 def armatures_of(meshes) -> list:
@@ -428,23 +450,51 @@ def _image_from(socket, depth: int = 0):
 
 
 def images_of(material):
-    """(colour image, normal image, flat colour) of a material."""
+    """(colour image, normal image, flat colour, emission image, emission strength, specular
+    colour image) of a material. The game has no glow or shine: a glowing material's emission
+    and a specular-workflow material's specular colour (Call of Duty's _s maps on Specular Tint:
+    their metal is there, the colour map is dark) go into its colour."""
     if material is None:
-        return None, None, (0.8, 0.8, 0.8, 1.0)
-    colour = normal = None
+        return None, None, (0.8, 0.8, 0.8, 1.0), None, 0.0, None
+    colour = normal = emission = specular = None
+    strength = 0.0
     flat = tuple(material.diffuse_color)
     if material.use_nodes and material.node_tree:
         principled = next((n for n in material.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        linked_base = False
         if principled is not None:
             colour = _image_from(principled.inputs.get("Base Color"))
             normal = _image_from(principled.inputs.get("Normal"))
+            emission = _image_from(principled.inputs.get("Emission Color") or principled.inputs.get("Emission"))
+            specular = _image_from(principled.inputs.get("Specular Tint"))
+            power = principled.inputs.get("Emission Strength")
+            strength = 1.0 if power is None or power.is_linked else float(power.default_value)
             base = principled.inputs.get("Base Color")
+            linked_base = base is not None and base.is_linked
             if base is not None and not base.is_linked:
                 flat = tuple(base.default_value)
-        images = [n.image for n in material.node_tree.nodes if n.type == "TEX_IMAGE" and n.image]
-        colour = colour or next((i for i in images if not i.name.lower().split(".")[0].endswith("_n")), None)
-        normal = normal or next((i for i in images if i.name.lower().split(".")[0].endswith("_n")), None)
-    return colour, normal, flat
+        used = {i for i in (normal, emission, specular) if i is not None}
+        images = [n.image for n in material.node_tree.nodes if n.type == "TEX_IMAGE" and n.image
+                  and n.image not in used]
+        if colour is None and (principled is None or linked_base or emission is None):
+            # No Base Color image: the likeliest colour map (not a normal, gloss, specular...).
+            colour = next((i for i in images if not _map_kind(i.name)), None) or \
+                next((i for i in images if _map_kind(i.name) not in ("n",)), None)
+        normal = normal or next((i for i in images if _map_kind(i.name) == "n"), None)
+    if emission is not None and strength <= 0:
+        emission = None
+    return colour, normal, flat, emission, min(1.0, strength), specular
+
+
+def _map_kind(name: str) -> str:
+    """The map a texture name says it is (_n normal, _g gloss, _s specular, _o occlusion, _e
+    emission...), '' for a colour map (_c, _d, _albedo or nothing)."""
+    stem = name.lower().split(".")[0]
+    for suffix, kind in (("_n", "n"), ("_nrm", "n"), ("_normal", "n"), ("_g", "g"), ("_s", "s"), ("_o", "o"),
+                         ("_e", "e"), ("_gloss", "g"), ("_spec", "s"), ("_rough", "g"), ("_ao", "o")):
+        if stem.endswith(suffix):
+            return kind
+    return ""
 
 
 def pixels_at(image, width: int, height: int):
@@ -461,17 +511,30 @@ def pixels_at(image, width: int, height: int):
 
 
 def make_texture(material, side: int, bake_normals: bool):
-    colour, normal, flat = images_of(material)
-    if colour is None or not colour.size[0]:
+    import numpy as np
+    colour, normal, flat, emission, strength, specular = images_of(material)
+    picture = colour if colour is not None and colour.size[0] else (
+        emission if emission is not None and emission.size[0] else None)
+    if picture is None:
         return assets.flat_texture(flat)
-    width, height = colour.size
+    width, height = picture.size
     if width >= height:
         tw = assets.texture_side(width, side)
         th = assets.texture_side(height, max(4, tw * height // width))
     else:
         th = assets.texture_side(height, side)
         tw = assets.texture_side(width, max(4, th * width // height))
-    rgba = pixels_at(colour, tw, th)
+    if picture is colour:
+        rgba = pixels_at(colour, tw, th)
+    else:
+        rgba = np.empty((th, tw, 4), dtype=np.float32)
+        rgba[...] = flat
+    if specular is not None and specular.size[0]:
+        shine = pixels_at(specular, tw, th)[..., :3]
+        rgba[..., :3] = 1.0 - (1.0 - rgba[..., :3]) * (1.0 - shine)       # screen: lighter, never past white
+    if emission is not None and emission.size[0]:
+        glow = pixels_at(emission, tw, th)
+        rgba[..., :3] = np.clip(rgba[..., :3] + glow[..., :3] * strength, 0.0, 1.0)
     if bake_normals and normal is not None and normal.size[0]:
         rgba = assets.shade(rgba, pixels_at(normal, tw, th)[..., :3])
     return assets.texture_from_rgba(rgba, bottom_up=True)
@@ -614,10 +677,12 @@ def main() -> None:
     log(f"{len(meshes)} meshes, {high} triangles, {length * assets.UNITS[unit]:.0f} cm long "
         f"(unit: {unit})")
     originals = {obj.name: prepare(obj, max(length * 1e-5, 1e-6)) for obj in meshes}
-    budget, holes = asset.budget(), 0.0
+    # The game's models hold MAX_VERTICES; a triangle count that stays under it with room for seams.
+    ceiling = int(assets.MAX_VERTICES * 0.8)
+    budget, holes = min(asset.budget(), ceiling), 0.0
     for attempt in range(6):
         if attempt:
-            budget = int(budget * 1.35)
+            budget = min(int(budget * 1.35), ceiling)
             for obj in meshes:
                 obj.data = originals[obj.name].copy()       # again from the original
         reduce_closed(meshes, originals, budget, length)
@@ -625,11 +690,20 @@ def main() -> None:
         log(f"{sum(triangle_count(o) for o in meshes)} triangles: "
             + (f"nothing see-through ({holes * 100:.3f}%)" if holes <= HOLE_LIMIT
                else f"{holes * 100:.3f}% see-through, more triangles"))
-        if holes <= HOLE_LIMIT or budget >= max(high, 1):
+        if holes <= HOLE_LIMIT or budget >= min(max(high, 1), ceiling):
             break
-    for obj in meshes:
-        remap_uvs(obj, Surface(originals[obj.name]))
-    model, materials, areas, material_index = collect(meshes, armature, scale, asset.kind)
+    for fit in range(5):
+        for obj in meshes:
+            remap_uvs(obj, Surface(originals[obj.name]))
+        model, materials, areas, material_index = collect(meshes, armature, scale, asset.kind)
+        if len(model.vertices) <= assets.MAX_VERTICES:
+            break
+        budget = int(budget * 0.85)                 # too many vertices for the game: fewer triangles
+        log(f"{len(model.vertices)} vertices is more than the game takes: {budget} triangles")
+        for obj in meshes:
+            obj.data = originals[obj.name].copy()
+        reduce_closed(meshes, originals, budget, length)
+        holes = see_through(meshes, originals, length)
     log(f"reduced to {len(model.triangles)} triangles, {len(model.vertices)} vertices")
     if asset.kind == "weapon":
         # The aiming-down-the-sights and distance models, from the originals (not the view model).

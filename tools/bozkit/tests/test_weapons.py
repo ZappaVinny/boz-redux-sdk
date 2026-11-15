@@ -114,8 +114,8 @@ class WeaponTests(unittest.TestCase):
         self.assertEqual([weapons.get_value(again, k) for k in (
             'autoROF', 'm_damage.m_headDamage', 'm_damage.m_torsoDamage',
             'm_falloff.m_startDistance', 'recoil')], [900, 70, 150, 300, 3])
-        with self.assertRaises(weapons.WeaponError):
-            weapons.set_value(blob, 'm_projectileName', 1)
+        weapons.set_value(blob, 'm_projectileName', 'boz_proj_ice_bolt')    # one of yours (bozkit.fx)
+        self.assertEqual(weapons.get_value(blob, 'm_projectileName'), iw_hash('boz_proj_ice_bolt'))
 
     def test_fields_are_documented(self):
         for spec in weapons.FIELDS:

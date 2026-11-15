@@ -10,7 +10,7 @@ import fnmatch
 from collections import defaultdict
 from pathlib import Path
 
-from . import collision, group, map_resources, native, navigation, resources
+from . import collision, gfx, group, map_resources, native, navigation, resources
 from .hashing import iw_hash
 from .schema import Names
 
@@ -22,6 +22,7 @@ _CAPABILITIES = {
     iw_hash('CIsNavMesh'): ('parse', 'write', 'edit-settings', 'validate'),
     iw_hash('CIsNavMeshConnection'): ('parse', 'write', 'edit', 'validate'),
     iw_hash('CIsPortal'): ('parse', 'write', 'edit', 'validate'),
+    gfx.EMITTER_SPEC: ('parse', 'write', 'edit', 'validate'),
 }
 
 
@@ -29,6 +30,9 @@ def _validate_codec(class_hash: int, body: bytes) -> bool | None:
     """Return codec support for a known class, or None when no codec exists."""
     if class_hash == iw_hash('CIwTexture'):
         native.texture_layout(body)
+    elif class_hash == gfx.EMITTER_SPEC:
+        if gfx.encode(gfx.decode(body)) != body:
+            raise ValueError('emitter spec round-trip mismatch')
     elif class_hash == iw_hash('CIwMaterial'):
         value = native.decode_material(body)
         if native.encode_material(value) != body:

@@ -137,7 +137,8 @@ function commands_here.help()
     info("Type a console variable name to see its value, or name and value to set it.")
     info("Type a command with its arguments to run it; separate several with ';'.")
     info("Mod commands: find <text>, clear, help, bind <key> <line>, unbind <key>, binds,")
-    info("cvar <name> <value> [bool|int|float|string], fov <degrees|default>, perks, noclip.")
+    info("cvar <name> <value> [bool|int|float|string], fov <degrees|default>, perks, noclip,")
+    info("fx <effect> [seconds] (spawns one of the map's effects where you aim).")
     info("The game also has listVars, listCommands, listAliases, alias, unbindAll.")
     info("Up/Down recall earlier lines.")
 end
@@ -251,6 +252,27 @@ function commands_here.fov(rest)
     end
     camera.set_fov(value)
     info(string.format("Field of view set to %.0f%s", value, current and "" or " (applies in a match)"))
+end
+
+-- fx <name> [seconds]: an effect of the map (yours or a named game one) where you aim.
+function commands_here.fx(rest)
+    local name, seconds = rest:match("^(%S+)%s*(%S*)$")
+    if not name then
+        fail("usage: fx <effect name> [seconds]  (the map's effects: Effects tab)")
+        return
+    end
+    local effects = require("boz.game.effects")
+    local at = effects.aim()
+    if not at then
+        fail("Start a Zombies match to spawn effects.")
+        return
+    end
+    local made, err = effects.spawn(name, at, {lifetime = tonumber(seconds) or 4})
+    if made then
+        info("Spawned " .. name .. " where you aim")
+    else
+        fail(tostring(err))
+    end
 end
 
 execute = function(line)

@@ -276,6 +276,8 @@ world_to_scene = convert.world_to_scene
 
 
 GAME_TAB = "Game tab"       # problems of the Game tab's rules (their button opens the tab)
+EFFECTS_TAB = "Effects tab"  # problems of your own effects and projectiles
+PROBLEM_TABS = {GAME_TAB: "Game", EFFECTS_TAB: "Effects"}
 
 
 def game_problems() -> list:
@@ -284,10 +286,17 @@ def game_problems() -> list:
     project = current_project()
     if project is None:
         return []
+    from ._bozkit import fx
+    out = []
     try:
-        return [(m, GAME_TAB) for m in game.check(game.load(project.root / "source"))]
+        out += [(m, GAME_TAB) for m in game.check(game.load(project.root / "source"))]
     except game.GameError as exc:
-        return [(str(exc), GAME_TAB)]
+        out.append((str(exc), GAME_TAB))
+    try:
+        out += [(m, EFFECTS_TAB) for m in fx.check(fx.load(project.root / "source"), project.root)]
+    except fx.FxError as exc:
+        out.append((str(exc), EFFECTS_TAB))
+    return out
 
 
 def write_source(scene) -> list:
@@ -486,8 +495,8 @@ class BOZ_OT_select_problem(Operator):
     name: StringProperty()
 
     def execute(self, context):
-        if self.name == GAME_TAB:
-            workspace = bpy.data.workspaces.get("Game")
+        if self.name in PROBLEM_TABS:
+            workspace = bpy.data.workspaces.get(PROBLEM_TABS[self.name])
             if workspace is not None:
                 context.window.workspace = workspace
             return {"FINISHED"}

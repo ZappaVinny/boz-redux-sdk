@@ -31,6 +31,8 @@ _TEXTURE_SCAN = range(4, 40)
 _TEXTURE_FORMATS = {0x05: (2, 'RGBA4444'), 0x0E: (4, 'ABGR8888')}
 _DECODE_ONLY_FORMATS = {0x0A: (3, 'BGR888')}
 _VERTS = iw_hash('CIwModelBlockVerts')
+# A model block's size is 16 bits (28 + 6 bytes a vertex): the most vertices one model holds.
+MAX_MODEL_VERTICES = (0xFFFF - 28) // 6
 _UVS = iw_hash('CIwModelBlockGLUVs')
 # Second texture-coordinate set, used by texture stage 1 (baked lightmaps). Same layout as
 # CIwModelBlockGLUVs: u16 count at +6, then count s16 pairs in 1/4096 units from +10.
@@ -627,8 +629,8 @@ def build_model(vertices, uvs, triangles, materials: Sequence[int],
     *scale*: the largest scale the model is placed at (its bounding sphere covers that).
     """
     count = len(vertices)
-    if not 0 < count <= 65535 or len(uvs) != count:
-        raise ValueError('a model needs 1-65535 vertices and one UV per vertex')
+    if not 0 < count <= MAX_MODEL_VERTICES or len(uvs) != count:
+        raise ValueError(f'a model needs 1-{MAX_MODEL_VERTICES} vertices and one UV per vertex')
     if any(len(v) != 3 or any(not -32768 <= c <= 32767 for c in v) for v in vertices):
         raise ValueError('model vertices must be signed 16-bit XYZ triples')
     if any(not 0 <= i < count for t in triangles for i in t):

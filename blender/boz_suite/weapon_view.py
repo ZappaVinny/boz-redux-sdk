@@ -191,6 +191,10 @@ def states():
             length = max((weapon_anim.frame_of(a.duration or (a.keyframes[-1].time if a.keyframes else 0))
                           for a in (arms, gun) if a is not None), default=0)
             out.append((anim_state.name, anim_state.label, length, anim_state.looping))
+        item, _weapon_ = _weapon()
+        if item is not None and link.source_dir() is not None:
+            for name, frames in weapon_anim.extra_clips(link.source_dir(), item.name):
+                out.append((weapon_anim.iw_hash(name), f"{name} (extra clip)", frames, False))
         editor_state["items"] = out
     return editor_state["items"]
 
@@ -595,7 +599,7 @@ def edited_states() -> set:
 
 
 def show_state(context, state: int) -> None:
-    """Play *state*: read its changes (or none) and bake it onto the rig."""
+    """Play *state*: its original (with an older project's timeline edits) and your keys."""
     entry = _entry(state)
     edits = {part: list(entry.get("edits", {}).get(part, [])) for part in ("arms", "gun")}
     original = max((s[2] for s in states() if s[0] == state), default=0)
@@ -604,9 +608,20 @@ def show_state(context, state: int) -> None:
     bake(context)
 
 
+ORIGINAL_ACTION, CHANGES_ACTION = "BOZ original", "BOZ your changes"
+ORIGINAL_TRACK = "Original"
+
+
+def _channels(name: str, base_location, base_rotation):
+    """(data path, index) of a bone's location and rotation channels."""
+    return ([(f'pose.bones["{name}"].location', i) for i in range(3)] +
+            [(f'pose.bones["{name}"].rotation_quaternion', i) for i in range(4)])
+
+
 def bake(context) -> None:
-    """The rig's action: every frame of the animation from its timelines (dense), and the IK on
-    where either part is yours."""
+    """The rig's animation as two layers: the original (the game's animation, or an older
+    project's saved result; locked, an NLA strip) and Your changes on top (the active action,
+    Combine: your keys add to the original; where you have none the original plays)."""
     view = view_scene()
     rig_obj = view.objects.get(RIG)
     state = editor_state.get("state")
@@ -618,11 +633,10 @@ def bake(context) -> None:
     length = max(1, editor_state["length"])
     names = bones.names + [f"hand {side}" for side in GRIPS]
     tracks = {name: [[] for _ in range(7)] for name in names}
-    influence = []
     baked = {}
     previous: dict = {}
     for frame in range(0, length + 1):
-        locals_, grips, ik = frame_locals(state, frame, entry)
+        locals_, grips, _ik = frame_locals(state, frame, entry)
         frame_values = {name: locals_.get(i, bones.binds[i]) for i, name in enumerate(bones.names)}
         for side, grip in grips.items():
             frame_values[f"hand {side}"] = grip
@@ -638,13 +652,13 @@ def bake(context) -> None:
             for channel, value in enumerate(list(location) + list(quaternion)):
                 tracks[name][channel] += [frame, value]
         baked[frame] = baked_frame
-        influence += [frame, 1.0 if ik else 0.0]
-    action = bpy.data.actions.get("BOZ weapon animation")
-    if action is not None:
-        bpy.data.actions.remove(action)
-    action = bpy.data.actions.new("BOZ weapon animation")
-    slot = action.slots.new(id_type="OBJECT", name=rig_obj.name)
-    bag = action.layers.new("Layer").strips.new(type="KEYFRAME").channelbag(slot, ensure=True)
+    for old in (ORIGINAL_ACTION,):
+        action = bpy.data.actions.get(old)
+        if action is not None:
+            bpy.data.actions.remove(action)
+    original = bpy.data.actions.new(ORIGINAL_ACTION)
+    original_slot = original.slots.new(id_type="OBJECT", name=rig_obj.name)
+    bag = original.layers.new("Layer").strips.new(type="KEYFRAME").channelbag(original_slot, ensure=True)
 
     def curve(path, index, points, group, constant=False):
         fcurve = bag.fcurves.new(path, index=index, group_name=group)
@@ -661,14 +675,26 @@ def bake(context) -> None:
         for channel, points in enumerate(channels):
             path = "location" if channel < 3 else "rotation_quaternion"
             curve(f'pose.bones["{name}"].{path}', channel % 3 if channel < 3 else channel - 3, points, name)
+    # The hands follow the gun (IK to their grips): moving a hand bone poses its arm.
     for side, wrist in GRIPS.items():
-        curve(f'pose.bones["ik {side}"].constraints["IK"].influence', 0, influence, f"ik {side}", True)
-        curve(f'pose.bones["{bones.names[wrist]}"].constraints["Grip"].influence', 0, influence,
+        curve(f'pose.bones["ik {side}"].constraints["IK"].influence', 0, [0, 1.0], f"ik {side}", True)
+        curve(f'pose.bones["{bones.names[wrist]}"].constraints["Grip"].influence', 0, [0, 1.0],
               bones.names[wrist], True)
-    rig_obj.animation_data_create()
-    rig_obj.animation_data.action = action
-    rig_obj.animation_data.action_slot = slot
+    data = rig_obj.animation_data_create()
+    for track in list(data.nla_tracks):
+        data.nla_tracks.remove(track)
+    track = data.nla_tracks.new()
+    track.name, track.lock = ORIGINAL_TRACK, True
+    strip = track.strips.new(ORIGINAL_TRACK, 0, original)
+    strip.action_slot = original_slot
+    strip.blend_type = "REPLACE"
+    changes = _changes_action(rig_obj, entry.get("layer") or [])
+    data.action = changes
+    data.action_slot = changes.slots[0]
+    data.action_blend_type = "COMBINE"
+    data.action_influence = 1.0
     editor_state["baked"] = baked
+    editor_state["layer_saved"] = _layer_of(changes)
     editor_state["busy"] = True
     try:
         view.frame_start, view.frame_end = 0, length
@@ -681,112 +707,126 @@ def bake(context) -> None:
             context.window_manager.boz_anim_length = length
         finally:
             editor_state["guard"] = False
+        view.tool_settings.use_keyframe_insert_auto = True      # moving a bone keys it
     finally:
         editor_state["busy"] = False
 
 
-# Changes: kept when you leave a frame
+def _changes_action(rig_obj, layer: list):
+    """Your changes: a fresh action with the stored keys."""
+    old = bpy.data.actions.get(CHANGES_ACTION)
+    if old is not None:
+        bpy.data.actions.remove(old)
+    action = bpy.data.actions.new(CHANGES_ACTION)
+    slot = action.slots.new(id_type="OBJECT", name=rig_obj.name)
+    bag = action.layers.new("Layer").strips.new(type="KEYFRAME").channelbag(slot, ensure=True)
+    for channel in layer:
+        group = channel["path"].split('"')[1] if '"' in channel["path"] else None
+        fcurve = bag.fcurves.new(channel["path"], index=int(channel.get("index", 0)), group_name=group)
+        for frame, value, *rest in channel.get("keys", []):
+            point = fcurve.keyframe_points.insert(frame, value, options={"FAST"})
+            if rest:
+                point.interpolation = rest[0]
+        fcurve.update()
+    return action
 
-def _group_of(name: str) -> str | None:
-    if name.startswith("hand "):
-        return "arms"
-    bones = editor_state["bones"]
-    index = bones.index.get(name)
-    if index is None or name == "gun root":
-        return None
-    return bones.part[index]
+
+def _changes_curves(action=None):
+    action = action or bpy.data.actions.get(CHANGES_ACTION)
+    if action is None or not action.layers or not action.layers[0].strips:
+        return []
+    bag = action.layers[0].strips[0].channelbag(action.slots[0]) if action.slots else None
+    return list(bag.fcurves) if bag is not None else []
 
 
-def _current_values(rig_obj, group: str) -> dict:
-    """The group's pose as stored values: arms by arm bone ("3") and grip ("hand L"); the gun by
-    TAG_WEAPON and your model's bone names (its own space) or the stock gun's numbers."""
-    bones = editor_state["bones"]
-    rests = editor_state["rests"]
-    values, gun = {}, {}
+def _layer_of(action=None) -> list:
+    """Your changes as stored data ([{path, index, keys}])."""
+    out = []
+    for fcurve in _changes_curves(action):
+        keys = [[round(k.co[0], 3), round(k.co[1], 6), k.interpolation] for k in fcurve.keyframe_points]
+        if keys:
+            out.append({"path": fcurve.data_path, "index": fcurve.array_index, "keys": keys})
+    out.sort(key=lambda c: (c["path"], c["index"]))
+    return out
+
+
+def key_count() -> int:
+    return sum(len(f.keyframe_points) for f in _changes_curves())
+
+
+def key_frames() -> list:
+    return sorted({int(round(k.co[0])) for f in _changes_curves() for k in f.keyframe_points})
+
+
+def key_pose(context=None, frame: int | None = None) -> int:
+    """Key every bone whose pose differs from the animation at *frame* (the frame shown) into
+    Your changes, worked out against the original (Combine: location adds, rotation multiplies),
+    whatever is selected. Returns the bones keyed."""
+    from mathutils import Quaternion, Vector
+    view = view_scene()
+    rig_obj = view.objects.get(RIG)
+    if rig_obj is None or editor_state.get("state") is None:
+        return 0
+    frame = view.frame_current if frame is None else frame
+    base = editor_state["baked"].get(frame) or {}
+    action = bpy.data.actions.get(CHANGES_ACTION)
+    if action is None:
+        return 0
+    bag = action.layers[0].strips[0].channelbag(action.slots[0], ensure=True)
+    curves = {(f.data_path, f.array_index): f for f in bag.fcurves}
+    keyed = 0
     for pose_bone in rig_obj.pose.bones:
         name = pose_bone.name
-        if _group_of(name) != group:
+        if name not in base:
             continue
-        local = _game(rests[name] @ pose_bone.matrix_basis)
-        if name.startswith("hand "):
-            values[name] = local
-        elif name == TAG:
-            values["TAG_WEAPON"] = local
-        elif bones.index[name] >= bones.gun_start:
-            gun[bones.index[name] - bones.gun_start] = local
-        else:
-            values[str(bones.index[name])] = local
-    if gun:
-        gun[0] = (tuple(bones.gun_bones[0].position), tuple(bones.gun_bones[0].rotation))
-        values.update({k: v for k, v in _gun_game_to_keys(gun).items()})
-    return values
-
-
-def _group_changed(rig_obj, group: str, frame: int) -> bool:
-    from mathutils import Quaternion, Vector
-    baked = editor_state["baked"].get(frame, {})
-    for pose_bone in rig_obj.pose.bones:
-        if _group_of(pose_bone.name) != group or pose_bone.name not in baked:
+        base_location, base_rotation = Vector(base[name][0]), Quaternion(base[name][1])
+        # What the animation shows here: the original plus your keys (Combine).
+        channels = _channels(name, None, None)
+        values = [curves[c].evaluate(frame) if c in curves else (1.0 if c[0].endswith("quaternion") and c[1] == 0 else 0.0)
+                  for c in channels]
+        shown_location = base_location + Vector(values[:3])
+        shown_rotation = base_rotation @ Quaternion(values[3:])
+        moved = (Vector(pose_bone.location) - shown_location).length > 1e-4 or \
+            Quaternion(pose_bone.rotation_quaternion).rotation_difference(shown_rotation).angle > 1e-4
+        if not moved:
             continue
-        location, rotation = baked[pose_bone.name]
-        if (Vector(location) - pose_bone.location).length > 1e-3:
-            return True
-        if Quaternion(rotation).rotation_difference(pose_bone.rotation_quaternion).angle > 1e-3:
-            return True
-    return False
-
-
-def capture(context=None, frame: int | None = None) -> bool:
-    """Keep what you changed at *frame* (the frame shown): a pose of that part, held from there."""
-    view = bpy.data.scenes.get(link.VIEW_SCENE)
-    rig_obj = view.objects.get(RIG) if view else None
-    if rig_obj is None or editor_state.get("state") is None or editor_state["busy"] or not editor_state["baked"]:
-        return False
-    frame = editor_state["frame"] if frame is None else frame
-    changed = False
-    for group in ("arms", "gun"):
-        if _group_changed(rig_obj, group, frame):
-            editor_state["edits"][group] = weapon_anim.add_pose(editor_state["edits"][group], frame,
-                                                          _current_values(rig_obj, group))
-            changed = True
-    if changed:
-        editor_state["dirty"] = True
-        store_edits()
-        bake(context or bpy.context)
-    return changed
-
-
-def _stored_edits() -> dict:
-    return {part: list(changes) for part, changes in editor_state["edits"].items()}
-
-
-def store_edits() -> None:
-    """Write the changes now (the result at every frame follows when you save: store())."""
-    item, _weapon_ = _weapon()
-    state = editor_state.get("state")
-    if item is None or state is None or link.source_dir() is None or item.name != editor_state.get("shown"):
-        return
-    labels = {s[0]: s[1] for s in states()}
-    entry = editor_state.get("entry") or {}
-    weapon_anim.save_state(link.source_dir(), item.name, state, labels.get(state, ""),
-                           {part: entry.get(part) for part in ("arms", "gun")}, _stored_edits(),
-                           editor_state["length"])
+        offset = Vector(pose_bone.location) - base_location
+        turn = base_rotation.inverted() @ Quaternion(pose_bone.rotation_quaternion)
+        values = list(offset) + list(turn)
+        for (path, index), value in zip(_channels(name, None, None), values):
+            fcurve = bag.fcurves.find(path, index=index) or bag.fcurves.new(path, index=index, group_name=name)
+            fcurve.keyframe_points.insert(frame, value)
+            fcurve.update()
+        keyed += 1
+    if keyed:
+        view.frame_set(frame)
+    return keyed
 
 
 def store(context=None) -> bool:
-    """Save the animation shown: its changes and the result at every frame (the IK baked in)."""
+    """Save the animation shown: your keys (to edit again) and the result at every frame (the
+    IK baked in) for the game."""
     view = bpy.data.scenes.get(link.VIEW_SCENE)
     rig_obj = view.objects.get(RIG) if view else None
     if rig_obj is None or editor_state.get("state") is None or editor_state.get("shown") is None:
         return False
-    capture(context)
-    if not editor_state["dirty"]:
+    layer = _layer_of()
+    entry = editor_state.get("entry") or {}
+    legacy = {part: list(entry.get("edits", {}).get(part, [])) for part in ("arms", "gun")}
+    if layer == editor_state.get("layer_saved") and not editor_state.get("dirty"):
         return False
     item, _weapon_ = _weapon()
     if item is None or item.name != editor_state["shown"] or link.source_dir() is None:
         return False
     bones = editor_state["bones"]
     state = editor_state["state"]
+    labels = {s[0]: s[1] for s in states()}
+    if not layer and not any(legacy.values()):
+        weapon_anim.save_state(link.source_dir(), item.name, state, labels.get(state, ""), {}, legacy,
+                               editor_state["length"])
+        editor_state["layer_saved"], editor_state["dirty"] = layer, False
+        editor_state["entry"] = _entry(state)
+        return True
     shown = view.frame_current
     arms_frames, gun_frames = [], []
     depsgraph = view.view_layers[0].depsgraph
@@ -809,22 +849,12 @@ def store(context=None) -> bool:
         view.frame_set(shown)
     finally:
         editor_state["busy"] = False
-    labels = {s[0]: s[1] for s in states()}
     weapon_anim.save_state(link.source_dir(), item.name, state, labels.get(state, ""),
                            {"arms": weapon_anim.Clip(arms_frames), "gun": weapon_anim.Clip(gun_frames)},
-                           _stored_edits(), editor_state["length"])
-    editor_state["dirty"] = False
+                           legacy, editor_state["length"], layer)
+    editor_state["layer_saved"], editor_state["dirty"] = layer, False
     editor_state["entry"] = _entry(state)
     return True
-
-
-@bpy.app.handlers.persistent
-def _before_frame(scene, _depsgraph=None):
-    if scene.name == link.VIEW_SCENE and not editor_state["busy"]:
-        try:
-            capture()
-        except (ReferenceError, RuntimeError, KeyError, AttributeError) as exc:
-            print(f"boz_suite: a weapon pose was not kept: {exc}")
 
 
 @bpy.app.handlers.persistent
@@ -891,10 +921,12 @@ def _state_changed(self, context):
 def _length_changed(self, context):
     if editor_state["guard"] or editor_state.get("state") is None:
         return
-    capture(context)
+    store(context)
     editor_state["length"] = max(1, context.window_manager.boz_anim_length)
     editor_state["dirty"] = True
-    store_edits()
+    entry = dict(editor_state.get("entry") or {})
+    entry["layer"] = _layer_of()
+    editor_state["entry"] = entry
     bake(context)
 
 
@@ -908,7 +940,6 @@ class BOZ_OT_weapon_anim_play(Operator):
         if wm.boz_anim_playing:
             stop_playing()
             return {"FINISHED"}
-        capture(context)
         view = view_scene()
         if view.frame_current >= view.frame_end:
             view.frame_set(view.frame_start)
@@ -921,8 +952,7 @@ class BOZ_OT_weapon_anim_play(Operator):
 class BOZ_OT_weapon_step(Operator):
     bl_idname = "boz.weapon_step"
     bl_label = "Step"
-    bl_description = "Go a frame back or forward, or to the previous or next change (what you " \
-                     "changed here is kept)"
+    bl_description = "Go a frame back or forward, or to your previous or next key"
     bl_options = {"INTERNAL"}
 
     forward: BoolProperty(default=True)
@@ -933,10 +963,7 @@ class BOZ_OT_weapon_step(Operator):
         view = view_scene()
         here = view.frame_current
         if self.to_change:
-            capture(context)
-            frames = sorted({f for part in ("arms", "gun")
-                             for f in weapon_anim.change_frames(editor_state["edits"][part])} - {here})
-            targets = [f for f in frames if (f > here if self.forward else f < here)]
+            targets = [f for f in key_frames() if (f > here if self.forward else f < here)]
             if not targets:
                 return {"CANCELLED"}
             view.frame_set(min(targets) if self.forward else max(targets))
@@ -945,101 +972,40 @@ class BOZ_OT_weapon_step(Operator):
         return {"FINISHED"}
 
 
-class BOZ_OT_weapon_original(Operator):
-    bl_idname = "boz.weapon_original"
-    bl_label = "Back to original from here"
-    bl_description = "From this frame on, this part plays the original again (until your next change)"
-    bl_options = {"INTERNAL"}
-
-    part: StringProperty()
+class BOZ_OT_weapon_key_pose(Operator):
+    bl_idname = "boz.weapon_key_pose"
+    bl_label = "Key pose"
+    bl_description = ("Key every bone you moved on this frame (whatever is selected): it holds there and "
+                      "blends to your other keys; where you have no keys the original plays")
 
     def execute(self, context):
-        capture(context)
-        frame = view_scene().frame_current
-        editor_state["edits"][self.part] = weapon_anim.add_original(editor_state["edits"][self.part], frame)
-        editor_state["dirty"] = True
-        store_edits()
-        bake(context)
+        keyed = key_pose(context)
+        self.report({"INFO"}, f"Keyed {keyed} bones" if keyed else "Nothing moved on this frame")
         return {"FINISHED"}
 
 
-def _parts_of(which: str) -> list:
-    return ["arms", "gun"] if which == "BOTH" else [which.lower()]
-
-
-def _original_values(state: int, frame: int) -> dict:
-    locals_, grips, _ik = frame_locals(state, frame, edits={"arms": [], "gun": []})
-    arms, gun = _arm_parts(locals_)
-    arms.update({f"hand {side}": v for side, v in grips.items()})
-    return {"arms": arms, "gun": gun}
-
-
-class BOZ_OT_weapon_copy_pose(Operator):
-    bl_idname = "boz.weapon_copy_pose"
-    bl_label = "Copy pose"
-    bl_description = "Copy the pose of this frame (from the original or yours) to paste anywhere"
+class BOZ_OT_weapon_clear_keys(Operator):
+    bl_idname = "boz.weapon_clear_keys"
+    bl_label = "Clear keys here"
+    bl_description = "Take your keys off this frame (the selected bones', or all of them when none is selected)"
 
     def execute(self, context):
-        capture(context)
-        wm = context.window_manager
-        state = editor_state.get("state")
-        frame = view_scene().frame_current
-        rig_obj = bpy.data.objects.get(RIG)
-        if state is None or rig_obj is None:
-            return {"CANCELLED"}
-        if wm.boz_copy_source == "ORIGINAL":
-            copied = _original_values(state, frame)
-        else:
-            copied = {group: _current_values(rig_obj, group) for group in ("arms", "gun")}
-        editor_state["clipboard"] = {part: copied[part] for part in _parts_of(wm.boz_copy_part)}
-        self.report({"INFO"}, f"Copied the {' and '.join(editor_state['clipboard'])} pose of frame {frame}")
-        return {"FINISHED"}
-
-
-class BOZ_OT_weapon_paste_pose(Operator):
-    bl_idname = "boz.weapon_paste_pose"
-    bl_label = "Paste pose"
-    bl_description = "Put the copied pose here: it holds from this frame on, until your next change"
-
-    @classmethod
-    def poll(cls, context):
-        return bool(editor_state.get("clipboard"))
-
-    def execute(self, context):
-        capture(context)
-        frame = view_scene().frame_current
-        rig_obj = bpy.data.objects.get(RIG)
-        for part, values in editor_state["clipboard"].items():
-            current = _current_values(rig_obj, part)
-            current.update(values)
-            editor_state["edits"][part] = weapon_anim.add_pose(editor_state["edits"][part], frame, current)
-        editor_state["dirty"] = True
-        store_edits()
-        bake(context)
-        return {"FINISHED"}
-
-
-class BOZ_OT_weapon_copy_frames(Operator):
-    bl_idname = "boz.weapon_copy_frames"
-    bl_label = "Copy original frames here"
-    bl_description = ("Play the original's frames From..To starting at this frame (for the chosen "
-                      "part), then hold its last pose")
-
-    def execute(self, context):
-        capture(context)
-        wm = context.window_manager
-        state = editor_state.get("state")
-        if state is None:
-            return {"CANCELLED"}
-        start, end = sorted((wm.boz_copy_from, wm.boz_copy_to))
-        at = view_scene().frame_current
-        last = _original_values(state, end)
-        for part in _parts_of(wm.boz_copy_part):
-            editor_state["edits"][part] = weapon_anim.copy_frames(editor_state["edits"][part], at, start, end, last[part])
-        editor_state["length"] = max(editor_state["length"], at + (end - start) + 1)
-        editor_state["dirty"] = True
-        store_edits()
-        bake(context)
+        view = view_scene()
+        rig_obj = view.objects.get(RIG)
+        frame = view.frame_current
+        chosen = {b.name for b in rig_obj.pose.bones if getattr(b, "select", False) or getattr(b.bone, "select", False)} if rig_obj else set()
+        removed = 0
+        for fcurve in _changes_curves():
+            bone = fcurve.data_path.split('"')[1] if '"' in fcurve.data_path else ""
+            if chosen and bone not in chosen:
+                continue
+            for point in reversed(list(fcurve.keyframe_points)):
+                if abs(point.co[0] - frame) < 0.5:
+                    fcurve.keyframe_points.remove(point)
+                    removed += 1
+            fcurve.update()
+        view.frame_set(frame)
+        self.report({"INFO"}, f"Removed {removed} keys")
         return {"FINISHED"}
 
 
@@ -1061,38 +1027,80 @@ class BOZ_OT_weapon_reset_anim(Operator):
         return {"FINISHED"}
 
 
+class BOZ_OT_weapon_clip_new(Operator):
+    bl_idname = "boz.weapon_clip_new"
+    bl_label = "New clip"
+    bl_description = ("An extra animation for this weapon (a charge, an inspect, ...): it starts as "
+                      "the idle pose; scripts play it with weapon:play(name), or play it instead "
+                      "of one of the game's (weapon:replace_animation)")
+
+    name: StringProperty(name="Name", description="What scripts call it (a-z, 0-9 and _)")
+    frames: IntProperty(name="Frames", default=30, min=1, max=600,
+                        description=f"How long it is ({weapon_anim.FPS} frames a second)")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        item, _weapon_ = _weapon()
+        if item is None or link.source_dir() is None:
+            return {"CANCELLED"}
+        store(context)
+        try:
+            state = weapon_anim.add_extra_clip(link.source_dir(), item.name, self.name.strip(), self.frames,
+                                               taken=[s[0] for s in states()])
+        except weapon_anim.WeaponAnimError as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        editor_state["items"] = None
+        context.window_manager.boz_anim_state = str(state)
+        self.report({"INFO"}, f"Clip {self.name} made: pose it, then save")
+        return {"FINISHED"}
+
+
+class BOZ_OT_weapon_clip_remove(Operator):
+    bl_idname = "boz.weapon_clip_remove"
+    bl_label = "Remove clip"
+    bl_description = "Delete this extra clip (the game's own animations cannot be removed)"
+
+    @classmethod
+    def poll(cls, context):
+        return _extra_name(current_state()) is not None
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        item, _weapon_ = _weapon()
+        name = _extra_name(current_state())
+        if item is None or name is None:
+            return {"CANCELLED"}
+        weapon_anim.remove_extra_clip(link.source_dir(), item.name, name)
+        editor_state["items"] = None
+        rig = editor_state["rig"]
+        if rig is not None:
+            context.window_manager.boz_anim_state = str(rig.idle())
+        return {"FINISHED"}
+
+
+def _extra_name(state) -> str | None:
+    item, _weapon_ = _weapon()
+    if item is None or state is None or link.source_dir() is None:
+        return None
+    return next((n for n, _f in weapon_anim.extra_clips(link.source_dir(), item.name)
+                 if weapon_anim.iw_hash(n) == state), None)
+
+
 class BOZ_OT_weapon_anim_save(Operator):
     bl_idname = "boz.weapon_anim_save"
     bl_label = "Save animation"
     bl_description = "Store this animation in the project (it is also stored when you save)"
 
     def execute(self, context):
-        capture(context)
-        editor_state["dirty"] = editor_state["dirty"] or bool(editor_state["edits"]["arms"] or editor_state["edits"]["gun"])
+        editor_state["dirty"] = True
         store(context)
         self.report({"INFO"}, "Saved")
         return {"FINISHED"}
-
-
-def timeline_text(part: str) -> str:
-    changes = editor_state["edits"].get(part, [])
-    if not changes:
-        return "original"
-    pieces = []
-    if changes[0]["frame"] > 0:
-        pieces.append(f"original 0-{changes[0]['frame'] - 1}")
-    for number, change in enumerate(changes):
-        end = changes[number + 1]["frame"] - 1 if number + 1 < len(changes) else None
-        span = f"{change['frame']}" + (f"-{end}" if end is not None and end != change["frame"] else
-                                       "" if end is not None else "+")
-        if "pose" in change:
-            kind = "yours"
-        elif change["original"] == change["frame"]:
-            kind = "original"
-        else:
-            kind = f"original (its {change['original']})"
-        pieces.append(f"{kind} {span}")
-    return ", ".join(pieces)
 
 
 # Placement (Weapons tab)
@@ -1185,9 +1193,15 @@ def _hang_from_tag(obj, rig_obj) -> None:
     obj.matrix_parent_inverse = Matrix.Translation((0.0, -bone.length, 0.0))
 
 
+def _show_stock_changed(self, context):
+    ghost = bpy.data.objects.get(GHOST)
+    if ghost is not None:
+        ghost.hide_viewport = not context.window_manager.boz_fit_show_stock
+
+
 def _fit_edit_changed(self, context):
     """Fit model in hand: a rigid copy of your model on the gun position to move, turn and scale;
-    the stock gun shows see-through. Turning it off keeps the fit and rebuilds the view."""
+    the stock gun as a wireframe when Show stock gun is on. Turning it off keeps the fit and rebuilds the view."""
     wm = context.window_manager
     view = view_scene()
     rig_obj = view.objects.get(RIG)
@@ -1218,6 +1232,7 @@ def _fit_edit_changed(self, context):
             ghost.display_type = "WIRE"
             ghost.show_in_front = True
             ghost.hide_select = True
+            ghost.hide_viewport = not wm.boz_fit_show_stock
         gun = view.objects.get(GUN)
         if gun is not None:
             gun.hide_viewport = True
@@ -1307,15 +1322,20 @@ def _model_items(self, context):
     return items
 
 
-def auto_model(context, asset_name: str, keep_bones: dict | None = None) -> dict:
-    """A weapon model entry for *asset_name*: fitted to the stock gun, each bone told which
-    stock bone its original motion comes from."""
+AS_MADE = {"location": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": 1.0}
+
+
+def auto_model(context, asset_name: str, keep_bones: dict | None = None, fit_to_stock: bool = False) -> dict:
+    """A weapon model entry for *asset_name*: as it was made (its own size and origin; Auto fit
+    lines it up with the stock gun instead), each bone told which stock bone its original motion
+    comes from."""
     item, weapon = _weapon()
     level = weapon.level or wt().base_level(context)
     stock = viewmodel.Rig(game.game_pack().read, level, weapon.source)
     model, _textures = assets.load_game(link.source_dir(), asset_name)
     fit = weapon_model.auto_fit({b.name: b.head for b in model.bones}, model.vertices,
-                                stock.gun_bones, stock.gun_model.vertices if stock.gun_model else [])
+                                stock.gun_bones, stock.gun_model.vertices if stock.gun_model else []) \
+        if fit_to_stock else dict(AS_MADE)
     reload_anim = stock._anim(stock.gun_anims, stock.gun_states, iw_hash("reloading"))
     mover = weapon_model.reload_mover(stock.gun_bones, reload_anim)
     bones = weapon_model.default_bones([b.name for b in model.bones], stock.gun_bones, mover)
@@ -1399,14 +1419,16 @@ def refresh_model_panel(context) -> None:
 class BOZ_OT_weapon_auto_fit(Operator):
     bl_idname = "boz.weapon_auto_fit"
     bl_label = "Auto fit"
-    bl_description = ("Line your model up with the stock gun again: along its barrel, upright, "
-                      "as long as it and centred on it")
+    bl_description = ("Size and line your model up with the stock gun: along its barrel, upright, "
+                      "as long as it and centred on it (only when you click this; a model you pick "
+                      "keeps its own size)")
 
     def execute(self, context):
         item, weapon = _weapon()
         if weapon is None or not weapon.model.get("asset"):
             return {"CANCELLED"}
-        weapon.model["fit"] = auto_model(context, weapon.model["asset"], weapon.model.get("bones"))["fit"]
+        weapon.model["fit"] = auto_model(context, weapon.model["asset"], weapon.model.get("bones"),
+                                         fit_to_stock=True)["fit"]
         wt().save(context, weapon)
         fit_obj = bpy.data.objects.get(FIT_MODEL)
         if fit_obj is not None:
@@ -1618,7 +1640,8 @@ class BOZ_PT_weapon_model(_ViewPanel, Panel):
         row.prop(wm, "boz_fit_edit", text="Fit model in hand", toggle=True)
         row.operator(BOZ_OT_weapon_auto_fit.bl_idname, icon="SNAP_ON")
         if wm.boz_fit_edit:
-            box.label(text="Click your model: G moves, R turns, S scales (wire: the stock gun)")
+            box.prop(wm, "boz_fit_show_stock", toggle=True, icon="MOD_WIREFRAME")
+            box.label(text="Click your model: G moves, R turns, S scales")
         column = box.column(align=True)
         column.prop(wm, "boz_fit_location", text="Position")
         column.prop(wm, "boz_fit_rotation", text="Rotation")
@@ -1643,7 +1666,10 @@ class BOZ_PT_weapon_animations(_ViewPanel, Panel):
         if editor_state.get("rig") is None or view is None:
             layout.label(text="Select a weapon in the Weapons tab", icon="INFO")
             return
-        layout.prop(wm, "boz_anim_state", text="")
+        row = layout.row(align=True)
+        row.prop(wm, "boz_anim_state", text="")
+        row.operator(BOZ_OT_weapon_clip_new.bl_idname, text="", icon="ADD")
+        row.operator(BOZ_OT_weapon_clip_remove.bl_idname, text="", icon="REMOVE")
         row = layout.row(align=True)
         step = row.operator(BOZ_OT_weapon_step.bl_idname, text="", icon="PREV_KEYFRAME")
         step.forward, step.to_change = False, True
@@ -1661,43 +1687,33 @@ class BOZ_PT_weapon_animations(_ViewPanel, Panel):
         if not animation_tab:
             layout.label(text="Change animations in the Animation tab", icon="INFO")
             return
+        count = key_count()
         box = layout.box()
-        for part, label in (("arms", "Arms"), ("gun", "Gun")):
-            row = box.row(align=True)
-            row.label(text=f"{label}: {timeline_text(part)}")
-            row.operator(BOZ_OT_weapon_original.bl_idname, text="", icon="LOOP_BACK").part = part
-        box = layout.box()
+        box.label(text=f"Your changes: {count} keys" if count else "Your changes: none (the original plays)",
+                  icon="KEYFRAME_HLT" if count else "KEYFRAME")
         row = box.row(align=True)
-        row.prop(wm, "boz_copy_part", expand=True)
-        row = box.row(align=True)
-        row.prop(wm, "boz_copy_source", expand=True)
-        row = box.row(align=True)
-        row.operator(BOZ_OT_weapon_copy_pose.bl_idname, icon="COPYDOWN")
-        row.operator(BOZ_OT_weapon_paste_pose.bl_idname, icon="PASTEDOWN")
-        row = box.row(align=True)
-        row.prop(wm, "boz_copy_from", text="From")
-        row.prop(wm, "boz_copy_to", text="To")
-        box.operator(BOZ_OT_weapon_copy_frames.bl_idname, icon="DUPLICATE")
+        row.operator(BOZ_OT_weapon_key_pose.bl_idname, icon="KEY_HLT")
+        row.operator(BOZ_OT_weapon_clear_keys.bl_idname, icon="KEY_DEHLT")
         row = layout.row(align=True)
         row.operator(BOZ_OT_weapon_anim_save.bl_idname, icon="FILE_TICK")
         row.operator(BOZ_OT_weapon_reset_anim.bl_idname, icon="TRASH")
         help_box = layout.box()
-        for line in ("Click a bone: R turns, G moves (hand L/R: the grip; gun position: the gun).",
-                     "Step to another frame: what you changed is kept and holds from there on.",
-                     "Arms and gun have their own timelines; the arrow sends one back to the",
-                     "original from this frame. Earlier frames never change."):
+        for line in ("Click a bone: G moves, R turns (hand L/R: the hands; gun position: the gun).",
+                     "Moving a bone keys it (auto-key is on); Key pose keys every bone you moved.",
+                     "Your keys blend into each other; where you have none the original plays.",
+                     "The Dope Sheet shows your keys: move, copy (Ctrl C/V) or delete them there."):
             help_box.label(text=line)
 
 
 CLASSES = (BOZ_WeaponBone, BOZ_OT_weapon_arms_reset, BOZ_OT_weapon_anim_play, BOZ_OT_weapon_step,
-           BOZ_OT_weapon_original, BOZ_OT_weapon_copy_pose, BOZ_OT_weapon_paste_pose,
-           BOZ_OT_weapon_copy_frames, BOZ_OT_weapon_reset_anim, BOZ_OT_weapon_anim_save,
+           BOZ_OT_weapon_key_pose, BOZ_OT_weapon_clear_keys, BOZ_OT_weapon_reset_anim, BOZ_OT_weapon_anim_save,
+           BOZ_OT_weapon_clip_new, BOZ_OT_weapon_clip_remove,
            BOZ_OT_weapon_auto_fit, BOZ_PT_weapon_model, BOZ_PT_weapon_animations)
 
 WM_PROPS = ("boz_arms_edit", "boz_view_fov", "boz_anim_length", "boz_view_free", "boz_view_arms",
             "boz_view_bones", "boz_anim_state", "boz_anim_playing", "boz_anim_loop", "boz_fit_edit",
-            "boz_weapon_model", "boz_fit_location", "boz_fit_rotation", "boz_fit_scale",
-            "boz_weapon_bones", "boz_copy_part", "boz_copy_source", "boz_copy_from", "boz_copy_to")
+            "boz_fit_show_stock", "boz_weapon_model", "boz_fit_location", "boz_fit_rotation", "boz_fit_scale",
+            "boz_weapon_bones")
 
 
 def register():
@@ -1725,6 +1741,9 @@ def register():
     wm.boz_arms_edit = BoolProperty(name="Position on screen", update=_arms_edit_changed,
                                     description="Move (G) and turn (R) the arms and gun together in "
                                                 "front of the camera; saved with the weapon")
+    wm.boz_fit_show_stock = BoolProperty(name="Show stock gun", update=_show_stock_changed,
+                                         description="The weapon's original gun as a wireframe, to line yours up with "
+                                                     "(only shown, never used in the game)")
     wm.boz_fit_edit = BoolProperty(name="Fit model in hand", update=_fit_edit_changed,
                                    description="Move, turn and scale your model in the hand")
     wm.boz_weapon_model = EnumProperty(name="Model", items=_model_items, update=_model_choice_changed,
@@ -1740,18 +1759,8 @@ def register():
                                      update=_fit_fields_changed,
                                      description="Model units per unit of your asset")
     wm.boz_weapon_bones = CollectionProperty(type=BOZ_WeaponBone)
-    wm.boz_copy_part = EnumProperty(name="Part",
-                                    description="What to copy: the weapon, the arms or both",
-                                    default="BOTH", items=[
-        ("ARMS", "Arms", ""), ("GUN", "Gun", ""), ("BOTH", "Both", "")])
-    wm.boz_copy_source = EnumProperty(name="From", description="The weapon to copy it from", items=[
-        ("ORIGINAL", "Original", "The game's own animation at this frame"),
-        ("YOURS", "Yours", "What the view shows at this frame")])
-    wm.boz_copy_from = IntProperty(name="From", min=0, description="First original frame to copy")
-    wm.boz_copy_to = IntProperty(name="To", min=0, description="Last original frame to copy")
     bpy.types.VIEW3D_HT_header.append(draw_view_header)
     bpy.app.handlers.save_pre.append(_before_save)
-    bpy.app.handlers.frame_change_pre.append(_before_frame)
     bpy.app.handlers.frame_change_post.append(_after_frame)
     bpy.app.handlers.load_post.append(_after_load)
     subscribe()
@@ -1762,7 +1771,6 @@ def unregister():
         if bpy.app.timers.is_registered(timer):
             bpy.app.timers.unregister(timer)
     for handlers, function in ((bpy.app.handlers.save_pre, _before_save),
-                               (bpy.app.handlers.frame_change_pre, _before_frame),
                                (bpy.app.handlers.frame_change_post, _after_frame),
                                (bpy.app.handlers.load_post, _after_load)):
         if function in handlers:

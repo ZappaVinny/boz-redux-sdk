@@ -40,7 +40,7 @@ PRESET_LABELS = {'stock': 'Stock (like the game\'s own)', 'pc': 'PC (sharper)'}
 UNITS = {'cm': 1.0, 'm': 100.0, 'inch': 2.54, 'mm': 0.1}   # source unit -> centimetres
 SOURCE_TYPES = ('.blend', '.fbx', '.glb', '.gltf', '.obj')
 MAX_BONES_PER_VERTEX = 4
-MAX_VERTICES = 65535
+MAX_VERTICES = 10917         # native.MAX_MODEL_VERTICES: a model block's size is 16 bits
 MIN_PART_TRIANGLES = 24    # the budget never squeezes a mesh below this
 # A weapon's lighter models, as a share of its budget (the MP40: 1,066 view, 555 aiming down the
 # sights, 331 / 215 / 112 at a distance).
@@ -162,8 +162,86 @@ def delete(root: Path, name: str) -> None:
             shutil.rmtree(folder)
 
 
+IMAGE_TYPES = ('.png', '.jpg', '.jpeg', '.tga', '.tif', '.tiff', '.bmp', '.dds', '.exr', '.hdr', '.webp')
+_PATH_RE = re.compile(rb'[\x20-\x7e]{1,400}?\.(?:png|jpe?g|tga|tiff?|bmp|dds|exr|hdr|webp|mtl|bin)(?![A-Za-z0-9])', re.I)
+_SKIP_DIRS = 2000          # files looked at when searching a folder for a missing one
+
+
+def _read_model(path: Path) -> bytes:
+    data = path.read_bytes()
+    if data[:4] == b'\x28\xb5\x2f\xfd':          # a compressed .blend (zstd)
+        try:
+            from compression import zstd
+        except ImportError:                       # Python before 3.14
+            return data
+        try:
+            data = zstd.decompress(data)
+        except zstd.ZstdError:
+            pass
+    return data
+
+
+def _resolve(folder: Path, text: str) -> Path | None:
+    """A path as a model stores it (relative to the model, Blender's //, absolute, or with junk
+    before it in a binary file) as an existing file."""
+    text = text.strip().strip('"')
+    options = [text] + [text[i + 1:] for i, c in enumerate(text) if c in '/\\']
+    for option in options:
+        if not option:
+            continue
+        relative = option[2:] if option.startswith('//') else option
+        for candidate in (folder / relative.replace('\\', '/'), Path(option)):
+            try:
+                if candidate.is_file():
+                    return candidate
+            except (OSError, ValueError):
+                continue
+    return None
+
+
+def referenced_files(original: Path) -> list[Path]:
+    """The files a model links to (textures, .mtl, .bin) that exist: what has to travel with it."""
+    original = Path(original)
+    folder, suffix = original.parent, original.suffix.lower()
+    texts = []
+    try:
+        if suffix == '.gltf':
+            info = json.loads(original.read_text(encoding='utf-8'))
+            texts = [item.get('uri', '') for key in ('buffers', 'images') for item in info.get(key, [])
+                     if not str(item.get('uri', '')).startswith('data:')]
+        elif suffix == '.obj':
+            for line in original.read_text(encoding='utf-8', errors='replace').splitlines():
+                if line.startswith('mtllib '):
+                    texts.append(line[7:])
+            for mtl in [m for m in (_resolve(folder, t) for t in texts) if m is not None]:
+                for line in mtl.read_text(encoding='utf-8', errors='replace').splitlines():
+                    parts = line.split()
+                    if parts and parts[0].lower().startswith(('map_', 'bump', 'disp', 'norm', 'refl')):
+                        texts.append(parts[-1])
+        else:                                     # .blend, .fbx, .glb: paths inside the binary
+            texts = [m.group(0).decode('ascii', 'replace') for m in _PATH_RE.finditer(_read_model(original))]
+    except (OSError, ValueError):
+        return []
+    out = []
+    for text in texts:
+        found = _resolve(folder, text)
+        if found is not None and found.resolve() != original.resolve() and found not in out:
+            out.append(found)
+    return out
+
+
+def _place(folder: Path, source_folder: Path, file: Path) -> Path:
+    """Where a linked file goes in the asset's folder: at the same place relative to the model when
+    it was beside or under it (so the model's own links keep working), else at the top."""
+    try:
+        return folder / file.resolve().relative_to(source_folder.resolve())
+    except ValueError:
+        return folder / file.name
+
+
 def copy_source(root: Path, name: str, original: Path) -> str:
-    """Copy *original* into the project's assets/<name>/; the copy's path from the root."""
+    """Copy *original* and the files it links to (textures...) into the project's assets/<name>/;
+    the copy's path from the root."""
     original = Path(original)
     if original.suffix.lower() not in SOURCE_TYPES:
         raise AssetError(f'{original.name}: pick a {", ".join(SOURCE_TYPES)} file')
@@ -172,7 +250,43 @@ def copy_source(root: Path, name: str, original: Path) -> str:
     target = folder / original.name
     if original.resolve() != target.resolve():
         shutil.copy2(original, target)
+        for file in referenced_files(original):
+            place = _place(folder, original.parent, file)
+            place.parent.mkdir(parents=True, exist_ok=True)
+            if not place.exists():
+                shutil.copy2(file, place)
     return target.relative_to(root).as_posix()
+
+
+def find_linked(root: Path, asset: 'AssetDef', file_name: str) -> Path | None:
+    """A file the asset's model links to but which is not where the link says (an import before
+    linked files were copied, or a moved file): found by name in the asset's folder, else beside
+    where it was imported from (then copied into the asset's folder). None when it is nowhere."""
+    folder = Path(root) / 'assets' / asset.name
+    wanted = file_name.lower()
+
+    def search(base: Path):
+        if not base.is_dir():
+            return None
+        for count, file in enumerate(base.rglob('*')):
+            if count > _SKIP_DIRS:
+                return None
+            if file.name.lower() == wanted and file.is_file():
+                return file
+        return None
+
+    found = search(folder)
+    if found is not None:
+        return found
+    original = Path(asset.original) if asset.original else None
+    found = search(original.parent) if original is not None else None
+    if found is None:
+        return None
+    place = _place(folder, original.parent, found)
+    place.parent.mkdir(parents=True, exist_ok=True)
+    if not place.exists():
+        shutil.copy2(found, place)
+    return place
 
 
 def write_game(source: Path, name: str, model: GameModel, textures: list[world.Texture],
@@ -364,7 +478,11 @@ def check(asset: AssetDef, model: GameModel, textures: list[world.Texture]) -> t
         errors.append('it has no triangles')
     if len(model.vertices) > MAX_VERTICES:
         errors.append(f'{len(model.vertices)} vertices: the game takes at most {MAX_VERTICES} '
-                      'per model (reduce it)')
+                      'per model (lower its triangle budget)')
+    for key, level in model.levels.items():
+        if len(level.vertices) > MAX_VERTICES:
+            errors.append(f'its {key} model has {len(level.vertices)} vertices: the game takes at most '
+                          f'{MAX_VERTICES} (lower its triangle budget)')
     if any(not -32768 <= c <= 32767 for v in model.vertices for c in v):
         errors.append(f'it is more than {32767 / ASSET_UNIT / 100:.1f} m from its centre '
                       '(check the unit)')

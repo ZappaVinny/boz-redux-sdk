@@ -380,6 +380,67 @@ def asm_anim_offsets(body: bytes) -> list[tuple[int, int, int]]:
     return out
 
 
+def asm_state_spans(body: bytes) -> tuple[list[tuple[int, int, int]], int]:
+    """([(name hash, start, end)] of each state's bytes, where the states end)."""
+    p, out = 0, []
+    (count,) = struct.unpack_from('<I', body, p)
+    p += 4
+    for _ in range(count):
+        start = p
+        name = struct.unpack_from('<I', body, p)[0]
+        p += struct.calcsize('<IIIiihIBB')
+        for _ in range(3):
+            (n,) = struct.unpack_from('<I', body, p)
+            p += 4 + n * 11
+        (events,) = struct.unpack_from('<I', body, p)
+        p += 4 + events * 12
+        out.append((name, start, p))
+    return out, p
+
+
+# Where an extra clip's state comes from: a one-shot state that plays its clip and then goes back
+# to idle (its events also let the weapon's own triggers, shoot, reload, sprint, take over).
+EXTRA_TEMPLATES = (iw_hash('reloading'), iw_hash('reload'))
+STATE_INDEX_AT = 20          # a state's s16 index, after name, two clips, speed and length
+
+
+def append_states(body: bytes, states: list[tuple[int, int, int]],
+                  template: int | None = None) -> bytes:
+    """A copy of a state machine with new states [(name hash, clip hash, length ms)] at the end,
+    each a copy of *template* (default: a state that ends after its length, else the reloading
+    state: its events, without its callbacks) with its name, clip (both slots), length (ms: when
+    it ends and goes back) and its own index. Existing states keep their indices."""
+    spans, end = asm_state_spans(body)
+    names = [name for name, _s, _e in spans]
+    timed = [name for name, st, _e in spans if struct.unpack_from('<i', body, st + 16)[0] > 0]
+    pick = template if template in names else (timed[0] if timed else
+                                               next((t for t in EXTRA_TEMPLATES if t in names), None))
+    if pick is None:
+        raise AnimError('the state machine has no reloading state to copy for new clips')
+    _name, start, stop = spans[names.index(pick)]
+    # The template's events (how it goes back), not its callbacks (what it tells the game: a
+    # melee hit, lowering the gun): an extra clip only plays.
+    header = struct.calcsize('<IIIiihIBB')
+    p = start + header
+    for _ in range(3):
+        (n,) = struct.unpack_from('<I', body, p)
+        p += 4 + n * 11
+    record = body[start:start + header] + struct.pack('<III', 0, 0, 0) + body[p:stop]
+    out = bytearray(body[:end])
+    added = 0
+    for name, clip, length in states:
+        if name in names:
+            continue
+        copy = bytearray(record)
+        struct.pack_into('<III', copy, 0, name, clip, clip)
+        struct.pack_into('<i', copy, 16, int(length))
+        struct.pack_into('<h', copy, STATE_INDEX_AT, len(names) + added)
+        out += copy
+        added += 1
+    struct.pack_into('<I', out, 0, len(names) + added)
+    return bytes(out) + body[end:]
+
+
 LENGTH_AFTER_ANIM = 12      # a state's length (ms) from its animation reference (asm_anim_offsets)
 
 

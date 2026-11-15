@@ -297,8 +297,8 @@ def own_model_checks(label, asset_name):
     wm.boz_weapon_model = asset_name
     wv.flush()
     weapon = {d.name: d for d in wt.wp.load_defs(project / "source")}["hq_wonder"]
-    check(weapon.model.get("asset") == asset_name and weapon.model.get("fit", {}).get("scale"),
-          f"{label}: the weapon uses your model, fitted ({weapon.model})")
+    check(weapon.model.get("asset") == asset_name and weapon.model.get("fit") == wv.AS_MADE,
+          f"{label}: the weapon uses your model as it was made, no resizing ({weapon.model.get('fit')})")
     model, _textures = suite._bozkit.assets.load_game(project / "source", asset_name)
     rig_obj = bpy.data.objects[wv.RIG]
     check(all(f"gun {b.name}" in rig_obj.data.bones for b in model.bones),
@@ -327,6 +327,10 @@ def own_model_checks(label, asset_name):
     fit_obj = bpy.data.objects.get(wv.FIT_MODEL)
     check(fit_obj is not None and bpy.data.objects.get(wv.GHOST) is not None
           and view.view_layers[0].objects.active == fit_obj, f"{label}: Fit model in hand shows your model to move")
+    check(bpy.data.objects[wv.GHOST].hide_viewport, f"{label}: the stock gun's wireframe is hidden by default")
+    wm.boz_fit_show_stock = True
+    check(not bpy.data.objects[wv.GHOST].hide_viewport, f"{label}: Show stock gun shows it")
+    wm.boz_fit_show_stock = False
     fit_obj.location.x += 100.0
     wm.boz_fit_edit = False
     wv.flush()
@@ -336,6 +340,9 @@ def own_model_checks(label, asset_name):
     wv.flush()
     again = {d.name: d for d in wt.wp.load_defs(project / "source")}["hq_wonder"].model["fit"]["location"]
     check(abs(again[0] - before[0]) < 0.5, f"{label}: the Position field sets the fit")
+    bpy.ops.boz.weapon_auto_fit()
+    fitted = {d.name: d for d in wt.wp.load_defs(project / "source")}["hq_wonder"].model["fit"]
+    check(fitted != wv.AS_MADE and fitted.get("scale"), f"{label}: Auto fit sizes it only when clicked ({fitted})")
     # A gun change of its own: the magazine lower from frame 10 on.
     rig_obj = bpy.data.objects[wv.RIG]
     wm.boz_anim_state = states["reloading"]
@@ -345,15 +352,15 @@ def own_model_checks(label, asset_name):
         view.frame_set(10)
         bone.location.z -= 30.0
         changed = Vector(bone.location)
+        bpy.ops.boz.weapon_key_pose()
         view.frame_set(30)
+        view.frame_set(10)
         held = (Vector(bone.location) - changed).length
-        check([c["frame"] for c in wv.editor_state["edits"]["gun"]] == [10] and held < 0.01,
-              f"{label}: the magazine change holds from frame 10 ({held:.4f} off)")
+        check(held < 0.01, f"{label}: the magazine key holds ({held:.4f} off)")
         bpy.ops.boz.weapon_anim_save()
         stored = wv.weapon_anim.load_clips(project / "source", "hq_wonder").get(int(states["reloading"]), {})
-        pose = stored.get("edits", {}).get("gun", [{}])[0].get("pose", {})
-        check("tag_clip" in {k.lower() for k in pose} and stored.get("gun"),
-              f"{label}: your change is stored by your bone's name ({sorted(pose)})")
+        check(any(clip_name in c["path"] for c in stored.get("layer", [])) and stored.get("gun"),
+              f"{label}: your magazine key is stored ({[c['path'] for c in stored.get('layer', [])][:3]})")
     wv.BOZ_PT_weapon_model.draw(type("Panel", (), {"layout": FakeLayout()})(), FakeContext(None))
     print(f"BOZ_SUITE_INFO {label} own model: reload moves it up to {best:.0f} units")
     return "hq_wonder"
@@ -478,56 +485,47 @@ def weapon_checks(label):
     check(view.frame_current == 1, f"{label}: playing steps the frames")
     bpy.ops.boz.weapon_anim_play()
     check(not wm.boz_anim_playing, f"{label}: Play again pauses")
-    # Editing: a change holds forward from its frame; earlier frames never move.
+    # Editing: your keys on top of the original (Combine); the hand stays on the gun.
+    check(wv.key_count() == 0, f"{label}: no keys before an edit")
+    check(any(t.name == wv.ORIGINAL_TRACK for t in rig_obj.animation_data.nla_tracks)
+          and rig_obj.animation_data.action_blend_type == "COMBINE", f"{label}: the original is a layer under yours")
+    check(view.tool_settings.use_keyframe_insert_auto, f"{label}: auto-key is on")
     hand = rig_obj.pose.bones["hand L"]
-    view.frame_set(10)
-    before_10 = Vector(hand.location)
     view.frame_set(20)
     original_20 = Vector(hand.location)
     hand.location.z += 4.0
     edited_20 = Vector(hand.location)
-    view.frame_set(25)                                 # leaving the frame keeps the change
-    edits = wv.editor_state["edits"]
-    check([c["frame"] for c in edits["arms"]] == [20] and not edits["gun"],
-          f"{label}: leaving the frame keeps the arms change ({edits})")
-    check((Vector(hand.location) - edited_20).length < 1e-3, f"{label}: the change holds on frame 25")
-    view.frame_set(10)
-    check((Vector(hand.location) - before_10).length < 1e-3, f"{label}: frame 10 (before) is unchanged")
-    # The gun's own timeline: moving the gun position changes only the gun's.
-    view.frame_set(40)
+    bpy.ops.boz.weapon_key_pose()
+    check(wv.key_count() > 0, f"{label}: Key pose keys the moved hand ({wv.key_count()} keys)")
+    view.frame_set(25)
+    view.frame_set(20)
+    check((Vector(hand.location) - edited_20).length < 1e-2, f"{label}: the key holds at frame 20")
+    view.frame_set(40)                                  # back to the original at 40: it blends
+    hand.location = wv.editor_state["baked"][40]["hand L"][0]
+    bpy.ops.boz.weapon_key_pose()
+    view.frame_set(30)
+    middle = Vector(hand.location)
+    original_30 = Vector(wv.editor_state["baked"][30]["hand L"][0])
+    check(0.1 < (middle - original_30).length < 4.0, f"{label}: between keys it blends ({(middle - original_30).length:.2f})")
+    view.frame_set(50)
     gun_bone = rig_obj.pose.bones[wv.TAG]
     gun_bone.location.x += 3.0
-    view.frame_set(45)
-    check([c["frame"] for c in wv.editor_state["edits"]["gun"]] == [40] and
-          [c["frame"] for c in wv.editor_state["edits"]["arms"]] == [20],
-          f"{label}: arms and gun keep their own timelines ({wv.editor_state['edits']})")
+    bpy.ops.boz.weapon_key_pose()
+    check(any('"gun position"' in c["path"] for c in wv._layer_of()), f"{label}: the gun is keyed too")
     depsgraph.update()
     evaluated = rig_obj.evaluated_get(depsgraph)
     wrist = evaluated.pose.bones["wrist L"].matrix.to_translation()
     grip = evaluated.pose.bones["hand L"].matrix.to_translation()
     check((wrist - grip).length < 2.0, f"{label}: the hand stays on the gun ({(wrist - grip).length:.2f})")
-    # Back to original, copy and paste, original frames.
-    view.frame_set(60)
-    bpy.ops.boz.weapon_original(part="arms")
-    check(wv.weapon_anim.source_of(wv.editor_state["edits"]["arms"], 70)[0] == "original",
-          f"{label}: back to original from 60")
-    wm.boz_copy_part, wm.boz_copy_source = "ARMS", "ORIGINAL"
-    view.frame_set(5)
-    bpy.ops.boz.weapon_copy_pose()
-    view.frame_set(80)
-    bpy.ops.boz.weapon_paste_pose()
-    check(80 in [c["frame"] for c in wv.editor_state["edits"]["arms"]], f"{label}: a pose pastes at 80")
-    wm.boz_copy_part = "BOTH"
-    wm.boz_copy_from, wm.boz_copy_to = 0, 10
-    view.frame_set(90)
-    bpy.ops.boz.weapon_copy_frames()
-    check(wv.weapon_anim.source_of(wv.editor_state["edits"]["gun"], 95) == ("original", 5),
-          f"{label}: original frames play from 90 ({wv.editor_state['edits']['gun']})")
+    bpy.ops.boz.weapon_clear_keys()
+    check(not any(abs(k[0] - 50) < 0.5 for c in wv._layer_of() for k in c["keys"]), f"{label}: clearing frame 50's keys")
     bpy.ops.boz.weapon_anim_save()
     stored = wv.weapon_anim.load_clips(project / "source", "colt45").get(reload_state, {})
-    check(stored.get("edits", {}).get("arms") and stored.get("arms") and stored.get("gun") and
+    check(stored.get("layer") and stored.get("arms") and stored.get("gun") and
           len(stored["arms"].frames[0][1]) == len(rig.arm_bones),
-          f"{label}: the changes and the result at every frame are stored")
+          f"{label}: your keys and the result at every frame are stored")
+    wv.show_state(bpy.context, reload_state)
+    check(wv.key_count() == sum(len(c["keys"]) for c in stored["layer"]), f"{label}: the keys come back")
     for workspace in ("Weapons", "Animation"):
         wv.BOZ_PT_weapon_animations.draw(type("Panel", (), {"layout": FakeLayout()})(),
                                          FakeContext(None, workspace))
@@ -537,7 +535,7 @@ def weapon_checks(label):
           f"{label}: Reset gives the original back")
     view.frame_set(30)                                 # one change kept, for the build
     rig_obj.pose.bones["hand R"].location.y += 2.0
-    view.frame_set(31)
+    bpy.ops.boz.weapon_key_pose()
     bpy.ops.boz.weapon_anim_save()
     window = bpy.context.window_manager.windows[0]
     window.scene = view                 # as when the Weapons tab is on screen
@@ -720,6 +718,128 @@ def sound_checks(label):
     added = {d.name for d in tab.defs()} - before
     check(added == {"growl", "roar_take_2_2"}, f"{label}: several recordings at once, a broken one skipped ({added})")
     return target
+
+
+def fx_checks(label):
+    """The Effects tab: one list (yours and the game's): a new effect with a texture, its values
+    (labelled pairs), a second emitter, the preview's simulation, a game effect added and made
+    editable, a game projectile with its options, own projectiles (blank and from a preset) and
+    scripts. Returns (effect, projectile, weapon) for the build checks."""
+    from PIL import Image
+    tab = suite.fx_tab
+    fxm = tab.fx
+    source = suite.link.source_dir()
+    picture = project.parent / f"frost_{label}.png"
+    Image.new("RGBA", (128, 64), (180, 220, 255, 200)).save(picture)
+    bpy.ops.boz.fx_new("EXEC_DEFAULT", name="frost", kind="lasting")
+    check([e["name"] for e in fxm.load(source)["effects"]] == ["frost"], f"{label}: a new effect")
+    check(scene.boz_fx_effects[scene.boz_fx_effect_index].source == "own", f"{label}: it is listed as yours")
+    bpy.ops.boz.fx_texture("EXEC_DEFAULT", filepath=str(picture), target="emitter")
+    stored = fxm.load(source)["effects"][0]["emitters"][0]
+    check(stored["texture"] == "source/fx/frost_0.png" and (project / stored["texture"]).is_file(),
+          f"{label}: its texture is copied ({stored['texture']})")
+    form = scene.boz_fx_emitter
+    form.frames, form.columns = 4, 4
+    form.life_a, form.life_b = 0.4, 0.8
+    form.velocity = (0.0, 150.0, 0.0)
+    form.blend = "blend"
+    form.fade_out = True
+    stored = fxm.load(source)["effects"][0]["emitters"][0]
+    check(stored["life"] == [400, 800] and stored["velocity"][1] == 150 and stored["blend"] == "blend"
+          and stored["frames"] == 4 and "fade_out" in stored["flags"], f"{label}: emitter values are stored ({stored})")
+    bpy.ops.boz.fx_emitter_add("EXEC_DEFAULT")
+    check(len(fxm.load(source)["effects"][0]["emitters"]) == 2, f"{label}: a second emitter")
+    pieces_form = scene.boz_fx_effect_pieces
+    pieces_form.use_lure, pieces_form.lure_seconds = True, 8.0
+    stored = fxm.load(source)["effects"][0].get("pieces")
+    check(stored == {"lure": {"seconds": 8.0}}, f"{label}: an effect lures where it appears ({stored})")
+    pieces_form.use_lure = False
+    check("pieces" not in fxm.load(source)["effects"][0], f"{label}: and stops when unticked")
+    pieces_form.use_lure = True
+    tab.refresh(bpy.context)
+    check(scene.boz_fx_effect_pieces.use_lure and abs(scene.boz_fx_effect_pieces.lure_seconds - 8.0) < 1e-6,
+          f"{label}: its pieces load back")
+    effect = tab.preview_effect()
+    sim = tab.fx_preview.Simulation(effect)
+    for _ in range(20):
+        sim.step_moving(50)
+    check(effect is not None and len(sim.particles) > 0, f"{label}: the preview runs ({len(sim.particles)} particles)")
+    if LIBRARY:
+        library = [i[0] for i in tab._library_items(type("Op", (), {"kind": "effect"})(), bpy.context) if i[0] != "_none"]
+        wanted = next((k for k in library if k.endswith(f"0x{world.iw_hash('iceShatter'):08x}")), library[0] if library else None)
+        if wanted:
+            bpy.ops.boz.fx_add_game("EXEC_DEFAULT", kind="effect", entry=wanted)
+            item = scene.boz_fx_effects[scene.boz_fx_effect_index]
+            check(item.source == "game" and any(u.name == item.name for u in tab.used()),
+                  f"{label}: a game effect is added as it is ({item.name})")
+            check(tab.preview_effect() is not None, f"{label}: a game effect previews")
+            name = item.name
+            bpy.ops.boz.fx_make_editable("EXEC_DEFAULT")
+            mine = [e for e in fxm.load(source)["effects"] if e["name"] == name]
+            check(mine and mine[0]["emitters"] and not any(u.name == name for u in tab.used()),
+                  f"{label}: Make editable: the same name, now yours")
+        projectiles = [i[0] for i in tab._library_items(type("Op", (), {"kind": "projectile"})(), bpy.context)
+                       if i[0] != "_none"]
+        if projectiles:
+            bpy.ops.boz.fx_add_game("EXEC_DEFAULT", kind="projectile", entry=projectiles[0])
+            scene.boz_fx_game_anchored = True
+            game_one = scene.boz_fx_projectiles[scene.boz_fx_projectile_index].name
+            check(any(u.name == game_one and u.anchored for u in tab.used()), f"{label}: a game projectile's options")
+            bpy.ops.boz.fx_remove("EXEC_DEFAULT", kind="projectile")
+    scene.boz_fx_effect_index = 0
+    bpy.ops.boz.fx_projectile_new("EXEC_DEFAULT", name="blank_one")
+    check([p for p in fxm.load(source)["projectiles"] if p["name"] == "blank_one"][0]["pieces"] == {},
+          f"{label}: a new projectile is blank")
+    bpy.ops.boz.fx_projectile_new("EXEC_DEFAULT", name="ice_bolt", preset="bolt")
+    pform = scene.boz_fx_projectile
+    pform.damage_centre, pform.damage_edge = 900, 500
+    pform.trail = "frost"
+    pform.use_lure = True
+    pform.radius = 200.0
+    projectile = [p for p in fxm.load(source)["projectiles"] if p["name"] == "ice_bolt"][0]
+    pieces = projectile["pieces"]
+    check(pieces["blast"]["damage"] == [500, 900] and pieces["trail"] == "frost" and "lure" in pieces
+          and "ribbon" in pieces and projectile["radius"] == 200.0, f"{label}: a projectile from a preset ({projectile})")
+    bpy.ops.boz.fx_script("EXEC_DEFAULT", kind="projectile")
+    script = project / [p for p in fxm.load(source)["projectiles"] if p["name"] == "ice_bolt"][0]["script"]
+    check(script.is_file() and "boz.Projectile:extend" in script.read_text(), f"{label}: its script is made ({script})")
+    scene.boz_fx_effect_index = [i.name for i in scene.boz_fx_effects].index("frost")
+    bpy.ops.boz.fx_script("EXEC_DEFAULT", kind="effect")
+    check((project / [e for e in fxm.load(source)["effects"] if e["name"] == "frost"][0]["script"]).is_file(),
+          f"{label}: an effect script is made")
+    check(not any(n == link.EFFECTS_TAB for _m, n in link.problems_of(scene)),
+          f"{label}: no problems ({link.problems_of(scene)})")
+    for panel in (tab.BOZ_PT_fx_effects, tab.BOZ_PT_fx_emitter, tab.BOZ_PT_fx_projectiles):
+        fake = type("Panel", (), {"layout": FakeLayout()})()
+        try:
+            panel.draw(fake, FakeContext(None, "Effects"))
+        except Exception as exc:   # noqa: BLE001
+            check(False, f"{label}: {panel.__name__} fails: {exc!r}")
+    try:
+        tab.draw_view_header(type("Header", (), {"layout": FakeLayout()})(), FakeContext(None, "Effects"))
+    except Exception as exc:   # noqa: BLE001
+        check(False, f"{label}: the preview header fails: {exc!r}")
+    # A launcher weapon firing it, with an extra clip.
+    wt = suite.weapons_tab
+    names = [i.name for i in scene.boz_weapons]
+    if "colt45" not in names:
+        return "frost", "ice_bolt", None
+    scene.boz_weapon_index = names.index("colt45")
+    wt.refresh_fields(bpy.context)
+    rows = {r.key: r for r in scene.boz_weapon_fields}
+    rows["boz_fires_projectile"].value_bool = True
+    rows["m_projectileName"].value_enum = "boz_proj_ice_bolt"
+    fields = wt.weapon_def(bpy.context, "colt45").fields
+    check(fields.get("boz_fires_projectile") is True and fields.get("m_projectileName") == "boz_proj_ice_bolt",
+          f"{label}: any weapon fires a projectile ({fields})")
+    items = {i[0] for i in wt.projectile_items(bpy.context)}
+    check("boz_proj_ice_bolt" in items, f"{label}: the projectile picker lists yours ({sorted(items)[:5]})")
+    wv = suite.weapon_view
+    if wv.load(bpy.context):
+        bpy.ops.boz.weapon_clip_new("EXEC_DEFAULT", name="charge", frames=20)
+        check(("charge", 20) in wv.weapon_anim.extra_clips(source, "colt45"), f"{label}: an extra clip")
+        check(any(s[1].startswith("charge") for s in wv.states()), f"{label}: it is listed with the animations")
+    return "frost", "ice_bolt", "colt45"
 
 
 def effect_checks(label):
@@ -1099,6 +1219,7 @@ if source.inherit:
     own = own_model_checks("inherited", asset_name)
     replaced_sound = sound_checks("inherited")
     used_effect = effect_checks("inherited")
+    own_fx = fx_checks("inherited")
     game_rules = game_checks("inherited")
     saved, data = build_and_compile("inherited")
     if game_rules:
@@ -1107,6 +1228,14 @@ if source.inherit:
         sound_build_checks("inherited", replaced_sound)
     if used_effect is not None:
         effect_build_checks("inherited", used_effect, data)
+    if own_fx and LIBRARY:
+        built = link.sdk_project.load_project(project)
+        output = next((project / "build").glob("*/assets"))
+        group_bytes = (output / f"weapon_projectiles_{built.map_name}.group.bin").read_bytes()
+        for name in ("boz_fx_frost", "boz_proj_ice_bolt", "boz_proj_blank_one", "boz_fx_frost_0"):
+            check(world.iw_hash(name).to_bytes(4, "little") in group_bytes, f"own effects: {name} is built")
+        check('"frost"' in data and '"ice_bolt"' in data and 'projectiles/ice_bolt' in data,
+              "own effects: scripts know them and their scripts")
     if own:
         built_group = next((project / "build").glob(f"*/assets/weapons_*.group.bin")).read_bytes()
         for name in ("hq_wonder_model", "hq_wonder_skel", "hq_wonder_gun"):

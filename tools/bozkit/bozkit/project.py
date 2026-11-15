@@ -491,7 +491,7 @@ def _hash_files(root: Path) -> list[dict]:
 def compile_map(project: Project, game, fixed=None):
     """The game's groups for a map project's world (``bozkit.levels.LevelFiles``). *game*
     reads the shipped groups: ``bozkit.library.open_game``."""
-    from . import (assets, effects, game as game_rules, hud_icons, levels, sound, weapons, world,
+    from . import (assets, effects, fx, game as game_rules, hud_icons, levels, sound, weapons, world,
                    world_compile)
     if project.kind != 'map':
         raise ProjectError(f'{project.mod.id} is not a map project')
@@ -515,12 +515,17 @@ def compile_map(project: Project, game, fixed=None):
         hud_icons.apply(source, defs, game.read, files.groups, project.map_name, pack=game)
         # The Effects tab's effects (from any map) under the names scripts use.
         files.runtime['effects'] = effects.apply(game.read, source, files.groups, project.map_name,
-                                                 game, scripts=project.scripts)
+                                                 game, scripts=project.scripts,
+                                                 extra=fx.needs_game(fx.load(source)))
+        # The Effects tab's own effects and projectiles (made from your textures and values).
+        files.runtime['effects'] += fx.apply(game.read, source, files.groups, project.map_name,
+                                             {e['name']: e['hash'] for e in files.runtime['effects']})
+        _weapon_projectiles(defs, source, game, files.groups, project.map_name)
         # The Game tab: rounds, special rounds, zombie looks, economy, loading screen.
         files.runtime['game'] = game_rules.apply(game_rules.load(source), project.root,
                                                  files.groups, project.map_name, game.read, pack=game)
     except (world.WorldError, levels.LevelError, weapons.WeaponError, sound.SoundError,
-            effects.EffectError, game_rules.GameError, hud_icons.IconError) as exc:
+            effects.EffectError, fx.FxError, game_rules.GameError, hud_icons.IconError) as exc:
         raise ProjectError(str(exc)) from None
     built = files.groups.get(f'weapons_{project.map_name}.group.bin')
     if built is not None and weapons.hash_of(start) not in weapons.resource_hashes(built):
@@ -531,6 +536,27 @@ def compile_map(project: Project, game, fixed=None):
     files.runtime['weapons'] = weapons.runtime(defs, index)
     files.runtime['start_weapon'] = {'name': start, 'reserve': reserve, 'level': project.map_name}
     return files
+
+
+def _weapon_projectiles(defs, source: Path, game, groups: dict, map_name: str) -> None:
+    """What the map's weapons fire: your own projectiles must exist (Effects tab); the game's
+    (any map's) come with the map."""
+    from . import bundle, fx, weapons
+    own = {p['name'] for p in fx.load(source).get('projectiles', [])}
+    wanted = []
+    for weapon in defs:
+        value = weapon.fields.get('m_projectileName')
+        if not value:
+            continue
+        if isinstance(value, str) and value.startswith(weapons.OWN_PROJECTILE_PREFIX):
+            name = value[len(weapons.OWN_PROJECTILE_PREFIX):]
+            if name not in own:
+                raise ProjectError(f'weapon {weapon.name} fires the projectile {name}, which is not one of '
+                                   'your projectiles (Effects tab)')
+            continue
+        wanted.append(weapons.hash_of(value))
+    if wanted:
+        bundle.Bundle(bundle.Registry.of(game), groups, map_name).add(wanted)
 
 
 MAP_RUNTIME = 'require("boz.game.world").start()'

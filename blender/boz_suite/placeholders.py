@@ -18,7 +18,6 @@ PLACEHOLDERS = [
     ("Characters", "Model replacement", "Replace player arms, characters and zombies with your models", "RE"),
     ("Characters", "Skeleton and preview", "Map bones to the game skeleton and preview animations", "RE"),
     ("Assets", "Lightmaps", "Bake lighting into the game's lightmap textures", "later"),
-    ("Effects", "Edit effects", "Change particle effects: colours, sizes, timing, new emitters", "RE"),
     ("Animation", "Map and character animations", "Animate map objects and characters in the game's "
      "format (weapons are done: pick a weapon in the Weapons tab)", "RE"),
     ("Scripts", "Lua completions", "boz.* suggestions while typing in the script editor", "UI"),

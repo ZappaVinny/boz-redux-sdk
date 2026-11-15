@@ -380,9 +380,10 @@ class BOZ_PT_effects_used(_EffectsPanel, Panel):
         box.operator(BOZ_OT_effect_copy.bl_idname, icon="COPYDOWN")
 
 
+# The Effects tab's panels are fx_tab's now (one list: yours and the game's); these operators and
+# the catalog stay for scripts and older projects.
 CLASSES = (BOZ_EffectEntry, BOZ_EffectUsed, BOZ_OT_effects_refresh, BOZ_OT_effect_use,
-           BOZ_OT_effect_remove, BOZ_OT_effect_copy, BOZ_UL_effect_entries, BOZ_UL_effects_used,
-           BOZ_PT_effects_game, BOZ_PT_effects_used)
+           BOZ_OT_effect_remove, BOZ_OT_effect_copy, BOZ_UL_effect_entries, BOZ_UL_effects_used)
 
 
 def register():

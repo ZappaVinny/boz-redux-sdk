@@ -95,6 +95,9 @@ def setup_area(area, workspace_name: str, screen=None) -> None:
         space.shading.type = "MATERIAL"   # maps saved before game materials were shown
     if area.type == "IMAGE_EDITOR" and workspace_name == "Audio" and space.image is None:
         space.image = view_image(workspace_name)     # the wave view
+    if area.type == "VIEW_3D" and workspace_name == "Effects":
+        from . import fx_tab
+        fx_tab.setup_view(space)                     # the preview: only the effect unless In the map
     if _configured(space):
         return
     if area.type == "VIEW_3D":
@@ -250,9 +253,9 @@ def _scripts_editors(window, screen) -> None:
     space.show_region_ui = True          # the sidebar: hook scripts (game_tab.BOZ_PT_game_hooks)
 
 
-AUDIO_KEY = "boz_audio_layout2"   # Audio, Effects: the next layout step, "done" or "failed"
+AUDIO_KEY = "boz_audio_layout4"   # Audio, Effects: the next layout step, "done" or "failed"
 AUDIO_LAST = 3
-FORMS_LAYOUTS = {"Audio": True, "Effects": False, "Game": False}   # forms + log (+ the wave view)
+FORMS_LAYOUTS = {"Audio": True, "Effects": True, "Game": False}   # forms + log (+ the wave / preview)
 
 
 def view_image(workspace_name: str):
@@ -287,7 +290,8 @@ def _audio_step(window, step: int) -> None:
         forms = columns[0]
         editors = [(log, "TEXT_EDITOR"), (forms, "PROPERTIES")]
         if waves:
-            editors.append((columns[-1], "IMAGE_EDITOR"))
+            # The Audio tab's wave picture; the Effects tab's 3D preview.
+            editors.append((columns[-1], "VIEW_3D" if window.workspace.name == "Effects" else "IMAGE_EDITOR"))
         for area, editor in editors:
             with _override(window, screen, area):
                 area.ui_type = editor
@@ -296,7 +300,7 @@ def _audio_step(window, step: int) -> None:
         space.show_word_wrap = True
         space.show_line_numbers = False
         setup_properties(space_of(forms), True)
-        if waves:
+        if waves and window.workspace.name != "Effects":
             space_of(columns[-1]).image = view_image(window.workspace.name)
 
 

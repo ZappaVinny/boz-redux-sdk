@@ -70,6 +70,8 @@ local function start_state()
             objects.set_navmesh(name, false)
         end
         require("boz.game.effects").know(data.effects)
+        require("boz.game.projectile").start()     -- your projectiles' scripts and pieces
+        require("boz.engine.weapons").fire_projectiles(data.weapons)   -- "Fires its projectile"
         prefabs.start(data.objects or {}, data.names, data.weapons)
     end)
 end

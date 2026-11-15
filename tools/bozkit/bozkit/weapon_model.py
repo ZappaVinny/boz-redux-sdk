@@ -263,9 +263,10 @@ def build(weapon: str, model, textures, fit: dict, bone_map: dict, bones: list[a
         if any(not -32768 <= c <= 32767 for v in rounded for c in v):
             raise WeaponModelError(f'{weapon}: the fitted model is too big for the game '
                                    '(lower its scale)')
-        if len(rounded) > 0x4000:
-            raise WeaponModelError(f'{weapon}: {len(rounded)} vertices; a skinned model takes '
-                                   'at most 16384 (lower the asset\'s budget)')
+        if len(rounded) > native.MAX_MODEL_VERTICES:
+            raise WeaponModelError(f'{weapon}: its model has {len(rounded)} vertices; the game takes at most '
+                                   f'{native.MAX_MODEL_VERTICES} (Assets tab: lower its triangle budget, '
+                                   'then Make game version)')
         model_hash = iw_hash(name)
         body = bytearray(native.build_model(rounded, level.uvs, level.triangles, materials,
                                             level.materials or None))

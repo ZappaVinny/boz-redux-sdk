@@ -376,6 +376,23 @@ def _clear_view(view) -> None:
             bpy.data.armatures.remove(data)
 
 
+def _relink_images(asset) -> int:
+    """Images of the source whose files are not where they link to: the copies in the asset's
+    folder (or beside the original, copied in; asset_build.py does the same when making)."""
+    fixed = 0
+    for image in bpy.data.images:
+        if image.source not in ("FILE", "SEQUENCE", "TILED") or image.packed_file or not image.filepath:
+            continue
+        if Path(bpy.path.abspath(image.filepath, library=image.library)).is_file():
+            continue
+        found = assets.find_linked(link.project_root(), asset, Path(bpy.path.basename(image.filepath)).name)
+        if found is not None:
+            image.filepath = str(found)
+            image.reload()
+            fixed += 1
+    return fixed
+
+
 def _load_high(view, asset) -> list:
     """The high-quality source's meshes (and armature) in the view, under one empty that scales
     them from the source's unit to centimetres."""
@@ -405,6 +422,7 @@ def _load_high(view, asset) -> list:
             print(f"boz_suite: could not show {path.name}: {exc}")
         objects = [o for o in bpy.data.objects if o not in before]
         del window
+    _relink_images(asset)
     wanted = [o for o in objects if o.type in ("MESH", "ARMATURE")
               and (o.type == "ARMATURE" or not asset.objects or o.name in asset.objects)]
     for obj in objects:

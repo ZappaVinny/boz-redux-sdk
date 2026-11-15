@@ -220,6 +220,19 @@ function Object:rotation()
     return entity ~= 0 and require("boz.engine.entities").rotation(entity) or nil
 end
 
+--- Plays a state of its animation state machine (an animated object or character): "open",
+--- "idle", ...; blend: seconds of cross-fade. True when it has that state.
+function Object:play_animation(state, blend)
+    local entity = self._handle:entity_pointer()
+    return entity ~= 0 and require("boz.engine.animation").play(entity, state, blend) or false
+end
+
+--- Where one of its bones is ({x, y, z}), for an animated object or character; nil otherwise.
+function Object:bone_position(bone)
+    local entity = self._handle:entity_pointer()
+    return entity ~= 0 and require("boz.engine.animation").bone_position(entity, bone) or nil
+end
+
 --- Its position {x, y, z} (centimetres, y up), or nil when it is not in the level.
 function Object:position()
     return self._handle:position()

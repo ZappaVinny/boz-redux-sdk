@@ -187,6 +187,39 @@ def used_items(context, kind: str) -> list:
 NONE = "_none"   # Blender takes an empty identifier as a divider, not a choice
 
 
+def projectile_items(context) -> list:
+    """What a launcher can fire: your projectiles (Effects tab), then the ones the map's weapons
+    fire (any other map's: name it in a script)."""
+    from ._bozkit import fx
+    source = link.source_dir()
+    own = []
+    try:
+        own = [p["name"] for p in fx.load(source).get("projectiles", [])] if source else []
+    except fx.FxError:
+        pass
+    key = ("projectiles", base_level(context), tuple(own))
+    if key not in _state["items"]:
+        items = [(NONE, "None", "")]
+        items += [(wp.OWN_PROJECTILE_PREFIX + name, f"{name} (yours)", "One of your projectiles") for name in own]
+        seen = {}
+        for weapon in level_weapons(base_level(context)):
+            value = weapon.values.get("m_projectileName") or 0
+            if value and value not in seen:
+                seen[value] = f"{weapon.label}'s projectile"
+        items += [(f"0x{value:08x}", text, "") for value, text in sorted(seen.items(), key=lambda kv: kv[1].lower())]
+        _state["items"][key] = items
+    return _state["items"][key]
+
+
+def projectile_choice(value) -> str:
+    """A stored projectile (name or hash) as one of projectile_items' identifiers."""
+    if not value:
+        return NONE
+    if isinstance(value, str) and (value.startswith(wp.OWN_PROJECTILE_PREFIX) or value.startswith("0x")):
+        return value
+    return f"0x{wp.hash_of(value):08x}"
+
+
 def weapon_items(context, include_none=True, listed_only=False) -> list:
     """Weapons to choose from: the project's list first, then (unless *listed_only*) every other
     weapon of the map (Pack-a-Punch results are rarely listed)."""
@@ -218,6 +251,8 @@ def _enum_items(self, context):
         return weapon_items(context)
     if spec.kind in ("sound", "effect"):
         return used_items(context, spec.kind)
+    if spec.kind == "projectile":
+        return projectile_items(context)
     return [("0", "-", "")]
 
 
@@ -233,7 +268,7 @@ def _row_value(row):
         return int(row.value_enum)
     if spec.kind in ("sound", "effect"):
         return int(row.value_enum)
-    if spec.kind == "weapon":
+    if spec.kind in ("weapon", "projectile"):
         return "" if row.value_enum == NONE else row.value_enum
     return None
 
@@ -251,6 +286,8 @@ def _row_changed(self, context):
     original = base.get(self.key)
     if self.key == "Upgrade":
         same = (value or "") == (original or "")
+    elif wp.FIELD_BY_KEY[self.key].kind == "projectile":
+        same = wp.hash_of(value or 0) == wp.hash_of(original or 0)
     elif isinstance(value, float):
         same = abs(value - float(original or 0)) < 1e-4
     else:
@@ -366,6 +403,10 @@ def refresh_fields(context) -> None:
                     row.value_enum = wanted
             elif spec.kind == "weapon":
                 wanted = str(value or NONE)
+                if wanted in {i[0] for i in _enum_items(row, context)}:
+                    row.value_enum = wanted
+            elif spec.kind == "projectile":
+                wanted = projectile_choice(value)
                 if wanted in {i[0] for i in _enum_items(row, context)}:
                     row.value_enum = wanted
             row.changed = spec.key in changed

@@ -32,6 +32,7 @@ local CLIP, RESERVE = pw("clip"), pw("reserve")
 local CLIP_SIZE, RESERVE_SIZE = pw("m_clipSize"), pw("m_ammoSize")
 local FIRE_RATE = pw("autoROF")
 local DAMAGE, LIMB_DAMAGE = pw("damage"), pw("limbDamage")
+local PROJECTILE, LAUNCH_FORCE = pw("m_projectileName"), pw("m_projectileLaunchForce")
 
 local names = {}        -- hash -> name, for the weapons the map knows
 
@@ -121,10 +122,98 @@ function Weapon:set_damage(head, torso, limbs)
     return self
 end
 
+--- The projectile it fires (a launcher: name hash), and changing it for this match (one of
+--- your projectiles by name, or a game projectile's name or hash). Returns the weapon.
+function Weapon:projectile() return game.read("u32", self.pointer + PROJECTILE) end
+function Weapon:set_projectile(name)
+    local fx = require("boz.game.effects").known()[name]
+    game.write("u32", self.pointer + PROJECTILE, fx and fx.hash or hash.of(name))
+    return self
+end
+
+--- Its gun model entity while it is in hand (skeleton, bones such as "tag_flash", its state
+--- machine): the animated child of the player's arms. Else the weapon's own entity.
+function Weapon:entity()
+    local entities = require("boz.engine.entities")
+    if self:in_hand() then
+        local gun = require("boz.engine.animation").view_model()
+        if gun then return gun end
+    end
+    return entities.of_component(self.pointer)
+end
+
+--- Plays one of its animations now: an extra clip made in the Weapons tab ("charge") or one of
+--- the game's states ("reloading"); blend: seconds of cross-fade. The gun and the arms play it
+--- (each that has it). True when one did.
+function Weapon:play(clip, blend)
+    return require("boz.engine.animation").play_machines({self.name .. "_gun", self.name .. "_arms"},
+        clip, blend)
+end
+
 --- True while this is the weapon in hand.
 function Weapon:in_hand()
     local manager = weapons.manager()
     return manager ~= nil and game.read("ptr", manager + MANAGER_IN_HAND) == self.pointer
+end
+
+--- Ends whatever animation it plays: back to idle (before it shoots again, say).
+function Weapon:stop_animation()
+    return require("boz.engine.animation").stop({self.name .. "_gun", self.name .. "_arms"})
+end
+
+--- Whenever weapon `name` would play animation `state` ("reloading", "shooting", ...), plays
+--- `replacement` instead (an extra clip of it, or a function(state) returning a clip name or
+--- nil to keep the game's). Returns a handle for animation.on_play.
+function weapons.replace_animation(name, state, replacement)
+    local animation = require("boz.engine.animation")
+    local machines = {[hash.of(name .. "_gun")] = true, [hash.of(name .. "_arms")] = true}
+    local wanted = hash.of(state)
+    return animation.on_play(function(machine, playing)
+        if machines[machine] and playing == wanted then
+            if type(replacement) == "function" then
+                return replacement(state)
+            end
+            return replacement
+        end
+    end)
+end
+
+local projectile_firing, firing_hooked = {}, false
+
+--- Weapons whose shots launch their projectile instead of bullets, whatever their fire mode
+--- (the Weapons tab's "Fires its projectile": entries {name, fires_projectile}); also
+--- weapons.set_fires_projectile(name, on) during a match.
+function weapons.fire_projectiles(list)
+    for _, entry in ipairs(list or {}) do
+        if entry.fires_projectile then
+            weapons.set_fires_projectile(entry.name, true)
+        end
+    end
+end
+
+function weapons.set_fires_projectile(name, on)
+    projectile_firing[hash.of(name)] = on and true or nil
+    if on and not firing_hooked then
+        firing_hooked = true
+        -- One shot's bullets (fire type 0) become the weapon's projectile (fire type 1's launch).
+        hook.add(core.sym("PlayerWeapon_ShootBullets"), {before = function(call)
+            local shooter = call:arg(1)
+            local data = core.call("PlayerWeapon_Data", shooter)
+            local projectile = data ~= 0 and game.read("u32", data + PROJECTILE) or 0
+            if projectile ~= 0 and projectile_firing[game.read("u32", data + WEAPON_NAME)] then
+                if game.read("f32", data + LAUNCH_FORCE) <= 0 then
+                    -- A gun has no launch force of its own: the projectile's speed.
+                    local speed = 3000
+                    for _, entry in pairs(require("boz.game.effects").known()) do
+                        if entry.hash == projectile and entry.speed then speed = entry.speed end
+                    end
+                    game.write("f32", data + LAUNCH_FORCE, speed)
+                end
+                core.call("PlayerWeapon_ShootProjectile", shooter, 0)
+                call:skip()
+            end
+        end})
+    end
 end
 
 --- The weapon in the player's hands, or nil.

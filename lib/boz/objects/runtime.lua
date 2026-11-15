@@ -730,6 +730,9 @@ local function load_class(script)
     return class
 end
 
+--- Loads a script that returns a class (map objects, effects, projectiles), or nil (logged).
+runtime.load_class = load_class
+
 --- Starts the level's objects (boz.world calls this when a level starts: the map's objects,
 --- the names of all of them and its weapons).
 function runtime.start(list, all_names, weapon_list)

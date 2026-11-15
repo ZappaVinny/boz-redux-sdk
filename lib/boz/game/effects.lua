@@ -5,6 +5,8 @@
 --   local hole = effects.projectile("gersch", effects.aim(), {trigger = "open", lifetime = 6})
 --   hole:remove()                                                    -- close it early
 --   effects.explode(position, {radius = 400, damage = 2000})          -- a grenade's blast
+--   local glow = effects.attach("frost_glow", "weapon", {bone = "tag_flash"})  -- follows the gun
+--   glow:set({scale = 2, rate = {10, 20}})                            -- its particles, live
 --
 -- Names are the game's effect and projectile names ("gersch_Effect", "impactRayGun",
 -- "iceShatter", ...; any map's: the build bundles what scripts name, and the editor's Effects tab
@@ -62,8 +64,14 @@ function effects.known()
     return known
 end
 
+--- The effect handle of an entity already in the world (a projectile the game launched).
+function effects.handle(entity, name)
+    return setmetatable({entity = entity, id = entities.id(entity), name = name}, effects._Effect)
+end
+
 local Effect = {}
 Effect.__index = Effect
+effects._Effect = Effect
 
 local function make(entity, name)
     return setmetatable({entity = entity, id = entities.id(entity), name = name}, Effect)
@@ -273,6 +281,23 @@ local function shared(op, name, position, options)
     return require("boz.engine.net").route(op, {name = name, position = at, options = plain}) == "skip"
 end
 
+--- Runs pieces (Effects tab) at a position: blast {damage, radius}, lure {seconds}, black_hole
+--- {seconds}. Projectiles run theirs where they hit, effects where they appear.
+function effects.run_pieces(at, pieces)
+    if pieces.blast then
+        local radius, damage = pieces.blast.radius or {32, 64}, pieces.blast.damage or {1000, 1500}
+        effects.explode(at, {inner = radius[1], radius = radius[2], min_damage = damage[1],
+                             damage = damage[2], quiet = true})
+    end
+    if pieces.lure then
+        require("boz").lure(at, {seconds = pieces.lure.seconds})
+    end
+    if pieces.black_hole then
+        effects.projectile("boz_black_hole", at, {trigger = "open", lifetime = pieces.black_hole.seconds,
+                                                  freeze = true, hidden = true})
+    end
+end
+
 function effects.spawn(name, position, options)
     if shared("effect_spawn", name, position, options) then
         return nil, "the host spawns it"
@@ -280,6 +305,16 @@ function effects.spawn(name, position, options)
     local effect, err = spawn_logged(name, position, options)
     if effect and options and options.lifetime then
         timed[effect] = options.lifetime
+    end
+    local entry = effect and known[name]
+    local keep
+    if entry and entry.script and entry.script ~= "" then
+        keep = select(2, require("boz.game.effect_script").start(effect, entry))   -- its script (Effects tab)
+    end
+    if entry and entry.pieces and next(entry.pieces) and keep ~= false then
+        local at = effect:position() or position
+        local ok, why = pcall(effects.run_pieces, at, entry.pieces)
+        if not ok then log("boz.effects " .. tostring(name) .. ": pieces: " .. tostring(why)) end
     end
     return effect, err
 end
@@ -369,6 +404,147 @@ function effects.explode(position, options)
     return blast
 end
 
+-- Live settings ---------------------------------------------------------------------------
+
+local EMITTER_COMPONENT = "CIsRenderableGFXEmitter"
+local RUNNING = core.offset("CIsRenderableGFXEmitter", "emitter")
+local function em(field) return core.offset("CIwGFXEmitter", field) end
+local SCALE, SPAWNING, AGE, DURATION = em("scale"), em("spawning"), em("age"), em("duration")
+local OWN_RATE, RATE_MIN, RATE_MAX = em("ownRate"), em("rateMin"), em("rateMax")
+local OWN_VELOCITY, VELOCITY_BOX = em("ownVelocity"), em("velocityBox")
+local OWN_POSITION, POSITION_BOX = em("ownPosition"), em("positionBox")
+local PARENT = core.offset("CIsHierarchy", "parent")
+local COMPONENT_ENTITY = core.offset("CIsComponent", "entity")
+local FIXED = 4096
+
+local function parent_of(entity)
+    local hierarchy = entities.component(entity, "CIsHierarchy")
+    local parent = hierarchy and game.read("ptr", hierarchy + PARENT)
+    return parent and parent ~= 0 and game.read("ptr", parent + COMPONENT_ENTITY) or nil
+end
+
+--- Its running particle emitters (its own and its children's): CIwGFXEmitter pointers.
+function Effect:emitters()
+    local out = {}
+    if not self:alive() then
+        return out
+    end
+    for component in require("boz.engine.components").each(EMITTER_COMPONENT) do
+        local owner = entities.of_component(component)
+        if owner == self.entity or parent_of(owner) == self.entity then
+            local emitter = game.read("ptr", component + RUNNING)
+            if emitter and emitter ~= 0 then
+                out[#out + 1] = emitter
+            end
+        end
+    end
+    return out
+end
+
+local function write_box(at, base, spread, per_second)
+    local x, y, z = core.xyz(base or {0, 0, 0})
+    local sx, sy, sz = core.xyz(spread or {0, 0, 0})
+    local k = per_second and FIXED / 1000 or 1
+    for i, v in ipairs({x, y, z, sx, sy, sz}) do
+        game.write("i32", at + (i - 1) * 4, math.floor(v * k))
+    end
+end
+
+--- Changes its particles while it runs (each emitter): scale (x: speed, size and growth), rate
+--- {min ms, max ms} between particles, velocity {x, y, z} units a second (and spread), position
+--- {x, y, z} where particles start (and position_spread), duration (seconds; it stops spawning
+--- after), spawning (false: stops making new ones; true: starts again). Returns the effect.
+function Effect:set(settings)
+    for _, emitter in ipairs(self:emitters()) do
+        if settings.scale then
+            game.write("i32", emitter + SCALE, math.floor(settings.scale * FIXED))
+        end
+        if settings.rate then
+            local low, high = settings.rate[1] or settings.rate, settings.rate[2] or settings.rate[1] or settings.rate
+            game.write("i32", emitter + RATE_MIN, math.floor(low * FIXED))
+            game.write("i32", emitter + RATE_MAX, math.floor(high * FIXED))
+            game.write("u8", emitter + OWN_RATE, 1)
+        end
+        if settings.velocity then
+            write_box(emitter + VELOCITY_BOX, settings.velocity, settings.spread, true)
+            game.write("u8", emitter + OWN_VELOCITY, 1)
+        end
+        if settings.position then
+            write_box(emitter + POSITION_BOX, settings.position, settings.position_spread, false)
+            game.write("u8", emitter + OWN_POSITION, 1)
+        end
+        if settings.duration then
+            game.write("i32", emitter + DURATION, math.floor(settings.duration * 1000 * FIXED))
+        end
+        if settings.spawning == false then
+            game.write("u8", emitter + SPAWNING, 0)
+        elseif settings.spawning == true then
+            game.write("i32", emitter + AGE, 0)
+            game.write("u8", emitter + SPAWNING, 1)
+        end
+    end
+    return self
+end
+
+-- Following -------------------------------------------------------------------------------
+
+local following = {}     -- Effect -> {target, bone, offset}
+
+local function target_entity(target)
+    if target == "weapon" then
+        local gun = require("boz.engine.weapons").current()
+        return gun and gun:entity() or nil
+    end
+    if type(target) == "table" then
+        if target._handle then          -- boz.get(...): a map object
+            local entity = target._handle:entity_pointer()
+            return entity ~= 0 and entity or nil
+        end
+        return target.entity          -- an Effect, a Zombie, ...
+    end
+    return target
+end
+
+local function place_of(follow)
+    local entity = target_entity(follow.target)
+    if not entity then
+        return nil
+    end
+    local at = follow.bone and require("boz.engine.animation").bone_position(entity, follow.bone)
+        or entities.position(entity)
+    if not at then
+        return nil
+    end
+    local dx, dy, dz = core.xyz(follow.offset or {0, 0, 0})
+    return {x = at.x + dx, y = at.y + dy, z = at.z + dz}
+end
+
+--- Makes an effect (an Effect, or a name to spawn) follow something: an object (boz.get(...)),
+--- an entity, or "weapon" (the gun in hand); options: bone (a bone of it, e.g. "tag_flash", the
+--- muzzle), offset {x, y, z}, lifetime (seconds). Returns the effect, or nil and why.
+function effects.attach(effect, target, options)
+    options = options or {}
+    local follow = {target = target, bone = options.bone, offset = options.offset}
+    if type(effect) ~= "table" then
+        local at = place_of(follow)
+        if not at then
+            return nil, "nothing to attach to"
+        end
+        local made, err = effects.spawn(effect, at, {lifetime = options.lifetime})
+        if not made then
+            return nil, err
+        end
+        effect = made
+    end
+    following[effect] = follow
+    return effect
+end
+
+--- Stops an effect following what it was attached to (it stays where it is).
+function effects.detach(effect)
+    following[effect] = nil
+end
+
 --- The point the player's crosshair is on {x, y, z} (where a shot lands; up to 100 m away) and
 --- whether it is a live zombie; nil outside a match.
 function effects.aim()
@@ -380,6 +556,14 @@ function effects.aim()
 end
 
 events.on("frame", function(dt)
+    for effect, follow in pairs(following) do
+        if not effect:alive() then
+            following[effect] = nil
+        else
+            local at = place_of(follow)
+            if at then effect:move(at) end
+        end
+    end
     for effect, frames in pairs(waiting) do
         if not effect:alive() or frames <= 0 then
             if frames <= 0 then

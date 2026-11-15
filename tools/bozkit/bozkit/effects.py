@@ -294,7 +294,8 @@ def _source_group(used: Used) -> str | None:
     return f'levels/{used.level}/effects.group.bin'
 
 
-def apply(read, source: Path, groups: dict, map_name: str, pack, scripts: Path | None = None) -> list[dict]:
+def apply(read, source: Path, groups: dict, map_name: str, pack, scripts: Path | None = None,
+          extra: list | None = None) -> list[dict]:
     """Put the project's effects in the map and return the runtime list for boz.effects.
 
     Everything goes through bozkit.bundle: each effect (from any map) and every effect or
@@ -302,6 +303,7 @@ def apply(read, source: Path, groups: dict, map_name: str, pack, scripts: Path |
     uses, so scripts can spawn anything; changed ones (hidden, anchored) get the map's own copy."""
     from . import bundle as bundle_module, resources, weapons
     used = load(source)
+    used += [u for u in (extra or []) if u.name not in {v.name for v in used}]   # what own pieces need
     target = groups.get(f'weapon_projectiles_{map_name}.group.bin')
     registry = bundle_module.Registry.of(pack)
     bundle = bundle_module.Bundle(registry, groups, map_name)

@@ -47,6 +47,24 @@ Weapon.damage = live("damage")
 Weapon.set_damage = live("set_damage", false)
 --- True while it is in the player's hand.
 Weapon.in_hand = live("in_hand", false)
+--- Plays one of its animations (an extra clip from the Weapons tab, or a game state).
+Weapon.play = live("play", false)
+--- Ends its animation (back to idle).
+Weapon.stop_animation = live("stop_animation", false)
+--- The projectile it fires, and changing it for this match.
+Weapon.projectile = live("projectile")
+Weapon.set_projectile = live("set_projectile", false)
+
+--- Plays `replacement` (an extra clip, or function(state) -> clip or nil) whenever it would play
+--- the animation `state`.
+function Weapon:replace_animation(state, replacement)
+    return weapons.replace_animation(self.name, state, replacement)
+end
+
+--- A charged shot (boz.charge): hold fire to charge, release to fire.
+function Weapon:charge(options)
+    return require("boz.game.charge").new(self.name, options)
+end
 --- A field by its game name, and setting it.
 Weapon.field = live("get")
 Weapon.set_field = live("set", false)

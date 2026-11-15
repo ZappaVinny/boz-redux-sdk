@@ -70,6 +70,51 @@ def _clip_from(data: dict) -> Clip:
     return Clip(frames)
 
 
+EXTRA_FILE = 'extra.clips'      # a weapon's extra clips: one "name frames" a line
+CLIP_NAME_RE = __import__('re').compile(r'[a-z][a-z0-9_]{0,31}')
+
+
+def extra_clips(source: Path, weapon: str) -> list[tuple[str, int]]:
+    """[(name, frames)] of a weapon's extra clips: animations the game does not have, added as
+    states of its state machines (Lua plays them: weapon:play(name))."""
+    path = clips_dir(source, weapon) / EXTRA_FILE
+    out = []
+    if path.is_file():
+        for line in path.read_text(encoding='utf-8').splitlines():
+            parts = line.split()
+            if len(parts) == 2 and CLIP_NAME_RE.fullmatch(parts[0]) and parts[1].isdigit():
+                out.append((parts[0], int(parts[1])))
+    return out
+
+
+def save_extra_clips(source: Path, weapon: str, clips: list[tuple[str, int]]) -> None:
+    folder = clips_dir(source, weapon)
+    path = folder / EXTRA_FILE
+    if not clips:
+        path.unlink(missing_ok=True)
+        return
+    folder.mkdir(parents=True, exist_ok=True)
+    path.write_text(''.join(f'{name} {int(frames)}\n' for name, frames in clips), encoding='utf-8',
+                    newline='\n')
+
+
+def add_extra_clip(source: Path, weapon: str, name: str, frames: int, taken=()) -> int:
+    """Adds an extra clip; returns its state hash. *taken*: the state names the game has."""
+    if not CLIP_NAME_RE.fullmatch(name):
+        raise WeaponAnimError('clip names use a-z, 0-9 and _ (at most 32, starting with a letter)')
+    clips = extra_clips(source, weapon)
+    if name in {n for n, _f in clips} or iw_hash(name) in set(taken):
+        raise WeaponAnimError(f'the weapon already has an animation called {name}')
+    clips.append((name, max(1, int(frames))))
+    save_extra_clips(source, weapon, clips)
+    return iw_hash(name)
+
+
+def remove_extra_clip(source: Path, weapon: str, name: str) -> None:
+    save_extra_clips(source, weapon, [c for c in extra_clips(source, weapon) if c[0] != name])
+    (clips_dir(source, weapon) / f'{iw_hash(name):08x}.json').unlink(missing_ok=True)
+
+
 def load_clips(source: Path, weapon: str) -> dict:
     """{state hash: {"arms": Clip, "gun": Clip, "state": label}} of a weapon."""
     out = {}
@@ -81,7 +126,7 @@ def load_clips(source: Path, weapon: str) -> dict:
         except (OSError, ValueError) as exc:
             raise WeaponAnimError(f'{path}: {exc}') from None
         entry = {'state': str(data.get('state', '')), 'edits': dict(data.get('edits', {})),
-                 'length': int(data.get('length', 0))}
+                 'length': int(data.get('length', 0)), 'layer': list(data.get('layer', []))}
         for part in ('arms', 'gun'):
             if part in data:
                 entry[part] = _clip_from(data[part])
@@ -92,17 +137,21 @@ def load_clips(source: Path, weapon: str) -> dict:
 
 
 def save_state(source: Path, weapon: str, state: int, label: str, clips: dict, edits: dict,
-               length: int) -> None:
-    """Store one animation of a weapon as the editor made it: *edits* ({part: changes}, see
-    Timelines) to edit it again, and the *clips* ({part: Clip} at every frame) the build uses.
-    No changes: the file goes and the stock animation plays."""
+               length: int, layer: list | None = None) -> None:
+    """Store one animation of a weapon as the editor made it: *layer* (your keys on top of the
+    original: [{"path", "index", "keys": [[frame, value, interpolation]]}], the editor's "Your
+    changes" action) and older *edits* ({part: changes}, see Timelines) to edit it again, and the
+    *clips* ({part: Clip} at every frame) the build uses. No changes: the file goes and the stock
+    animation plays."""
     folder = clips_dir(source, weapon)
     path = folder / f'{state:08x}.json'
-    if not any(edits.values()):
+    if not any(edits.values()) and not layer:
         if path.is_file():
             path.unlink()
         return
     data = {'state': label, 'length': int(length), 'edits': edits}
+    if layer:
+        data['layer'] = layer
     for part, clip in clips.items():
         if clip is not None:
             data[part] = _clip_json(clip)
