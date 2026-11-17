@@ -17,8 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / 'lib' / 'boz'
-# Local mods (gitignored, e.g. mods/online) are synced when they are present.
-MODS = [ROOT / 'mods' / 'developer', ROOT / 'mods' / 'online']
+MODS = [ROOT / 'mods' / 'developer']
 GENERATED_PER_MOD = {'world_data.lua'}
 
 

@@ -4,7 +4,8 @@
 --
 --   online.available()          false on clients without online servers (before BOZ Redux 0.4.0)
 --   online.server()             the server Play Online uses, "" when it is off
---   online.set_server(host)     call it while the mod starts; needs mod.toml [network] connects
+--   online.set_server(host)     deprecated: does nothing since BOZ Redux 0.4.2 (the launcher's
+--                               Settings > Online chooses the server)
 --   online.check(host, fn)      fn(ok, message): whether the server answers
 --   online.connected()          logged in to the server now
 --   online.on_screen(fn)        fn(true) when the Multiplayer screen opens, fn(false) when it closes
@@ -30,10 +31,8 @@ function online.server()
     return client_network() and network.server() or ""
 end
 
---- Sends Play Online to host ("" or nil: off). Call it while the mod starts: the game signs in
---- once per run, when the Multiplayer screen opens, and a failed sign-in (online was off) does
---- not recover, so a later change is for the next start. Returns false on clients without
---- online servers. The mod's mod.toml must list the host under [network] connects.
+--- Deprecated: the launcher's Settings > Online chooses the server, and clients from 0.4.2 on
+--- ignore this. Older clients still send Play Online to host ("" or nil: off).
 function online.set_server(host)
     if not client_network() then
         return false
